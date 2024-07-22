@@ -1,5 +1,4 @@
 use lean_sys::*;
-//use lean_sys::{lean_alloc_ctor, lean_inc, lean_object, lean_obj_res};
 
 #[no_mangle]
 pub extern "C" fn rust_hello(_: lean_obj_arg) -> lean_obj_res {
