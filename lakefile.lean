@@ -18,7 +18,7 @@ lean_exe tests {
 }
 
 extern_lib crypt_walker_for_lean pkg := do
-  proc { cmd := "cargo", args := #["build", "--release"], cwd := pkg.dir / "Rust" }
+  proc { cmd := "cargo", args := #["rustc", "--release", "--", "-C", "relocation-model=pic"], cwd := pkg.dir / "Rust" }
   let name := nameToStaticLib "crypt_walker_for_lean"
   let srcPath := pkg.dir / "Rust" / "target" / "release" / name
   IO.FS.createDirAll pkg.nativeLibDir
