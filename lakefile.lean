@@ -8,7 +8,6 @@ package «crypt_walker» where
 
 @[default_target]
 lean_lib «CryptWalker» where
-  precompileModules := true
 
 extern_lib crypt_walker_for_lean pkg := do
   proc { cmd := "cargo", args := #["rustc", "--release", "--", "-C", "relocation-model=pic"], cwd := pkg.dir / "Rust" }
