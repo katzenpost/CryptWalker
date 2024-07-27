@@ -6,18 +6,9 @@ open Lake DSL
 package «crypt_walker» where
   srcDir := "Lean"
 
-lean_lib «CryptWalker» where
-
 @[default_target]
-lean_exe «crypt_walker» where
-  root := `CryptWalker
-
-/-
-@[test_driver]
-lean_exe tests {
-  root := `tests.Main
-}
--/
+lean_lib «CryptWalker» where
+  precompileModules := true
 
 extern_lib crypt_walker_for_lean pkg := do
   proc { cmd := "cargo", args := #["rustc", "--release", "--", "-C", "relocation-model=pic"], cwd := pkg.dir / "Rust" }
