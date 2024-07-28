@@ -9,6 +9,11 @@ package «crypt_walker» where
 @[default_target]
 lean_lib «CryptWalker» where
 
+@[test_driver]
+lean_exe tests {
+  root := `tests.Main
+}
+
 extern_lib crypt_walker_for_lean pkg := do
   proc { cmd := "cargo", args := #["rustc", "--release", "--", "-C", "relocation-model=pic"], cwd := pkg.dir / "Rust" }
   let name := nameToStaticLib "crypt_walker_for_lean"
