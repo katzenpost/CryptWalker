@@ -7,4 +7,4 @@ edition = "2021"
 crate-type = ["staticlib"]
 
 [dependencies]
-lean-sys = "0.0.7"
+lean-sys = { version = "0.0.7", default-features = false, features = ["extern"] }
