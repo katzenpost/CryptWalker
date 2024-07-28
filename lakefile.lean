@@ -3,6 +3,8 @@ open Lake DSL
 
 --set_option diagnostics true
 
+require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
+
 package «crypt_walker» where
   srcDir := "Lean"
 

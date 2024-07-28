@@ -1,6 +1,8 @@
 import Batteries.Classes.SatisfiesM
 
-structure EncDecSpec where
+/- KEM spec written initially by Mario Carneiro -/
+
+structure KEMSpec where
   State : Type
   PublicKey : Type
   PrivateKey : Type
@@ -13,7 +15,7 @@ structure EncDecSpec where
     ∀ s, let (c, k) := (encap pk s).1; ∀ s, (decap sk c s).1 = k})
   [plaintextEq : DecidableEq Plaintext]
 
-instance : Inhabited EncDecSpec := ⟨{
+instance : Inhabited KEMSpec := ⟨{
   State := Unit
   PublicKey := Unit
   PrivateKey := Unit
@@ -26,7 +28,7 @@ instance : Inhabited EncDecSpec := ⟨{
   plaintextEq := inferInstance
 }⟩
 
-opaque encDecSpec : EncDecSpec
+opaque encDecSpec : KEMSpec
 
 instance : Inhabited encDecSpec.State := ⟨encDecSpec.init⟩
 
