@@ -28,35 +28,35 @@ instance : Inhabited KEMSpec := ⟨{
   plaintextEq := inferInstance
 }⟩
 
-opaque encDecSpec : KEMSpec
+opaque kemSpec : KEMSpec
 
-instance : Inhabited encDecSpec.State := ⟨encDecSpec.init⟩
+instance : Inhabited kemSpec.State := ⟨kemSpec.init⟩
 
-abbrev EncDecM := StateM encDecSpec.State
+abbrev KEMM := StateM kemSpec.State
 
-def PublicKey : Type := encDecSpec.PublicKey
-instance : Inhabited PublicKey := ⟨(encDecSpec.generate default).1.1⟩
+def PublicKey : Type := kemSpec.PublicKey
+instance : Inhabited PublicKey := ⟨(kemSpec.generate default).1.1⟩
 
-def PrivateKey : Type := encDecSpec.PrivateKey
-instance : Inhabited PrivateKey := ⟨(encDecSpec.generate default).1.2.1⟩
+def PrivateKey : Type := kemSpec.PrivateKey
+instance : Inhabited PrivateKey := ⟨(kemSpec.generate default).1.2.1⟩
 
-def Ciphertext : Type := encDecSpec.Ciphertext
+def Ciphertext : Type := kemSpec.Ciphertext
 instance : Inhabited Ciphertext :=
-  ⟨(encDecSpec.encap (encDecSpec.generate default).1.1 default).1.1⟩
+  ⟨(kemSpec.encap (kemSpec.generate default).1.1 default).1.1⟩
 
-def Plaintext : Type := encDecSpec.Plaintext
+def Plaintext : Type := kemSpec.Plaintext
 instance : Inhabited Plaintext :=
-  ⟨(encDecSpec.encap (encDecSpec.generate default).1.1 default).1.2⟩
+  ⟨(kemSpec.encap (kemSpec.generate default).1.1 default).1.2⟩
 
-def generate : EncDecM (PublicKey × PrivateKey) := fun s =>
-  let (⟨pk, sk, _⟩, s) := encDecSpec.generate s
+def generate : KEMM (PublicKey × PrivateKey) := fun s =>
+  let (⟨pk, sk, _⟩, s) := kemSpec.generate s
   ((pk, sk), s)
 
-def encap : PublicKey → EncDecM (Ciphertext × Plaintext) := encDecSpec.encap
+def encap : PublicKey → KEMM (Ciphertext × Plaintext) := kemSpec.encap
 
-def decap : PrivateKey → Ciphertext → EncDecM Plaintext := encDecSpec.decap
+def decap : PrivateKey → Ciphertext → KEMM Plaintext := kemSpec.decap
 
-instance : DecidableEq Plaintext := encDecSpec.plaintextEq
+instance : DecidableEq Plaintext := kemSpec.plaintextEq
 
 def IsEncapsulation (sk : PrivateKey) (c : Ciphertext) (k : Plaintext) :=
   ∀ s, (decap sk c s).1 = k
