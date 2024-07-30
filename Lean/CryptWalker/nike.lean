@@ -60,7 +60,7 @@ def NikeKeyPair (pk : NikePublicKey) (sk : NikePrivateKey) :=
     let pk2 := toPublicKey sk2;
     (deriveSecret sk pk2 s).1 = (deriveSecret sk2 pk s).1
 
-/-
-theorem nike_generate_ok : SatisfiesM (fun (pk, sk) => NikeKeyPair pk sk) generate := by
-  sorry
--/
+def SatisfiesNIKESpecM {σ α : Type} (P : α → Prop) (m : StateM σ α) : Prop :=
+  ∀ s, P (m s).1
+
+theorem nike_generate_ok : SatisfiesNIKESpecM (fun (pk, sk) => NikeKeyPair pk sk) nike_generate := sorry
