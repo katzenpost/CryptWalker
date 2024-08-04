@@ -14,7 +14,7 @@ instance : BEq ByteArray where
 def myhash0 : ByteArray := myhash (ByteArray.empty)
 
 /-! Settings for Merkle Hash Trees. -/
-structure Settings  where
+structure Settings where
   hash0 : ByteArray := myhash (ByteArray.empty)
   hash1 : ByteArray → ByteArray := fun x => myhash (ByteArray.mk #[0x00] ++ x)
   hash2 : ByteArray → ByteArray → ByteArray := fun x y => myhash (ByteArray.mk #[0x01] ++ x ++ y)
@@ -58,11 +58,11 @@ def empty (settings : Settings) : MerkleHashTrees :=
   MerkleHashTrees.mk settings 0 (Lean.mkHashMap) (Lean.mkHashMap)
 
 /-! hashValue returns the hash value for the given HashTree. -/
-def hashValue (tree : HashTree) : Option ByteArray :=
+def hashValue (tree : HashTree) : ByteArray :=
   match tree with
-  | .empty => none
-  | .leaf hash _ _ => some hash
-  | .node hash _ _ _ _=> some hash
+  | .empty => panic! "empty HashTree"
+  | .leaf hash _ _ => hash
+  | .node hash _ _ _ _=> hash
 
 def isPowerOf2 (n : Nat) : Bool :=
   (n &&& (n - 1)) == 0
@@ -72,21 +72,15 @@ def insert (tree : HashTree) (hash : ByteArray) (newLeaf : HashTree) (settings :
   match tree with
   | HashTree.empty =>
     newLeaf
-  | HashTree.leaf h idx value =>
+  | HashTree.leaf h idx _value =>
     HashTree.node (settings.hash2 h hash) idx (idx + 1) tree newLeaf
   | HashTree.node h leftIdx rightIdx leftTree rightTree =>
     if isPowerOf2 (size + 1) then
       HashTree.node (settings.hash2 h hash) leftIdx (rightIdx + 1) tree newLeaf
     else
       let newRight := insert rightTree hash newLeaf settings size
-      let leftHash := match leftTree with
-        | .empty => panic! "impossible error"
-        | .leaf hash _ _ => hash
-        | .node hash _ _ _ _ => hash
-        let rightHash := match rightTree with
-        | .empty => panic! "impossible error"
-        | .leaf hash _ _ => hash
-        | .node hash _ _ _ _ => hash
+      let leftHash := hashValue leftTree
+      let rightHash := hashValue rightTree
       HashTree.node (settings.hash2 leftHash rightHash) leftIdx (rightIdx + 1) leftTree newRight
 
 /-! add, adds the given input into the tree, returning the new tree. -/
