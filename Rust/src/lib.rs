@@ -1,14 +1,4 @@
 use lean_sys::*;
-use blake3::hash;
-
-fn blake3(mem: &mut [u8; 32], len: usize, input: *const u8) {
-  unsafe {
-    *mem = *hash(std::slice::from_raw_parts(input, len)).as_bytes();
-  }
-} 
-
-
-
 
 #[no_mangle]
 pub extern "C" fn rust_hello(_: lean_obj_arg) -> lean_obj_res {
