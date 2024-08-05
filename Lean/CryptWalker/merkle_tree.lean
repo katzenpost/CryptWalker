@@ -7,6 +7,7 @@ import Mathlib.Data.ByteArray
 import Mathlib.Data.HashMap
 import «CryptWalker».hash
 import «CryptWalker».nat
+import «CryptWalker».hex
 
 instance : BEq ByteArray where
   beq a b := a.data = b.data
@@ -27,6 +28,19 @@ inductive HashTree (α : Type) where
   | leaf (hash : ByteArray) (index : Nat) (value : α)
   | node (hash : ByteArray) (leftIndex : Nat) (rightIndex : Nat) (leftTree : HashTree α) (rightTree : HashTree α)
 deriving BEq
+
+def reprIndented {α : Type} [Repr α] (tree : HashTree α) (indent : String) (last : Bool) : String :=
+  let newIndent := indent ++ (if last then "   " else "│  ")
+  match tree with
+  | HashTree.empty hash =>
+      s!"{indent}{if last then "└─ " else "├─ "}(empty {repr hash})"
+  | HashTree.leaf hash index value =>
+      s!"{indent}{if last then "└─ " else "├─ "}(leaf {repr hash}, {index}, {repr value})"
+  | HashTree.node hash leftIndex rightIndex leftTree rightTree =>
+      let leftStr := reprIndented leftTree newIndent false
+      let rightStr := reprIndented rightTree newIndent true
+      s!"{indent}{if last then "└─ " else "├─ "}(node {repr hash}, {leftIndex}, {rightIndex})\n{leftStr}\n{rightStr}"
+
 
 instance {α : Type} : Inhabited (HashTree α) where
   default := HashTree.empty (ByteArray.mk #[])
@@ -74,10 +88,17 @@ def hashValue (α : Type) [Hashable α] (tree : HashTree α) : ByteArray :=
   | .leaf hash _ _ => hash
   | .node hash _ _ _ _=> hash
 
-def rightIndex (α : Type) (tree : HashTree α) : Nat :=
+def rIndex (α : Type) (tree : HashTree α) : Nat :=
   match tree with
-  | HashTree.node _ _ rightIndex _ _ => rightIndex
-  | _ => panic! "not a node"
+  | HashTree.empty _ => panic! "not a node"
+  | HashTree.leaf _ index _ => index
+  | HashTree.node _ _ index _ _ => index
+
+def lIndex (α : Type) (tree : HashTree α) : Nat :=
+  match tree with
+  | HashTree.empty _ => panic! "not a node"
+  | HashTree.leaf _ index _ => index
+  | HashTree.node _ index _ _ _ => index
 
 def isPowerOf2 (n : Nat) : Bool :=
   (n &&& (n - 1)) == 0
@@ -128,7 +149,7 @@ instance : Inhabited InclusionProof where
 def path (α : Type) [Hashable α] (index : Nat) (tree : HashTree α) : List ByteArray :=
   match tree with
   | HashTree.node _ _ _ l r =>
-    if index <= rightIndex α l then hashValue α r :: path α index l else hashValue α l :: path α index r
+    if index <= rIndex α l then hashValue α r :: path α index l else hashValue α l :: path α index r
   | _ => []
 
 def sizeTree (α : Type) [Hashable α] (tree : MerkleHashTrees α) (treeSize : Nat) : (HashTree α) :=
