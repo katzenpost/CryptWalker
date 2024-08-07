@@ -9,3 +9,7 @@ def byteArrayToHex (blob : ByteArray) : String :=
 
 instance : Repr ByteArray where
   reprPrec a _ := byteArrayToHex a
+
+instance : ToString ByteArray where
+  toString x :=
+    byteArrayToHex x

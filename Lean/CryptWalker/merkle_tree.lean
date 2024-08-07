@@ -5,6 +5,8 @@
 
 import Mathlib.Data.ByteArray
 import Mathlib.Data.HashMap
+import Init.Data.ToString
+
 import «CryptWalker».hash
 import «CryptWalker».nat
 import «CryptWalker».hex
@@ -35,12 +37,11 @@ def reprIndented {α : Type} [Repr α] (tree : HashTree α) (indent : String) (l
   | HashTree.empty hash =>
       s!"{indent}{if last then "└─ " else "├─ "}(empty {repr hash})"
   | HashTree.leaf hash index value =>
-      s!"{indent}{if last then "└─ " else "├─ "}(leaf {repr hash}, {index}, {repr value})"
+      s!"{indent}{if last then "└─ " else "├─ "}(leaf {repr hash}, index: {index}, value: {repr value})"
   | HashTree.node hash leftIndex rightIndex leftTree rightTree =>
       let leftStr := reprIndented leftTree newIndent false
       let rightStr := reprIndented rightTree newIndent true
-      s!"{indent}{if last then "└─ " else "├─ "}(node {repr hash}, {leftIndex}, {rightIndex})\n{leftStr}\n{rightStr}"
-
+      s!"{indent}{if last then "└─ " else "├─ "}(node {repr hash}, left index: {leftIndex}, right index: {rightIndex})\n{leftStr}\n{rightStr}"
 
 instance {α : Type} : Inhabited (HashTree α) where
   default := HashTree.empty (ByteArray.mk #[])
@@ -106,18 +107,17 @@ def isPowerOf2 (n : Nat) : Bool :=
 /-! insert returns a new hash tree with the newLeaf hash tree inserted into the given tree. -/
 def insert (α : Type) [Hashable α] (tree : HashTree α) (hash : ByteArray) (newLeaf : HashTree α) (settings : Settings α) (size : Nat) : HashTree α :=
   match tree with
-  | HashTree.empty _ =>
-    newLeaf
-  | HashTree.leaf h idx _value =>
-    HashTree.node (settings.hash2 h hash) idx (idx + 1) tree newLeaf
+  | HashTree.empty _ => newLeaf
+  | HashTree.leaf h idx _ => HashTree.node (settings.hash2 h hash) idx size tree newLeaf
   | HashTree.node h leftIdx rightIdx leftTree rightTree =>
-    if isPowerOf2 (size + 1) then
-      HashTree.node (settings.hash2 h hash) leftIdx (rightIdx + 1) tree newLeaf
+    let sz := rightIdx - leftIdx + 1
+    if isPowerOf2 sz then
+      HashTree.node (settings.hash2 h hash) leftIdx size tree newLeaf
     else
       let newRight := insert α rightTree hash newLeaf settings size
       let leftHash := hashValue α leftTree
       let rightHash := hashValue α rightTree
-      HashTree.node (settings.hash2 leftHash rightHash) leftIdx (rightIdx + 1) leftTree newRight
+      HashTree.node (settings.hash2 leftHash rightHash) leftIdx size leftTree newRight
 
 /-! add, adds the given input into the tree, returning the new tree. -/
 def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : MerkleHashTrees α :=
@@ -126,12 +126,13 @@ def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : Merkl
     tree
   else
     let newSize := tree.size + 1
-    let newLeaf := HashTree.leaf hx newSize inp
+    let newLeaf := HashTree.leaf hx tree.size inp
     let newHt := match tree.hashtrees.find? tree.size with
       | some ht => insert α ht hx newLeaf tree.settings tree.size
-      | none => newLeaf -- should not happen
+      | none => newLeaf
     let newHashTrees := tree.hashtrees.insert newSize newHt
-    { tree with size := newSize, hashtrees := newHashTrees, indices := tree.indices.insert hx newSize }
+    let newIndices := tree.indices.insert hx newSize
+    { tree with size := newSize, hashtrees := newHashTrees, indices := newIndices }
 
 /-! fromList inserts a list of input items into the tree. -/
 def fromList (α : Type) [Hashable α] (settings : Settings α) (xs : List α) : MerkleHashTrees α :=
@@ -140,29 +141,42 @@ def fromList (α : Type) [Hashable α] (settings : Settings α) (xs : List α) :
 structure InclusionProof where
   index : Nat := 0
   treeSize : Nat := 1
-  inclusion : List ByteArray := []
+  proof : List ByteArray := []
 deriving BEq
 
-instance : Inhabited InclusionProof where
-  default := { index := 0, treeSize := 0, inclusion := [] }
+instance : ToString InclusionProof where
+  toString x :=
+    let proofLines := (x.proof.foldl fun acc h => acc ++ s!"{h}\n") ""
+    s!"InclusionProof index: {x.index} treeSize: {x.treeSize} proof: \n{proofLines}" ++ ""
 
-def path (α : Type) [Hashable α] (index : Nat) (tree : HashTree α) : List ByteArray :=
-  match tree with
-  | HashTree.node _ _ _ l r =>
-    if index <= rIndex α l then hashValue α r :: path α index l else hashValue α l :: path α index r
-  | _ => []
+instance : Inhabited InclusionProof where
+  default := { index := 0, treeSize := 0, proof := [] }
 
 def sizeTree (α : Type) [Hashable α] (tree : MerkleHashTrees α) (treeSize : Nat) : (HashTree α) :=
   match tree.hashtrees.find? treeSize with
   | none => panic! "failed to find hash tree entry"
   | .some x => x
 
+
+def path (α : Type) [Hashable α] (index : Nat) (tree : HashTree α) : List ByteArray :=
+  let rec doPath (mytree : HashTree α) (acc : List ByteArray) : List ByteArray :=
+    match mytree with
+    | HashTree.leaf _ myIndex _ =>
+      if myIndex == index then acc else []
+    | HashTree.node _ _ _ l r =>
+      if index <= rIndex α l then
+        doPath l (hashValue α r :: acc)
+      else
+        doPath r (hashValue α l :: acc)
+    | HashTree.empty _ => acc
+    (doPath tree [])
+
 def genarateInclusionProof (α : Type) [Hashable α] (targetHash : ByteArray) (treeSize : Nat) (tree : MerkleHashTrees α) : Option InclusionProof :=
   let ht : HashTree α := sizeTree α tree treeSize
   let i := index α tree targetHash
   if i < treeSize then
-    let digests := List.reverse $ path α i ht
-    some { index := i, treeSize := treeSize, inclusion := digests }
+    let digests := path α i ht
+    some { index := i, treeSize := treeSize, proof := digests }
   else
     none
 
@@ -170,24 +184,34 @@ def shiftR1 (p : Nat × Nat) : Nat × Nat :=
   (p.fst >>> 1, p.snd >>> 1)
 
 def untilSet (fst snd : Nat) : Nat × Nat :=
-  if fst % 2 == 0 && fst > 0 then untilSet (fst >>> 1) (snd >>> 1) else (fst, snd)
+  match fst, snd with
+  | 0, _ => (0, snd)
+  | f, s => if f % 2 != 0 then (f, s) else untilSet (f >>> 1) (s >>> 1)
   termination_by fst
   decreasing_by
   sorry
 
-def verifyInclusionProof (α : Type) [Hashable α] (settings : Settings α) (leafHash : ByteArray) (rootHash : ByteArray) (proof : InclusionProof) : Bool :=
-  if proof.index >= proof.treeSize then false else
-    let rec verify (index treeSize : Nat) (currentHash : ByteArray) (proof' : List ByteArray) : Bool :=
+
+def verifyInclusionProof (α : Type) [Hashable α] (settings : Settings α) (leafHash : ByteArray) (rootHash : ByteArray) (proof : InclusionProof) : IO Bool :=
+  if proof.index >= proof.treeSize then pure false else
+    let rec verify (index treeSize : Nat) (currentHash : ByteArray) (proof' : List ByteArray) : IO Bool := do
+      IO.println s!"Verifying: index={index}, treeSize={treeSize}, currentHash={currentHash}"
       match index, treeSize, proof' with
-      | _, 0, _ => false
-      | _, _, [] => treeSize == 0 && currentHash == rootHash
+      | _, sn, [] => pure (sn == 0 && currentHash == rootHash)
+      | _, 0, _ => pure false
       | index, treeSize, p :: ps =>
-        if index % 2 == 1 || index == treeSize then
+        if index % 2 != 0 || index == treeSize then
           let currentHash' := settings.hash2 p currentHash
-          let fsn' := shiftR1 $ untilSet index treeSize
-          verify fsn'.fst fsn'.snd currentHash' ps
+          IO.println s!"odd Hash left: {p}, right: {currentHash}, result: {currentHash'}"
+
+          let nope := settings.hash2 currentHash p
+          IO.println s!"nope hash: {nope}, right: {p}, result: {currentHash'}"
+
+          let (index', treeSize') := shiftR1 $ untilSet index treeSize
+          verify index' treeSize' currentHash' ps
         else
           let currentHash' := settings.hash2 currentHash p
-          let fsn' := shiftR1 (index, treeSize)
-          verify fsn'.fst fsn'.snd currentHash' ps
-    verify proof.index (proof.treeSize - 1) leafHash proof.inclusion
+          IO.println s!"even Hash left: {currentHash}, right: {p}, result: {currentHash'}"
+          let (index', treeSize') := shiftR1 (index, treeSize)
+          verify index' treeSize' currentHash' ps
+    verify proof.index (proof.treeSize - 1) leafHash proof.proof
