@@ -104,7 +104,7 @@ def lIndex (α : Type) (tree : HashTree α) : Nat :=
 def isPowerOf2 (n : Nat) : Bool :=
   (n &&& (n - 1)) == 0
 
-/-! insert returns a new hash tree with the newLeaf hash tree inserted into the given tree. -/
+/-! insert returns a new hash tree with the newLeaf hash tree inserted into the given tree.-/
 def insert (α : Type) [Hashable α] (tree : HashTree α) (hash : ByteArray) (newLeaf : HashTree α) (settings : Settings α) (size : Nat) : HashTree α :=
   match tree with
   | HashTree.empty _ => newLeaf
@@ -119,7 +119,7 @@ def insert (α : Type) [Hashable α] (tree : HashTree α) (hash : ByteArray) (ne
       let rightHash := hashValue α rightTree
       HashTree.node (settings.hash2 leftHash rightHash) leftIdx size leftTree newRight
 
-/-! add, adds the given input into the tree, returning the new tree. -/
+/-! add, adds the given input into the tree, returning the new tree.-/
 def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : MerkleHashTrees α :=
   let hx := tree.settings.hash1 inp
   if tree.indices.contains hx then
@@ -133,6 +133,7 @@ def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : Merkl
     let newHashTrees := tree.hashtrees.insert newSize newHt
     let newIndices := tree.indices.insert hx newSize
     { tree with size := newSize, hashtrees := newHashTrees, indices := newIndices }
+
 
 /-! fromList inserts a list of input items into the tree. -/
 def fromList (α : Type) [Hashable α] (settings : Settings α) (xs : List α) : MerkleHashTrees α :=
@@ -201,17 +202,11 @@ def verifyInclusionProof (α : Type) [Hashable α] (settings : Settings α) (lea
       | _, 0, _ => pure false
       | index, treeSize, p :: ps =>
         if index % 2 != 0 || index == treeSize then
-          let currentHash' := settings.hash2 p currentHash
-          IO.println s!"odd Hash left: {p}, right: {currentHash}, result: {currentHash'}"
-
-          let nope := settings.hash2 currentHash p
-          IO.println s!"nope hash: {nope}, right: {p}, result: {currentHash'}"
-
+          let currentHash' := settings.hash2 currentHash p
           let (index', treeSize') := shiftR1 $ untilSet index treeSize
           verify index' treeSize' currentHash' ps
         else
-          let currentHash' := settings.hash2 currentHash p
-          IO.println s!"even Hash left: {currentHash}, right: {p}, result: {currentHash'}"
+          let currentHash' := settings.hash2 p currentHash
           let (index', treeSize') := shiftR1 (index, treeSize)
           verify index' treeSize' currentHash' ps
     verify proof.index (proof.treeSize - 1) leafHash proof.proof
