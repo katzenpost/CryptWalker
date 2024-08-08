@@ -199,11 +199,11 @@ def verifyInclusionProof (α : Type) [Hashable α] (settings : Settings α) (lea
       | _, 0, _ => pure false
       | index, treeSize, p :: ps =>
         if index % 2 != 0 || index == treeSize then
-          let currentHash' := settings.hash2 currentHash p
+          let currentHash' := settings.hash2 p currentHash
           let (index', treeSize') := shiftR1 $ untilSet index treeSize
           verify index' treeSize' currentHash' ps
         else
-          let currentHash' := settings.hash2 p currentHash
+          let currentHash' := settings.hash2 currentHash p
           let (index', treeSize') := shiftR1 (index, treeSize)
           verify index' treeSize' currentHash' ps
     verify proof.index (proof.treeSize - 1) leafHash proof.proof
