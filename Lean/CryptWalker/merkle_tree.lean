@@ -104,21 +104,6 @@ def lIndex (α : Type) (tree : HashTree α) : Nat :=
 def isPowerOf2 (n : Nat) : Bool :=
   (n &&& (n - 1)) == 0
 
-/-! insert returns a new hash tree with the newLeaf hash tree inserted into the given tree.-/
-def insert (α : Type) [Hashable α] (tree : HashTree α) (hash : ByteArray) (newLeaf : HashTree α) (settings : Settings α) (size : Nat) : HashTree α :=
-  match tree with
-  | HashTree.empty _ => newLeaf
-  | HashTree.leaf h idx _ => HashTree.node (settings.hash2 h hash) idx size tree newLeaf
-  | HashTree.node h leftIdx rightIdx leftTree rightTree =>
-    let sz := rightIdx - leftIdx + 1
-    if isPowerOf2 sz then
-      HashTree.node (settings.hash2 h hash) leftIdx size tree newLeaf
-    else
-      let newRight := insert α rightTree hash newLeaf settings size
-      let leftHash := hashValue α leftTree
-      let rightHash := hashValue α rightTree
-      HashTree.node (settings.hash2 leftHash rightHash) leftIdx size leftTree newRight
-
 /-! add, adds the given input into the tree, returning the new tree.-/
 def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : MerkleHashTrees α :=
   let hx := tree.settings.hash1 inp
@@ -128,12 +113,28 @@ def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : Merkl
     let newSize := tree.size + 1
     let newLeaf := HashTree.leaf hx tree.size inp
     let newHt := match tree.hashtrees.find? tree.size with
-      | some ht => insert α ht hx newLeaf tree.settings tree.size
-      | none => newLeaf
+      | some ht => insert ht
+      | none => newLeaf -- not reached
     let newHashTrees := tree.hashtrees.insert newSize newHt
     let newIndices := tree.indices.insert hx newSize
     { tree with size := newSize, hashtrees := newHashTrees, indices := newIndices }
-
+  where
+  insert (ht : HashTree α) : HashTree α :=
+    let settings := tree.settings
+    let hx := settings.hash1 inp
+    let newLeaf := HashTree.leaf hx tree.size inp
+    match ht with
+    | .empty _ => newLeaf
+    | .leaf h idx _ => HashTree.node (settings.hash2 h hx) idx tree.size ht newLeaf
+    | .node h leftIdx rightIdx leftTree rightTree =>
+    let sz := rightIdx - leftIdx + 1
+    if isPowerOf2 sz then
+      HashTree.node (settings.hash2 h hx) leftIdx tree.size ht newLeaf
+    else
+      let newRight := insert rightTree
+      let leftHash := hashValue α leftTree
+      let rightHash := hashValue α rightTree
+      HashTree.node (settings.hash2 leftHash rightHash) leftIdx tree.size leftTree newRight
 
 /-! fromList inserts a list of input items into the tree. -/
 def fromList (α : Type) [Hashable α] (settings : Settings α) (xs : List α) : MerkleHashTrees α :=
@@ -158,28 +159,26 @@ def sizeTree (α : Type) [Hashable α] (tree : MerkleHashTrees α) (treeSize : N
   | none => panic! "failed to find hash tree entry"
   | .some x => x
 
-
-def path (α : Type) [Hashable α] (index : Nat) (tree : HashTree α) : List ByteArray :=
-  let rec doPath (mytree : HashTree α) (acc : List ByteArray) : List ByteArray :=
-    match mytree with
-    | HashTree.leaf _ myIndex _ =>
-      if myIndex == index then acc else []
-    | HashTree.node _ _ _ l r =>
-      if index <= rIndex α l then
-        doPath l (hashValue α r :: acc)
-      else
-        doPath r (hashValue α l :: acc)
-    | HashTree.empty _ => acc
-    (doPath tree [])
-
 def genarateInclusionProof (α : Type) [Hashable α] (targetHash : ByteArray) (treeSize : Nat) (tree : MerkleHashTrees α) : Option InclusionProof :=
   let ht : HashTree α := sizeTree α tree treeSize
   let i := index α tree targetHash
   if i < treeSize then
-    let digests := path α i ht
+    let digests := List.reverse $ path i ht
     some { index := i, treeSize := treeSize, proof := digests }
   else
     none
+  where
+    path (index : Nat) (tree : HashTree α) : List ByteArray :=
+      match tree with
+      | HashTree.empty _ => []
+      | HashTree.leaf _ _ _ => []
+      | HashTree.node _ _ _ l r =>
+        if index <= rIndex α l then
+          hashValue α r :: path index l
+        else
+          hashValue α l :: path index r
+
+
 
 def shiftR1 (p : Nat × Nat) : Nat × Nat :=
   (p.fst >>> 1, p.snd >>> 1)
