@@ -116,7 +116,7 @@ def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : Merkl
       | some ht => insert ht
       | none => newLeaf -- not reached
     let newHashTrees := tree.hashtrees.insert newSize newHt
-    let newIndices := tree.indices.insert hx newSize
+    let newIndices := tree.indices.insert hx tree.size
     { tree with size := newSize, hashtrees := newHashTrees, indices := newIndices }
   where
   insert (ht : HashTree α) : HashTree α :=
@@ -177,8 +177,6 @@ def genarateInclusionProof (α : Type) [Hashable α] (targetHash : ByteArray) (t
           hashValue α r :: path index l
         else
           hashValue α l :: path index r
-
-
 
 def shiftR1 (p : Nat × Nat) : Nat × Nat :=
   (p.fst >>> 1, p.snd >>> 1)
