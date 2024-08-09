@@ -21,44 +21,25 @@ def testUntilSet : IO Unit := do
     else
       IO.println s!"Test passed for inputs ({fst}, {snd})"
 
-/--
 def testMerkleHashTreeInclusionProof : IO Unit := do
-  let target := String.toAsciiByteArray "Euoplocephalus"
-  IO.println s!"target input value --> {target}"
-  let dinosaurs := [
-    String.toAsciiByteArray "Stegosaurus",
-    String.toAsciiByteArray "Apatosaurus",
-    target,
-    String.toAsciiByteArray "Deinocheirus",
-    String.toAsciiByteArray "Chasmosaurus"
-  ]
-  let mht := fromList ByteArray sha256HashByteArraySettings dinosaurs
-  let (treeSize, maybeRootHash) := info ByteArray mht
-  match currentHead ByteArray mht with
-    | none => panic! "wtf1"
-    | some rootTree =>
-      let treeHex : String := reprIndented rootTree "    " false
-      IO.println s!"mht\n{treeHex}"
-
-  let leafDigest := sha256HashByteArraySettings.hash1 target
-
-  IO.println s!"target leafDigest {leafDigest}"
-
-  match genarateInclusionProof ByteArray leafDigest treeSize mht with
-    | none => panic! "wtf2"
-    | some proof =>
-      IO.println s!"inclusion proof {proof}"
-      match maybeRootHash with
-      | none => panic! "wtf3"
-      | some rootHash =>
-        let isProved ← verifyInclusionProof ByteArray sha256HashByteArraySettings leafDigest rootHash proof
-        if isProved then
+  let target := "3"
+  let targetByteArray := String.toAsciiByteArray target
+  let mht := fromList ByteArray sha256HashByteArraySettings (List.map String.toAsciiByteArray ["0", "1", "2", target, "4", "5", "6"])
+  let treeSize := 5
+  let leafDigest := sha256HashByteArraySettings.hash1 targetByteArray
+  let maybeProof := generateInclusionProof _ leafDigest treeSize mht
+  let rootDigest := digest _ treeSize mht
+  match maybeProof with
+  | none => panic! "not a proof"
+  | some proof =>
+    let isProofValid : Bool ← verifyInclusionProof _ sha256HashByteArraySettings leafDigest rootDigest proof
+    if isProofValid then
           IO.println "tree proof true"
         else
           IO.println "tree proof false"
--/
 
-def testMerkleHashTreeBasic : IO Unit := do
+/-Creating a Merkle Hash Tree from a list of elements. O(n log n)-/
+def testMerkleHashTreeFromList : IO Unit := do
   let mht := fromList ByteArray sha256HashByteArraySettings (List.map String.toAsciiByteArray ["0", "1", "2"])
   let (treeSize, rootHash) := info ByteArray mht
   if treeSize != 3 then
@@ -72,6 +53,34 @@ def testMerkleHashTreeBasic : IO Unit := do
   IO.println s!"tree size {treeSize} root hash {rootHash}"
 
 
+def testAdd : IO Unit := do
+  let (size, rootHash) := info _ $ empty ByteArray sha256HashByteArraySettings
+  if size != 0 then
+    panic! "wrong tree size"
+  else
+    pure ()
+  if s!"{rootHash}" != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" then
+    panic! "root hash mismatch"
+  else
+    pure ()
+  IO.println s!"tree size {size} root hash {rootHash}"
+
+def testAdd1 : IO Unit := do
+  let (size, rootHash) := info _ $ add _ (String.toAsciiByteArray "1") $ empty ByteArray sha256HashByteArraySettings
+  if size != 1 then
+    panic! "wrong tree size"
+  else
+    pure ()
+  if s!"{rootHash}" != "2215e8ac4e2b871c2a48189e79738c956c081e23ac2f2415bf77da199dfd920c" then
+    panic! "root hash mismatch"
+  else
+    pure ()
+  IO.println s!"tree size {size} root hash {rootHash}"
+
+
 def main : IO Unit := do
   testUntilSet
-  testMerkleHashTreeBasic
+  testMerkleHashTreeFromList
+  testAdd
+  testAdd1
+  testMerkleHashTreeInclusionProof

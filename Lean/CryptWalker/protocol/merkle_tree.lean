@@ -91,7 +91,8 @@ def info (α : Type) [Hashable α] (tree : MerkleHashTrees α) : (Nat × ByteArr
 
 /-! empty creates an empty 'MerkleHashTrees'. -/
 def empty (α : Type) [Hashable α] (settings : Settings α) : MerkleHashTrees α :=
-  MerkleHashTrees.mk settings 0 (Lean.mkHashMap) (Lean.mkHashMap)
+  let indices := (Lean.mkHashMap).insert 0 (HashTree.empty settings.hash0)
+  MerkleHashTrees.mk settings 0 indices (Lean.mkHashMap)
 
 /-! hashValue returns the hash value for the given HashTree. -/
 def hashValue (α : Type) [Hashable α] (tree : HashTree α) : ByteArray :=
@@ -170,7 +171,7 @@ def sizeTree (α : Type) [Hashable α] (tree : MerkleHashTrees α) (treeSize : N
   | none => panic! "failed to find hash tree entry"
   | .some x => x
 
-def genarateInclusionProof (α : Type) [Hashable α] (targetHash : ByteArray) (treeSize : Nat) (tree : MerkleHashTrees α) : Option InclusionProof :=
+def generateInclusionProof (α : Type) [Hashable α] (targetHash : ByteArray) (treeSize : Nat) (tree : MerkleHashTrees α) : Option InclusionProof :=
   let ht : HashTree α := sizeTree α tree treeSize
   let i := index α tree targetHash
   if i < treeSize then
