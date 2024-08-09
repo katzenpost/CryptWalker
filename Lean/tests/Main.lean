@@ -24,27 +24,19 @@ def testUntilSet : IO Unit := do
 def testMerkleHashTreeInclusionProof : IO Unit := do
   let target := "3"
   let targetByteArray := String.toAsciiByteArray target
-  let mylist := List.map String.toAsciiByteArray ["0", "1", "2", target, "4", "5", "6"]
-  IO.println s!"MY TARGET is {targetByteArray}"
   let mht := fromList ByteArray sha256HashByteArraySettings (List.map String.toAsciiByteArray ["0", "1", "2", target, "4", "5", "6"])
-  let (treeSize, rootHash) := info ByteArray mht
-  IO.println s!"treeSize: {treeSize} rootHash: {rootHash}"
-  let rootTree : HashTree ByteArray := currentHead ByteArray mht
-  let treeHex : String := reprIndented rootTree "    " false
-  IO.println s!"mht\n{treeHex}"
-
   let treeSize := 5
   let leafDigest := sha256HashByteArraySettings.hash1 targetByteArray
-  let maybeProof := generateInclusionProof _ leafDigest treeSize mht
-  let rootDigest := digest _ treeSize mht
+  let maybeProof := generateInclusionProof ByteArray leafDigest treeSize mht
+  let rootDigest := digest ByteArray treeSize mht
   match maybeProof with
   | none => panic! "not a proof"
   | some proof =>
-    let isProofValid : Bool ← verifyInclusionProof _ sha256HashByteArraySettings leafDigest rootDigest proof
+    let isProofValid := verifyInclusionProof ByteArray sha256HashByteArraySettings leafDigest rootDigest proof
     if isProofValid then
-          IO.println "tree proof true"
+          IO.println "Merkle Hash Tree inclusion proof is correct"
         else
-          IO.println "tree proof false"
+          panic! "inclusion proof is false"
 
 /-Creating a Merkle Hash Tree from a list of elements. O(n log n)-/
 def testMerkleHashTreeFromList : IO Unit := do

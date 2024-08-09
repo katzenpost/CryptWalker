@@ -42,7 +42,7 @@ inductive HashTree (α : Type) where
   | node (hash : ByteArray) (leftIndex : Nat) (rightIndex : Nat) (leftTree : HashTree α) (rightTree : HashTree α)
 deriving BEq
 
-def reprIndented {α : Type} [Repr α] (tree : HashTree α) (indent : String) (last : Bool) : String :=
+def reprHashTree {α : Type} [Repr α] (tree : HashTree α) (indent : String) (last : Bool) : String :=
   let newIndent := indent ++ (if last then "   " else "│  ")
   match tree with
   | HashTree.empty hash =>
@@ -50,8 +50,8 @@ def reprIndented {α : Type} [Repr α] (tree : HashTree α) (indent : String) (l
   | HashTree.leaf hash index value =>
       s!"{indent}{if last then "└─ " else "├─ "}(leaf {repr hash}, index: {index}, value: {repr value})"
   | HashTree.node hash leftIndex rightIndex leftTree rightTree =>
-      let leftStr := reprIndented leftTree newIndent false
-      let rightStr := reprIndented rightTree newIndent true
+      let leftStr := reprHashTree leftTree newIndent false
+      let rightStr := reprHashTree rightTree newIndent true
       s!"{indent}{if last then "└─ " else "├─ "}(node {repr hash}, left index: {leftIndex}, right index: {rightIndex})\n{leftStr}\n{rightStr}"
 
 instance {α : Type} : Inhabited (HashTree α) where
@@ -62,6 +62,30 @@ structure MerkleHashTrees (α : Type) [Hashable α] :=
   (size : Nat)
   (hashtrees : (Lean.HashMap Nat (HashTree α)))
   (indices : (Lean.HashMap ByteArray Nat))
+
+/-! currentHead returns the current Merkle Tree head -/
+def currentHead (α : Type) [Hashable α] (tree : MerkleHashTrees α) : (HashTree α):=
+  match Lean.HashMap.findEntry? tree.hashtrees tree.size with
+  | .none => panic! "current head not found"
+  | some (_, ht) => ht
+
+
+def printHashTree {α : Type} [Repr α] (tree : HashTree α) : IO Unit :=
+  let treeHex : String := reprHashTree tree "    " false
+  IO.println s!"hashTree\n{treeHex}"
+
+def printMerkleHashTrees {α : Type} [Repr α] [Hashable α] (mht : MerkleHashTrees α) : IO Unit := do
+  IO.println s!"MerkleHashTrees with size: {mht.size}"
+  IO.println s!"hash0: {mht.settings.hash0}"
+  IO.println "Hash Trees:"
+  mht.hashtrees.toList.reverse.foldl (fun acc (index, tree) => do
+    acc
+    IO.println s!"Tree at index {index}:"
+    printHashTree tree) (pure ())
+  IO.println "Indices:"
+  mht.indices.toList.foldl (fun acc (digest, ix) => do
+    acc
+    IO.println s!"  Digest: {digest}, Index: {ix}") (pure ())
 
 /-! digest gets the current Merkle Tree hash value -/
 def digest (α : Type) [Hashable α] (treeSize : Nat) (tree : MerkleHashTrees α) : ByteArray :=
@@ -77,12 +101,6 @@ def index (α : Type) [Hashable α] (tree : MerkleHashTrees α) (hash : ByteArra
   match Lean.HashMap.findEntry? tree.indices hash with
   | some n => n.snd
   | none => panic! "failed to find tree index"
-
-/-! currentHead returns the current Merkle Tree head -/
-def currentHead (α : Type) [Hashable α] (tree : MerkleHashTrees α) : (HashTree α):=
-  match Lean.HashMap.findEntry? tree.hashtrees tree.size with
-  | .none => panic! "current head not found"
-  | some (_, ht) => ht
 
 /-! info gets the root information of the Merkle Hash tree.
     A pair of the current size and the current Merkle Tree Hash is returned. -/
@@ -138,15 +156,14 @@ def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : Merkl
     match ht with
     | .empty _ => newLeaf
     | .leaf h idx _ => HashTree.node (settings.hash2 h hx) idx tree.size ht newLeaf
-    | .node h leftIdx rightIdx leftTree rightTree =>
-    let sz := rightIdx - leftIdx + 1
-    if isPowerOf2 sz then
-      HashTree.node (settings.hash2 h hx) leftIdx tree.size ht newLeaf
-    else
-      let newRight := insert rightTree
-      let leftHash := hashValue α leftTree
-      let rightHash := hashValue α rightTree
-      HashTree.node (settings.hash2 leftHash rightHash) leftIdx tree.size leftTree newRight
+    | .node _ leftIdx rightIdx leftTree rightTree =>
+      let sz := rightIdx - leftIdx + 1
+      if isPowerOf2 sz then
+        HashTree.node (settings.hash2 (hashValue α ht) hx) leftIdx tree.size ht newLeaf
+      else
+        let newRight := insert rightTree
+        let newRootHash := settings.hash2 (hashValue α leftTree) (hashValue α newRight)
+        HashTree.node newRootHash leftIdx tree.size leftTree newRight
 
 /-! fromList inserts a list of input items into the tree. -/
 def fromList (α : Type) [Hashable α] (settings : Settings α) (xs : List α) : MerkleHashTrees α :=
@@ -185,7 +202,7 @@ def generateInclusionProof (α : Type) [Hashable α] (targetHash : ByteArray) (t
       | HashTree.empty _ => []
       | HashTree.leaf _ _ _ => []
       | HashTree.node _ _ _ l r =>
-        if index <= rIndex α l then
+        if index <= (rIndex α l) then
           hashValue α r :: path index l
         else
           hashValue α l :: path index r
@@ -201,14 +218,12 @@ def untilSet (fst snd : Nat) : Nat × Nat :=
   decreasing_by
   sorry
 
-
-def verifyInclusionProof (α : Type) [Hashable α] (settings : Settings α) (leafHash : ByteArray) (rootHash : ByteArray) (proof : InclusionProof) : IO Bool :=
-  if proof.index >= proof.treeSize then pure false else
-    let rec verify (index treeSize : Nat) (currentHash : ByteArray) (proof' : List ByteArray) : IO Bool := do
-      IO.println s!"Verifying: index={index}, treeSize={treeSize}, currentHash={currentHash}"
+def verifyInclusionProof (α : Type) [Hashable α] (settings : Settings α) (leafHash : ByteArray) (rootHash : ByteArray) (proof : InclusionProof) : Bool :=
+  if proof.index >= proof.treeSize then false else
+    let rec verify (index treeSize : Nat) (currentHash : ByteArray) (proof' : List ByteArray) : Bool :=
       match index, treeSize, proof' with
-      | _, sn, [] => pure (sn == 0 && currentHash == rootHash)
-      | _, 0, _ => pure false
+      | _, sn, [] => (sn == 0 && currentHash == rootHash)
+      | _, 0, _ => false
       | index, treeSize, p :: ps =>
         if index % 2 != 0 || index == treeSize then
           let currentHash' := settings.hash2 p currentHash
