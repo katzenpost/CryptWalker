@@ -7,9 +7,15 @@ import Mathlib.Data.ByteArray
 import Mathlib.Data.HashMap
 import Init.Data.ToString
 
-import «CryptWalker».hash
-import «CryptWalker».nat
-import «CryptWalker».hex
+import CryptWalker.hash.sha1
+import CryptWalker.hash.sha2.Sha2
+import CryptWalker.util.newnat
+import CryptWalker.util.newhex
+
+namespace Sha256
+  abbrev Sha256Digest := CryptWalker.hash.sha2.Sha2.Sha256.Digest
+  abbrev hash := CryptWalker.hash.sha2.Sha2.Sha256.hash
+end Sha256
 
 instance : BEq ByteArray where
   beq a b := a.data = b.data
@@ -20,10 +26,15 @@ structure Settings (α : Type) [Hashable α] where
   hash1 : α → ByteArray
   hash2 : ByteArray → ByteArray → ByteArray
 
-def defaultByteArraySettings : Settings ByteArray :=
-  { hash0 := myhash (ByteArray.empty),
-    hash1 :=  fun x => myhash (ByteArray.mk #[0x00] ++ x),
-    hash2 := fun x y => myhash (ByteArray.mk #[0x01] ++ x ++ y) }
+def sha256HashByteArraySettings : Settings ByteArray :=
+  { hash0 := CryptWalker.hash.sha2.Sha2.Sha256.Digest.toBytes $ Sha256.hash (ByteArray.empty),
+    hash1 :=  fun x => CryptWalker.hash.sha2.Sha2.Sha256.Digest.toBytes $ Sha256.hash (ByteArray.mk #[0x00] ++ x),
+    hash2 := fun x y => CryptWalker.hash.sha2.Sha2.Sha256.Digest.toBytes $ Sha256.hash (ByteArray.mk #[0x01] ++ x ++ y) }
+
+def sha1HashByteArraySettings : Settings ByteArray :=
+  { hash0 := sha1hash (ByteArray.empty),
+    hash1 :=  fun x => sha1hash (ByteArray.mk #[0x00] ++ x),
+    hash2 := fun x y => sha1hash (ByteArray.mk #[0x01] ++ x ++ y) }
 
 inductive HashTree (α : Type) where
   | empty (hash : ByteArray)
@@ -75,7 +86,7 @@ def currentHead (α : Type) [Hashable α] (tree : MerkleHashTrees α) : Option (
 
 /-! info gets the root information of the Merkle Hash tree.
     A pair of the current size and the current Merkle Tree Hash is returned. -/
-def info (α : Type) [Hashable α] (tree : MerkleHashTrees α) : (Nat × Option ByteArray) :=
+def info (α : Type) [Hashable α] (tree : MerkleHashTrees α) : (Nat × ByteArray) :=
   (tree.size, digest α tree.size tree)
 
 /-! empty creates an empty 'MerkleHashTrees'. -/

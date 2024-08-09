@@ -1,6 +1,9 @@
-import CryptWalker
+
 import Lean
 import Mathlib.Data.ByteArray
+
+import CryptWalker.protocol.merkle_tree
+
 
 def testUntilSet : IO Unit := do
   let testCases := [
@@ -18,10 +21,8 @@ def testUntilSet : IO Unit := do
     else
       IO.println s!"Test passed for inputs ({fst}, {snd})"
 
-def main : IO Unit := do
-
-  testUntilSet
-
+/--
+def testMerkleHashTreeInclusionProof : IO Unit := do
   let target := String.toAsciiByteArray "Euoplocephalus"
   IO.println s!"target input value --> {target}"
   let dinosaurs := [
@@ -31,7 +32,7 @@ def main : IO Unit := do
     String.toAsciiByteArray "Deinocheirus",
     String.toAsciiByteArray "Chasmosaurus"
   ]
-  let mht := fromList ByteArray defaultByteArraySettings dinosaurs
+  let mht := fromList ByteArray sha256HashByteArraySettings dinosaurs
   let (treeSize, maybeRootHash) := info ByteArray mht
   match currentHead ByteArray mht with
     | none => panic! "wtf1"
@@ -39,8 +40,7 @@ def main : IO Unit := do
       let treeHex : String := reprIndented rootTree "    " false
       IO.println s!"mht\n{treeHex}"
 
-  --let rootHash := digest ByteArray treeSize mht
-  let leafDigest := defaultByteArraySettings.hash1 target
+  let leafDigest := sha256HashByteArraySettings.hash1 target
 
   IO.println s!"target leafDigest {leafDigest}"
 
@@ -51,8 +51,27 @@ def main : IO Unit := do
       match maybeRootHash with
       | none => panic! "wtf3"
       | some rootHash =>
-        let isProved ← verifyInclusionProof ByteArray defaultByteArraySettings leafDigest rootHash proof
+        let isProved ← verifyInclusionProof ByteArray sha256HashByteArraySettings leafDigest rootHash proof
         if isProved then
           IO.println "tree proof true"
         else
           IO.println "tree proof false"
+-/
+
+def testMerkleHashTreeBasic : IO Unit := do
+  let mht := fromList ByteArray sha256HashByteArraySettings (List.map String.toAsciiByteArray ["0", "1", "2"])
+  let (treeSize, rootHash) := info ByteArray mht
+  if treeSize != 3 then
+    panic! "wrong tree size"
+  else
+    pure ()
+  if s!"{rootHash}" != "725d5230db68f557470dc35f1d8865813acd7ebb07ad152774141decbae71327" then
+    panic! "root hash mismatch"
+  else
+    pure ()
+  IO.println s!"tree size {treeSize} root hash {rootHash}"
+
+
+def main : IO Unit := do
+  testUntilSet
+  testMerkleHashTreeBasic
