@@ -156,10 +156,10 @@ def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : Merkl
     match ht with
     | .empty _ => newLeaf
     | .leaf h idx _ => HashTree.node (settings.hash2 h hx) idx tree.size ht newLeaf
-    | .node _ leftIdx rightIdx leftTree rightTree =>
+    | .node h leftIdx rightIdx leftTree rightTree =>
       let sz := rightIdx - leftIdx + 1
       if isPowerOf2 sz then
-        HashTree.node (settings.hash2 (hashValue α ht) hx) leftIdx tree.size ht newLeaf
+        HashTree.node (settings.hash2 h hx) leftIdx tree.size ht newLeaf
       else
         let newRight := insert rightTree
         let newRootHash := settings.hash2 (hashValue α leftTree) (hashValue α newRight)
