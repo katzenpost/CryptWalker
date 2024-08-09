@@ -79,10 +79,10 @@ def index (α : Type) [Hashable α] (tree : MerkleHashTrees α) (hash : ByteArra
   | none => panic! "failed to find tree index"
 
 /-! currentHead returns the current Merkle Tree head -/
-def currentHead (α : Type) [Hashable α] (tree : MerkleHashTrees α) : Option (HashTree α):=
+def currentHead (α : Type) [Hashable α] (tree : MerkleHashTrees α) : (HashTree α):=
   match Lean.HashMap.findEntry? tree.hashtrees tree.size with
-  | .none => none
-  | some (_, ht) => some ht
+  | .none => panic! "current head not found"
+  | some (_, ht) => ht
 
 /-! info gets the root information of the Merkle Hash tree.
     A pair of the current size and the current Merkle Tree Hash is returned. -/

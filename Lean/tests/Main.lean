@@ -25,6 +25,12 @@ def testMerkleHashTreeInclusionProof : IO Unit := do
   let target := "3"
   let targetByteArray := String.toAsciiByteArray target
   let mht := fromList ByteArray sha256HashByteArraySettings (List.map String.toAsciiByteArray ["0", "1", "2", target, "4", "5", "6"])
+  let (treeSize, rootHash) := info ByteArray mht
+  IO.println s!"treeSize: {treeSize} rootHash: {rootHash}"
+  let rootTree : HashTree ByteArray := currentHead ByteArray mht
+  let treeHex : String := reprIndented rootTree "    " false
+  IO.println s!"mht\n{treeHex}"
+
   let treeSize := 5
   let leafDigest := sha256HashByteArraySettings.hash1 targetByteArray
   let maybeProof := generateInclusionProof _ leafDigest treeSize mht
