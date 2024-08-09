@@ -24,6 +24,8 @@ def testUntilSet : IO Unit := do
 def testMerkleHashTreeInclusionProof : IO Unit := do
   let target := "3"
   let targetByteArray := String.toAsciiByteArray target
+  let mylist := List.map String.toAsciiByteArray ["0", "1", "2", target, "4", "5", "6"]
+  IO.println s!"MY TARGET is {targetByteArray}"
   let mht := fromList ByteArray sha256HashByteArraySettings (List.map String.toAsciiByteArray ["0", "1", "2", target, "4", "5", "6"])
   let (treeSize, rootHash) := info ByteArray mht
   IO.println s!"treeSize: {treeSize} rootHash: {rootHash}"
