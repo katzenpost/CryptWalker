@@ -1,5 +1,7 @@
 import Lake
+import Lake.Build.Job
 open Lake DSL
+
 
 set_option diagnostics true
 
@@ -18,6 +20,18 @@ lean_lib «CryptWalker» where
 lean_exe tests {
   root := `Tests.Main
 }
+
+target importTarget pkg : FilePath := do
+  let oFile := pkg.buildDir / "c" / "curve25519-donna.o"
+  let srcJob ← Lake.inputTextFile <| pkg.dir / "C" / "curve25519-donna.c"
+  buildFileAfterDep oFile srcJob fun srcFile => do
+    let flags := #["-I", toString (← getLeanIncludeDir), "-fPIC"]
+    compileO oFile srcFile flags
+
+extern_lib ffi pkg := do
+  let job ← fetch <| pkg.target ``importTarget
+  let libFile := pkg.nativeLibDir / nameToStaticLib "curve25519-donna"
+  buildStaticLib libFile #[job]
 
 extern_lib crypt_walker_for_lean pkg := do
   proc { cmd := "cargo", args := #["rustc", "--release", "--", "-C", "relocation-model=pic"], cwd := pkg.dir / "Rust" }

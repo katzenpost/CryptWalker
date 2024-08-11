@@ -218,6 +218,7 @@ def untilSet (fst snd : Nat) : Nat × Nat :=
   decreasing_by
   sorry
 
+
 def verifyInclusionProof (α : Type) [Hashable α] (settings : Settings α) (leafHash : ByteArray) (rootHash : ByteArray) (proof : InclusionProof) : Bool :=
   if proof.index >= proof.treeSize then false else
     let rec verify (index treeSize : Nat) (currentHash : ByteArray) (proof' : List ByteArray) : Bool :=

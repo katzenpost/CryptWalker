@@ -3,6 +3,7 @@ import Lean
 import Mathlib.Data.ByteArray
 
 import CryptWalker.protocol.merkle_tree
+import CryptWalker.nike.x25519
 
 
 def testUntilSet : IO Unit := do
@@ -77,6 +78,22 @@ def testAddHashTree1 : IO Unit := do
     pure ()
   IO.println s!"tree size {size} root hash {rootHash}"
 
+def testX25519 : IO Unit := do
+  let alicePrivateKey : ByteArray ← generatePrivateKey
+  let alicePublicKey := toPublic alicePrivateKey
+
+  let bobPrivateKey : ByteArray ← generatePrivateKey
+  let bobPublicKey := toPublic bobPrivateKey
+
+  let bobSharedSecret := dh bobPrivateKey alicePublicKey
+  let aliceSharedSecret := dh alicePrivateKey bobPublicKey
+
+  if bobSharedSecret.data.data == aliceSharedSecret.data.data then
+    IO.println "shared secrets match!"
+  else
+    panic! "testX25519 failed!"
+
+
 
 def main : IO Unit := do
   testUntilSet
@@ -84,3 +101,4 @@ def main : IO Unit := do
   testAddHashTree
   testAddHashTree1
   testMerkleHashTreeInclusionProof
+  testX25519
