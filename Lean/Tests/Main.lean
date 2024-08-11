@@ -53,7 +53,7 @@ def testMerkleHashTreeFromList : IO Unit := do
   IO.println s!"tree size {treeSize} root hash {rootHash}"
 
 
-def testAdd : IO Unit := do
+def testAddHashTree : IO Unit := do
   let (size, rootHash) := info _ $ empty ByteArray sha256HashByteArraySettings
   if size != 0 then
     panic! "wrong tree size"
@@ -65,7 +65,7 @@ def testAdd : IO Unit := do
     pure ()
   IO.println s!"tree size {size} root hash {rootHash}"
 
-def testAdd1 : IO Unit := do
+def testAddHashTree1 : IO Unit := do
   let (size, rootHash) := info _ $ add _ (String.toAsciiByteArray "1") $ empty ByteArray sha256HashByteArraySettings
   if size != 1 then
     panic! "wrong tree size"
@@ -81,6 +81,6 @@ def testAdd1 : IO Unit := do
 def main : IO Unit := do
   testUntilSet
   testMerkleHashTreeFromList
-  testAdd
-  testAdd1
+  testAddHashTree
+  testAddHashTree1
   testMerkleHashTreeInclusionProof
