@@ -8,7 +8,7 @@ import Mathlib.Data.HashMap
 import Init.Data.ToString
 
 import CryptWalker.hash.sha1
-import CryptWalker.hash.sha2.Sha2
+import CryptWalker.hash.Sha2
 import CryptWalker.util.newnat
 import CryptWalker.util.newhex
 

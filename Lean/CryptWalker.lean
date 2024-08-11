@@ -3,7 +3,7 @@ import CryptWalker.kem.kem
 import CryptWalker.nike.x25519
 import CryptWalker.hash.Hash
 import CryptWalker.hash.sha1
-import CryptWalker.hash.sha2.Sha2
+import CryptWalker.hash.Sha2
 import CryptWalker.util.newnat
 import CryptWalker.util.newhex
 import CryptWalker.util.Hex
