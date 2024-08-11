@@ -1,5 +1,8 @@
 /-
-Work-in-progress translation of the Haskell FFI X25519:
+SPDX-FileCopyrightText: © 2024 David Stainton
+SPDX-License-Identifier: AGPL-3.0-only
+
+Inspired by the Haskell FFI X25519:
 https://github.com/haskell-crypto/cryptonite/blob/master/Crypto/PubKey/Curve25519.hs
 -/
 
