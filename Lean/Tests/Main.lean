@@ -4,6 +4,7 @@ import Mathlib.Data.ByteArray
 
 import CryptWalker.protocol.merkle_tree
 import CryptWalker.nike.x25519
+import CryptWalker.nike.nike
 
 
 def testUntilSet : IO Unit := do
@@ -53,7 +54,6 @@ def testMerkleHashTreeFromList : IO Unit := do
     pure ()
   IO.println s!"tree size {treeSize} root hash {rootHash}"
 
-
 def testAddHashTree : IO Unit := do
   let (size, rootHash) := info _ $ empty ByteArray sha256HashByteArraySettings
   if size != 0 then
@@ -78,21 +78,19 @@ def testAddHashTree1 : IO Unit := do
     pure ()
   IO.println s!"tree size {size} root hash {rootHash}"
 
+
 def testX25519 : IO Unit := do
-  let alicePrivateKey : ByteArray ← generatePrivateKey
-  let alicePublicKey := toPublic alicePrivateKey
+  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
+  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
+  let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
 
-  let bobPrivateKey : ByteArray ← generatePrivateKey
-  let bobPublicKey := toPublic bobPrivateKey
+  let bobSharedSecret := scheme.groupAction bobPrivateKey alicePublicKey
+  let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
 
-  let bobSharedSecret := dh bobPrivateKey alicePublicKey
-  let aliceSharedSecret := dh alicePrivateKey bobPublicKey
-
-  if bobSharedSecret.data.data == aliceSharedSecret.data.data then
+  if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
     IO.println "shared secrets match!"
   else
     panic! "testX25519 failed!"
-
 
 
 def main : IO Unit := do
