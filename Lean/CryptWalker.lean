@@ -2,6 +2,7 @@ import CryptWalker.ffi.Basic
 import CryptWalker.kem.kem
 import CryptWalker.nike.x25519
 import CryptWalker.nike.nike
+import CryptWalker.nike.x25519pure
 import CryptWalker.hash.Hash
 import CryptWalker.hash.sha1
 import CryptWalker.hash.Sha2

@@ -44,6 +44,10 @@ structure PrivateKey where
 structure PublicKey where
   data : ByteArray
 
+def defaultPublicKey : PublicKey :=
+  let defaultPrivateKey : ByteArray := ByteArray.mk (Array.mk (List.replicate 32 (0 : UInt8)))
+  PublicKey.mk (toPublic defaultPrivateKey)
+
 instance : nike.Key PrivateKey where
   encode : PrivateKey → ByteArray := fun (key : PrivateKey) => key.data
   decode : ByteArray → Option PrivateKey := fun (bytes : ByteArray) => some (PrivateKey.mk bytes)

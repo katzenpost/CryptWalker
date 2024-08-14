@@ -5,6 +5,7 @@ import Mathlib.Data.ByteArray
 import CryptWalker.protocol.merkle_tree
 import CryptWalker.nike.x25519
 import CryptWalker.nike.nike
+import CryptWalker.nike.x25519pure
 
 
 def testUntilSet : IO Unit := do
@@ -92,6 +93,50 @@ def testX25519 : IO Unit := do
   else
     panic! "testX25519 failed!"
 
+def testPureX25519Exchange : IO Unit := do
+  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
+  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
+
+  let mut arr := ByteArray.mkEmpty 32
+  for _ in [0:32] do
+    let randomByte ← IO.rand 0 255
+    arr := arr.push (UInt8.ofNat randomByte)
+  let bobPrivateKey := arr
+  let bobPublicKey := CryptWalker.nike.x25519pure.scalarmult bobPrivateKey CryptWalker.nike.x25519pure.basepoint
+  let bobSS := CryptWalker.nike.x25519pure.scalarmult bobPrivateKey $ CryptWalker.nike.x25519pure.byteArrayToZmod alicePublicKey.data
+
+  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
+  let bobPublicKeyBytes := CryptWalker.nike.x25519pure.zmodToByteArray bobPublicKey
+  let bobpubkey := (scheme.decodePublicKey bobPublicKeyBytes).getD CryptWalker.nike.x25519.defaultPublicKey
+  let aliceSS := scheme.groupAction alicePrivateKey bobpubkey
+
+  if (CryptWalker.nike.x25519pure.zmodToByteArray bobSS) != aliceSS.data then
+    panic! "shared secrets mismatch"
+
+def testPureX25519DerivePubKey : IO Unit := do
+  let privateKeyHex := "951c011657648c76090885822284c461e3c84bf66b8842adb438334499922890"
+  let publicKeyHex := "f5ea54714e6ebfbce3d9073173261ca4ea50a15066ae33461bae83780cf51c43"
+  let privKeyBytes : ByteArray := (hexStringToByteArray privateKeyHex).getD ByteArray.empty
+  let pubKey := CryptWalker.nike.x25519pure.scalarmult privKeyBytes CryptWalker.nike.x25519pure.basepoint
+  let pubKeyBytes := CryptWalker.nike.x25519pure.zmodToByteArray pubKey
+  let expectedPubBytes := (hexStringToByteArray publicKeyHex).getD ByteArray.empty
+  if pubKeyBytes != expectedPubBytes then
+    panic! "public key mismatch"
+
+
+def testPureX25519BasepointDecode : IO Unit := do
+  let basepoint := CryptWalker.nike.x25519pure.basepoint
+  let basepoint2hex := "0900000000000000000000000000000000000000000000000000000000000000"
+  let basepoint2bytes := (hexStringToByteArray basepoint2hex).getD ByteArray.empty
+  let basepoint2 := CryptWalker.nike.x25519pure.byteArrayToZmod basepoint2bytes
+  if basepoint.val != basepoint2.val then
+    panic! "incorrectly decoded basepoint"
+  let basepoint3bytes := CryptWalker.nike.x25519pure.zmodToByteArray basepoint
+  IO.println s!"expected hex {basepoint2bytes}"
+  IO.println s!"computed hex {basepoint3bytes}"
+  if basepoint2bytes != basepoint2bytes then
+    panic! "basepoint decoding to hex failure"
+
 
 def main : IO Unit := do
   testUntilSet
@@ -99,4 +144,6 @@ def main : IO Unit := do
   testAddHashTree
   testAddHashTree1
   testMerkleHashTreeInclusionProof
-  testX25519
+  --testX25519
+  testPureX25519BasepointDecode
+  testPureX25519DerivePubKey
