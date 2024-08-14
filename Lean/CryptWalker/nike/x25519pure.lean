@@ -96,4 +96,7 @@ def scalarmult (scalarBytes : ByteArray) (point : ZMod p) : ZMod p :=
   let finalState := montgomery_ladder clampedScalar point
   finalState.x2 * finalState.z2⁻¹
 
+def curve25519 (scalarBytes : ByteArray) (point : ByteArray) : ByteArray :=
+  zmodToByteArray $ scalarmult scalarBytes $ byteArrayToZmod point
+
 end CryptWalker.nike.x25519pure
