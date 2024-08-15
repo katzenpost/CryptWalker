@@ -158,3 +158,27 @@ def main : IO Unit := do
   testPureX25519BasepointDecode
   testPureX25519DerivePubKey
   testX25519
+
+
+/-
+def runX25519Benchmarks : IO Unit := do
+  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519pure.X25519Scheme)
+  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
+  let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
+
+  let bobSharedSecret := scheme.groupAction bobPrivateKey alicePublicKey
+  let mut i := 0
+  while i < 10000 do
+    let _ := scheme.groupAction alicePrivateKey bobPublicKey
+    i := i + 1
+
+  let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
+  if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
+    IO.println "shared secrets match!"
+  else
+    panic! "testX25519 failed!"
+
+
+def main : IO Unit := do
+  runX25519Benchmarks
+-/
