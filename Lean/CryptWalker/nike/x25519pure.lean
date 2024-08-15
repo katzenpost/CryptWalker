@@ -9,11 +9,13 @@ import Mathlib.Data.ByteArray
 
 import CryptWalker.util.newnat
 import CryptWalker.util.newhex
+import CryptWalker.nike.nike
 
 namespace CryptWalker.nike.x25519pure
 
 def p : ℕ := 2^255 - 19
 def basepoint : ZMod p := 9
+def keySize : ℕ := 32
 
 theorem p_is_prime : Nat.Prime p := by sorry
 instance fact_p_is_prime : Fact (Nat.Prime p) := ⟨p_is_prime⟩
@@ -26,7 +28,7 @@ def clampScalarBytes (scalarBytes : ByteArray) : ByteArray :=
 
 def zmodToByteArray (x : ZMod p) : ByteArray :=
   let bytes := ByteArray.mk $ Array.mk $ (ByteArray.toList $ natToBytes x.val).reverse
-  bytes ++ ByteArray.mk (Array.mk (List.replicate (32 - bytes.size) 0))
+  bytes ++ ByteArray.mk (Array.mk (List.replicate (keySize - bytes.size) 0))
 
 def byteArrayToZmod (ba : ByteArray) : ZMod p :=
   let n := (ByteArray.mk $ Array.mk ba.toList.reverse).foldl (fun acc b => acc * 256 + b.toNat) 0
@@ -98,5 +100,62 @@ def scalarmult (scalarBytes : ByteArray) (point : ZMod p) : ZMod p :=
 
 def curve25519 (scalarBytes : ByteArray) (point : ByteArray) : ByteArray :=
   zmodToByteArray $ scalarmult scalarBytes $ byteArrayToZmod point
+
+/-
+  NIKE type classes instances for x25519
+-/
+
+def PublicKeySize := keySize
+def PrivateKeySize := keySize
+
+structure PrivateKey where
+  data : ByteArray
+
+structure PublicKey where
+  data : ByteArray
+
+instance : nike.Key PrivateKey where
+  encode : PrivateKey → ByteArray := fun (key : PrivateKey) => key.data
+  decode : ByteArray → Option PrivateKey := fun (bytes : ByteArray) => some (PrivateKey.mk bytes)
+
+instance : nike.Key PublicKey where
+  encode : PublicKey → ByteArray := fun (key : PublicKey) => key.data
+  decode : ByteArray → Option PublicKey := fun (bytes : ByteArray) => some (PublicKey.mk bytes)
+
+structure X25519Scheme
+
+def generatePrivateKey : IO PrivateKey := do
+  let mut arr := ByteArray.mkEmpty keySize
+  for _ in [0:keySize] do
+    let randomByte ← IO.rand 0 255
+    arr := arr.push (UInt8.ofNat randomByte)
+  pure { data := arr }
+
+def derivePublicKey (sk : PrivateKey) : PublicKey :=
+    PublicKey.mk $ zmodToByteArray $ (scalarmult sk.data basepoint)
+
+instance : nike.NIKE X25519Scheme where
+  PublicKeyType := PublicKey
+  PrivateKeyType := PrivateKey
+
+  generatePrivateKey : IO PrivateKey := do
+    generatePrivateKey
+
+  generateKeyPair : IO (PublicKey × PrivateKey) := do
+    let privKey ← generatePrivateKey
+    let pubKey := derivePublicKey privKey
+    pure (pubKey, privKey)
+
+  derivePublicKey (sk : PrivateKey) : PublicKey := derivePublicKey sk
+
+  groupAction (sk : PrivateKey) (pk : PublicKey) : PublicKey := PublicKey.mk $ curve25519 sk.data pk.data
+
+  privateKeySize : Nat := keySize
+  publicKeySize : Nat := keySize
+
+  encodePrivateKey : PrivateKey → ByteArray := fun (sk : PrivateKey) => nike.Key.encode sk
+  decodePrivateKey : ByteArray → Option PrivateKey := fun (bytes : ByteArray) => nike.Key.decode bytes
+  encodePublicKey : PublicKey → ByteArray := fun (pk : PublicKey) => nike.Key.encode pk
+  decodePublicKey : ByteArray → Option PublicKey := fun (bytes : ByteArray) => nike.Key.decode bytes
 
 end CryptWalker.nike.x25519pure

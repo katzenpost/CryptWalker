@@ -11,14 +11,15 @@ import CryptWalker.nike.nike
 
 namespace CryptWalker.nike.x25519
 
+def keySize : Nat := 32
 
 @[extern "curve25519"]
 opaque curve25519 : ByteArray → ByteArray → ByteArray
 
 def dh (privateKey : ByteArray) (publicKey : ByteArray) : ByteArray :=
-  if privateKey.size ≠ 32 then
+  if privateKey.size ≠ keySize then
     panic! "Private key must be 32 bytes long."
-  else if publicKey.size ≠ 32 then
+  else if publicKey.size ≠ keySize then
     panic! "Public key must be 32 bytes long."
   else
     curve25519 privateKey publicKey
@@ -75,6 +76,9 @@ instance : nike.NIKE X25519Scheme where
   derivePublicKey (sk : PrivateKey) : PublicKey := PublicKey.mk $ toPublic sk.data
 
   groupAction (sk : PrivateKey) (pk : PublicKey) : PublicKey := PublicKey.mk $ dh sk.data pk.data
+
+  privateKeySize : Nat := keySize
+  publicKeySize : Nat := keySize
 
   encodePrivateKey : PrivateKey → ByteArray := fun (sk : PrivateKey) => nike.Key.encode sk
   decodePrivateKey : ByteArray → Option PrivateKey := fun (bytes : ByteArray) => nike.Key.decode bytes

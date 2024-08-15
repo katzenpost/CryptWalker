@@ -79,8 +79,7 @@ def testAddHashTree1 : IO Unit := do
     pure ()
   IO.println s!"tree size {size} root hash {rootHash}"
 
-
-def testX25519 : IO Unit := do
+def testX25519FFI : IO Unit := do
   let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
   let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
   let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
@@ -104,7 +103,6 @@ def testPureX25519Exchange : IO Unit := do
   let bobPrivateKey := arr
   let bobPublicKey := CryptWalker.nike.x25519pure.scalarmult bobPrivateKey CryptWalker.nike.x25519pure.basepoint
   let bobSS := CryptWalker.nike.x25519pure.scalarmult bobPrivateKey $ CryptWalker.nike.x25519pure.byteArrayToZmod alicePublicKey.data
-
   let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
   let bobPublicKeyBytes := CryptWalker.nike.x25519pure.zmodToByteArray bobPublicKey
   let bobpubkey := (scheme.decodePublicKey bobPublicKeyBytes).getD CryptWalker.nike.x25519.defaultPublicKey
@@ -123,7 +121,6 @@ def testPureX25519DerivePubKey : IO Unit := do
   if pubKeyBytes != expectedPubBytes then
     panic! "public key mismatch"
 
-
 def testPureX25519BasepointDecode : IO Unit := do
   let basepoint := CryptWalker.nike.x25519pure.basepoint
   let basepoint2hex := "0900000000000000000000000000000000000000000000000000000000000000"
@@ -137,6 +134,19 @@ def testPureX25519BasepointDecode : IO Unit := do
   if basepoint2bytes != basepoint2bytes then
     panic! "basepoint decoding to hex failure"
 
+def testX25519 : IO Unit := do
+  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519pure.X25519Scheme)
+  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
+  let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
+
+  let bobSharedSecret := scheme.groupAction bobPrivateKey alicePublicKey
+  let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
+
+  if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
+    IO.println "shared secrets match!"
+  else
+    panic! "testX25519 failed!"
+
 
 def main : IO Unit := do
   testUntilSet
@@ -144,6 +154,7 @@ def main : IO Unit := do
   testAddHashTree
   testAddHashTree1
   testMerkleHashTreeInclusionProof
-  --testX25519
+  testX25519FFI
   testPureX25519BasepointDecode
   testPureX25519DerivePubKey
+  testX25519
