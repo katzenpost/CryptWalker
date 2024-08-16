@@ -1,21 +1,17 @@
-name: CI
+name: Build
 on:
-  push:
-    branches: ["main"]
   pull_request:
-    branches: ["main"]
+  push:
+    branches:
+      - master
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
-      - name: "run `lean-action` with `lake test`" 
-        id: lean-action
-        uses: leanprover/lean-action@v1
-        continue-on-error: true
+      - uses: leanprover/lean-action@v1
         with:
-          test: true
-      - name: log `lean-action` `test-status` output
-        env:
-          TEST_STATUS: ${{ steps.lean-action.outputs.test-status }}
-        run: echo "Test status: $TEST_STATUS"
+          check-reservoir-eligibility: true
