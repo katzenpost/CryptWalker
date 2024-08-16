@@ -1,28 +1,35 @@
 # Crypt Walker
 
-Lean library for modeling cryptographic protocols and proving cryptographic protocol properties.
-
-## Status
-
-Work-in-progress.
+A cryptographic library for Lean.
 
 
-## Running
+## abstract
 
-Build:
-
-```bash
-lake build
-````
-
-Test:
-
-```bash
-lake test
-````
+Implement cryptographic protocols and prove protocol properties.
 
 
-## License
+## cryptographic primitives
+
+| NIKE: Non-Interactive Key Exchange |
+|:---:|
+* X25519
+* X25519 FFI
+
+| KEM: Key Encapsulation Method |
+|:---:|
+* work-in-progress
+
+| SIGN: Cryptographic Signature Scheme |
+|:---:|
+* work-in-progress
+
+| PRF: Pseuodo Random Function |
+|:---:|
+* SHA1
+* SHA256
+
+
+## licensing
 
 AGPLv3
 
