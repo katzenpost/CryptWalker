@@ -8,7 +8,6 @@ set_option diagnostics true
 require mathlib from git "https://github.com/leanprover-community/mathlib4"@"master"
 require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
 require LeanSha from git "https://github.com/Ferinko/LeanSha" @ "master"
-require LSpec from git "https://github.com/argumentcomputer/LSpec"@"main"
 
 package «crypt_walker» where
   srcDir := "Lean"
