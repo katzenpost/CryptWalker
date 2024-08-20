@@ -28,18 +28,18 @@ def clampScalarBytes (scalarBytes : ByteArray) : ByteArray :=
   let clamped2 := clamped1.set! 55 (clamped1.get! 55 ||| 0x80)
   clamped2
 
-def zmodToByteArray (x : ZMod p) : ByteArray :=
+def fromField (x : ZMod p) : ByteArray :=
   let bytes := ByteArray.mk $ Array.mk $ (ByteArray.toList $ natToBytes x.val).reverse
   bytes ++ ByteArray.mk (Array.mk (List.replicate (keySize - bytes.size) 0))
 
-def byteArrayToZmod (ba : ByteArray) : ZMod p :=
+def toField (ba : ByteArray) : ZMod p :=
   let n := (ByteArray.mk $ Array.mk ba.toList.reverse).foldl (fun acc b => acc * 256 + b.toNat) 0
   n
 
 def clampScalar (scalar : ZMod p) : ZMod p :=
-  let b := zmodToByteArray scalar
+  let b := fromField scalar
   let newB := clampScalarBytes b
-  byteArrayToZmod newB
+  toField newB
 
 structure LadderState :=
   (x1 : ZMod p)
@@ -70,7 +70,7 @@ def montgomery_step (s : LadderState) : LadderState :=
   { s with x2 := x2, z2 := z2, x3 := x3, z3 := z3 }
 
 def montgomery_ladder (scalar : ZMod p) (point : ZMod p) : LadderState :=
-  let e : ByteArray := zmodToByteArray scalar
+  let e : ByteArray := fromField scalar
   let initState : LadderState := {
     x1 := point,
     x2 := 1,
@@ -96,12 +96,12 @@ def montgomery_ladder (scalar : ZMod p) (point : ZMod p) : LadderState :=
   { finalState with x2 := x2, x3 := x3, z2 := z2, z3 := z3 }
 
 def scalarmult (scalarBytes : ByteArray) (point : ZMod p) : ZMod p :=
-  let clampedScalar := byteArrayToZmod $ clampScalarBytes scalarBytes
+  let clampedScalar := toField $ clampScalarBytes scalarBytes
   let finalState := montgomery_ladder clampedScalar point
   finalState.x2 * finalState.z2⁻¹
 
 def curve448 (scalarBytes : ByteArray) (point : ByteArray) : ByteArray :=
-  zmodToByteArray $ scalarmult scalarBytes $ byteArrayToZmod point
+  fromField $ scalarmult scalarBytes $ toField point
 
 /-
   NIKE type classes instances for x448
@@ -134,7 +134,7 @@ def generatePrivateKey : IO PrivateKey := do
   pure { data := arr }
 
 def derivePublicKey (sk : PrivateKey) : PublicKey :=
-    PublicKey.mk $ zmodToByteArray $ (scalarmult sk.data basepoint)
+    PublicKey.mk $ fromField $ (scalarmult sk.data basepoint)
 
 instance : nike.NIKE X448Scheme where
   PublicKeyType := PublicKey

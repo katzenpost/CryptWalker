@@ -103,13 +103,13 @@ def testPureX25519Exchange : IO Unit := do
     arr := arr.push (UInt8.ofNat randomByte)
   let bobPrivateKey := arr
   let bobPublicKey := CryptWalker.nike.x25519pure.scalarmult bobPrivateKey CryptWalker.nike.x25519pure.basepoint
-  let bobSS := CryptWalker.nike.x25519pure.scalarmult bobPrivateKey $ CryptWalker.nike.x25519pure.byteArrayToZmod alicePublicKey.data
+  let bobSS := CryptWalker.nike.x25519pure.scalarmult bobPrivateKey $ CryptWalker.nike.x25519pure.toField alicePublicKey.data
   let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
-  let bobPublicKeyBytes := CryptWalker.nike.x25519pure.zmodToByteArray bobPublicKey
+  let bobPublicKeyBytes := CryptWalker.nike.x25519pure.fromField bobPublicKey
   let bobpubkey := (scheme.decodePublicKey bobPublicKeyBytes).getD CryptWalker.nike.x25519.defaultPublicKey
   let aliceSS := scheme.groupAction alicePrivateKey bobpubkey
 
-  if (CryptWalker.nike.x25519pure.zmodToByteArray bobSS) != aliceSS.data then
+  if (CryptWalker.nike.x25519pure.fromField bobSS) != aliceSS.data then
     panic! "shared secrets mismatch"
 
 def testPureX25519DerivePubKey : IO Unit := do
@@ -117,7 +117,7 @@ def testPureX25519DerivePubKey : IO Unit := do
   let publicKeyHex := "f5ea54714e6ebfbce3d9073173261ca4ea50a15066ae33461bae83780cf51c43"
   let privKeyBytes : ByteArray := (hexStringToByteArray privateKeyHex).getD ByteArray.empty
   let pubKey := CryptWalker.nike.x25519pure.scalarmult privKeyBytes CryptWalker.nike.x25519pure.basepoint
-  let pubKeyBytes := CryptWalker.nike.x25519pure.zmodToByteArray pubKey
+  let pubKeyBytes := CryptWalker.nike.x25519pure.fromField pubKey
   let expectedPubBytes := (hexStringToByteArray publicKeyHex).getD ByteArray.empty
   if pubKeyBytes != expectedPubBytes then
     panic! "public key mismatch"
@@ -126,10 +126,10 @@ def testPureX25519BasepointDecode : IO Unit := do
   let basepoint := CryptWalker.nike.x25519pure.basepoint
   let basepoint2hex := "0900000000000000000000000000000000000000000000000000000000000000"
   let basepoint2bytes := (hexStringToByteArray basepoint2hex).getD ByteArray.empty
-  let basepoint2 := CryptWalker.nike.x25519pure.byteArrayToZmod basepoint2bytes
+  let basepoint2 := CryptWalker.nike.x25519pure.toField basepoint2bytes
   if basepoint.val != basepoint2.val then
     panic! "incorrectly decoded basepoint"
-  let basepoint3bytes := CryptWalker.nike.x25519pure.zmodToByteArray basepoint
+  let basepoint3bytes := CryptWalker.nike.x25519pure.fromField basepoint
   IO.println s!"expected hex {basepoint2bytes}"
   IO.println s!"computed hex {basepoint3bytes}"
   if basepoint2bytes != basepoint2bytes then
@@ -159,7 +159,7 @@ def testX448 : IO Unit := do
   if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
     IO.println "shared secrets match!"
   else
-    panic! "testX failed!"
+    panic! "testX448 failed!"
 
 def testX448KATs : IO Unit := do
   let vectors := #[
