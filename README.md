@@ -12,6 +12,7 @@ Implement cryptographic protocols and prove protocol properties.
 
 | NIKE: Non-Interactive Key Exchange |
 |:---:|
+* X448
 * X25519
 * X25519 FFI
 
