@@ -9,6 +9,7 @@ import CryptWalker.nike.x25519
 import CryptWalker.nike.x25519ffi
 import CryptWalker.nike.x448
 import CryptWalker.nike.x41417
+import CryptWalker.kem.adapter
 
 instance : BEq ByteArray where
   beq a b := a.data = b.data
@@ -204,6 +205,18 @@ def testX41417 : IO Unit := do
     panic! "testX41417 failed!"
 
 
+def testX25519AsKEM : IO Unit := do
+  let kemInstance := inferInstanceAs (CryptWalker.kem.kem.KEM (CryptWalker.kem.adapter.Adapter CryptWalker.nike.x25519.X25519Scheme))
+  let (alicePublicKey, alicePrivateKey) ← kemInstance.generateKeyPair
+  let (ciphertext, bobSharedSecret) ← kemInstance.encapsulate alicePublicKey
+  let aliceSharedSecret := kemInstance.decapsulate alicePrivateKey ciphertext
+  if bobSharedSecret == aliceSharedSecret then
+    IO.println "X25519 as KEM shared secrets match!"
+  else
+    panic! "testX25519AsKEM failed!"
+
+
+
 def main : IO Unit := do
   -- hash tree tests
   testUntilSet
@@ -212,10 +225,13 @@ def main : IO Unit := do
   testAddHashTree1
   testMerkleHashTreeInclusionProof
 
--- ecdh tests
+-- ECDH tests
   testX25519FFI
   testX25519BasepointDecode
   testX25519DerivePubKey
   testX25519
   testX448
   testX41417
+
+-- KEM tests
+  testX25519AsKEM
