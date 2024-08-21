@@ -1,74 +1,30 @@
-import Batteries.Classes.SatisfiesM
+/-
+SPDX-FileCopyrightText: Copyright (C) 2024 David Stainton
+SPDX-License-Identifier: AGPL-3.0-only
+ -/
 
-/- KEM spec written initially by Mario Carneiro -/
+namespace CryptWalker.kem.kem
 
-structure KEMSpec where
-  State : Type
-  PublicKey : Type
-  PrivateKey : Type
-  Ciphertext : Type
-  Plaintext : Type
-  decap : PrivateKey → Ciphertext → StateM State Plaintext
-  encap : PublicKey → StateM State (Ciphertext × Plaintext)
-  init : State
-  generate : StateM State (Σ' (pk : PublicKey), {sk : PrivateKey //
-    ∀ s, let (c, k) := (encap pk s).1; ∀ s, (decap sk c s).1 = k})
-  [plaintextEq : DecidableEq Plaintext]
+class Key (key : Type) where
+  encode : key → ByteArray
+  decode : ByteArray → Option key
 
-instance : Inhabited KEMSpec := ⟨{
-  State := Unit
-  PublicKey := Unit
-  PrivateKey := Unit
-  Ciphertext := Unit
-  Plaintext := Unit
-  decap := fun _ _ => pure ()
-  encap := fun _ => pure ((), ())
-  init := ()
-  generate := pure ⟨(), (), fun () () => rfl⟩
-  plaintextEq := inferInstance
-}⟩
+class PrivateKey (privkey : Type) extends Key privkey
 
-opaque kemSpec : KEMSpec
+class PublicKey (pubkey : Type) extends Key pubkey
 
-instance : Inhabited kemSpec.State := ⟨kemSpec.init⟩
+class KEM (scheme : Type) where
+  PublicKeyType : Type
+  PrivateKeyType : Type
 
-abbrev KEMM := StateM kemSpec.State
+  generateKeyPair : IO (PublicKeyType × PrivateKeyType)
+  encapsulate : PublicKeyType → IO (ByteArray × ByteArray)
+  decapsulate : PrivateKeyType → ByteArray → ByteArray
+  privateKeySize : Nat
+  publicKeySize : Nat
+  encodePrivateKey : PrivateKeyType → ByteArray
+  decodePrivateKey : ByteArray → Option PrivateKeyType
+  encodePublicKey : PublicKeyType → ByteArray
+  decodePublicKey : ByteArray → Option PublicKeyType
 
-def PublicKey : Type := kemSpec.PublicKey
-instance : Inhabited PublicKey := ⟨(kemSpec.generate default).1.1⟩
-
-def PrivateKey : Type := kemSpec.PrivateKey
-instance : Inhabited PrivateKey := ⟨(kemSpec.generate default).1.2.1⟩
-
-def Ciphertext : Type := kemSpec.Ciphertext
-instance : Inhabited Ciphertext :=
-  ⟨(kemSpec.encap (kemSpec.generate default).1.1 default).1.1⟩
-
-def Plaintext : Type := kemSpec.Plaintext
-instance : Inhabited Plaintext :=
-  ⟨(kemSpec.encap (kemSpec.generate default).1.1 default).1.2⟩
-
-def generate : KEMM (PublicKey × PrivateKey) := fun s =>
-  let (⟨pk, sk, _⟩, s) := kemSpec.generate s
-  ((pk, sk), s)
-
-def encap : PublicKey → KEMM (Ciphertext × Plaintext) := kemSpec.encap
-
-def decap : PrivateKey → Ciphertext → KEMM Plaintext := kemSpec.decap
-
-instance : DecidableEq Plaintext := kemSpec.plaintextEq
-
-def IsEncapsulation (sk : PrivateKey) (c : Ciphertext) (k : Plaintext) :=
-  ∀ s, (decap sk c s).1 = k
-
-def KeyPair (pk : PublicKey) (sk : PrivateKey) :=
-  ∀ s, let (c, k) := (encap pk s).1; IsEncapsulation sk c k
-
-theorem generate_ok : SatisfiesM (fun (pk, sk) => KeyPair pk sk) generate := by
-  simp [generate]; intro s; split; rename_i h1 s1 _; exact h1
-
-theorem encap_ok {pk sk} (h : KeyPair pk sk) :
-    SatisfiesM (fun (c, k) => IsEncapsulation sk c k) (encap pk) := by simpa using h
-
-theorem decap_ok {sk c k} (h : IsEncapsulation sk c k) :
-    SatisfiesM (fun k' => k' = k) (decap sk c) := by simpa using h
+end CryptWalker.kem.kem

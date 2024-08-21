@@ -21,7 +21,7 @@ import CryptWalker.util.UInt32
 import CryptWalker.hash.Hash
 import CryptWalker.util.Serial
 
-namespace CryptWalker.hash.sha2.Sha2
+namespace CryptWalker.hash.Sha2
 
 open CryptWalker.hash.Hash
 open CryptWalker.util.ByteArray
@@ -337,4 +337,4 @@ instance [Monad M] [MonadStateOf Sha256.Rng M]: MonadMixRng Sha256.Digest M wher
   mix := Sha256.Rng.mix
 
 
-end CryptWalker.hash.sha2.Sha2
+end CryptWalker.hash.Sha2
