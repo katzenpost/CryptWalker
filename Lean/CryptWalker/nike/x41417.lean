@@ -13,7 +13,7 @@ import CryptWalker.nike.nike
 
 namespace CryptWalker.nike.x41417
 
-set_option exponentiation.threshold 1000
+set_option exponentiation.threshold 500
 
 def p : ℕ := 2^414 - 17
 def keySize : ℕ := 52

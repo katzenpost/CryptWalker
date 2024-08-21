@@ -11,7 +11,7 @@ import CryptWalker.util.newnat
 import CryptWalker.util.newhex
 import CryptWalker.nike.nike
 
-namespace CryptWalker.nike.x25519pure
+namespace CryptWalker.nike.x25519
 
 def p : ℕ := 2^255 - 19
 def basepoint : ZMod p := 9
@@ -158,4 +158,4 @@ instance : nike.NIKE X25519Scheme where
   encodePublicKey : PublicKey → ByteArray := fun (pk : PublicKey) => nike.Key.encode pk
   decodePublicKey : ByteArray → Option PublicKey := fun (bytes : ByteArray) => nike.Key.decode bytes
 
-end CryptWalker.nike.x25519pure
+end CryptWalker.nike.x25519

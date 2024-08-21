@@ -3,12 +3,15 @@ import Lean
 import Mathlib.Data.ByteArray
 
 import CryptWalker.protocol.merkle_tree
-import CryptWalker.nike.x25519
+
 import CryptWalker.nike.nike
-import CryptWalker.nike.x25519pure
+import CryptWalker.nike.x25519
+import CryptWalker.nike.x25519ffi
 import CryptWalker.nike.x448
 import CryptWalker.nike.x41417
 
+instance : BEq ByteArray where
+  beq a b := a.data = b.data
 
 def testUntilSet : IO Unit := do
   let testCases := [
@@ -81,8 +84,11 @@ def testAddHashTree1 : IO Unit := do
     pure ()
   IO.println s!"tree size {size} root hash {rootHash}"
 
+
+-- ECDH tests
+
 def testX25519FFI : IO Unit := do
-  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
+  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519ffi.X25519Scheme)
   let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
   let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
 
@@ -94,50 +100,51 @@ def testX25519FFI : IO Unit := do
   else
     panic! "testX25519 failed!"
 
-def testPureX25519Exchange : IO Unit := do
+def testX25519Exchange : IO Unit := do
   let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
   let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
-
   let mut arr := ByteArray.mkEmpty 32
   for _ in [0:32] do
     let randomByte ← IO.rand 0 255
     arr := arr.push (UInt8.ofNat randomByte)
   let bobPrivateKey := arr
-  let bobPublicKey := CryptWalker.nike.x25519pure.scalarmult bobPrivateKey CryptWalker.nike.x25519pure.basepoint
-  let bobSS := CryptWalker.nike.x25519pure.scalarmult bobPrivateKey $ CryptWalker.nike.x25519pure.toField alicePublicKey.data
+  let bobPublicKey := CryptWalker.nike.x25519.scalarmult bobPrivateKey CryptWalker.nike.x25519.basepoint
+  let bobSS := CryptWalker.nike.x25519.scalarmult bobPrivateKey $ CryptWalker.nike.x25519.toField alicePublicKey.data
   let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
-  let bobPublicKeyBytes := CryptWalker.nike.x25519pure.fromField bobPublicKey
-  let bobpubkey := (scheme.decodePublicKey bobPublicKeyBytes).getD CryptWalker.nike.x25519.defaultPublicKey
-  let aliceSS := scheme.groupAction alicePrivateKey bobpubkey
+  let bobPublicKeyBytes := CryptWalker.nike.x25519.fromField bobPublicKey
+  let bobpubkeyMaybe := (scheme.decodePublicKey bobPublicKeyBytes)
+  match bobpubkeyMaybe with
+  | none => panic! "wtf"
+  | some bobpubkey =>
+    let aliceSS := scheme.groupAction alicePrivateKey bobpubkey
+    if (CryptWalker.nike.x25519.fromField bobSS) != aliceSS.data then
+      panic! "shared secrets mismatch"
 
-  if (CryptWalker.nike.x25519pure.fromField bobSS) != aliceSS.data then
-    panic! "shared secrets mismatch"
-
-def testPureX25519DerivePubKey : IO Unit := do
+def testX25519DerivePubKey : IO Unit := do
   let privateKeyHex := "951c011657648c76090885822284c461e3c84bf66b8842adb438334499922890"
   let publicKeyHex := "f5ea54714e6ebfbce3d9073173261ca4ea50a15066ae33461bae83780cf51c43"
   let privKeyBytes : ByteArray := (hexStringToByteArray privateKeyHex).getD ByteArray.empty
-  let pubKey := CryptWalker.nike.x25519pure.scalarmult privKeyBytes CryptWalker.nike.x25519pure.basepoint
-  let pubKeyBytes := CryptWalker.nike.x25519pure.fromField pubKey
+  let pubKey := CryptWalker.nike.x25519.scalarmult privKeyBytes CryptWalker.nike.x25519.basepoint
+  let pubKeyBytes := CryptWalker.nike.x25519.fromField pubKey
   let expectedPubBytes := (hexStringToByteArray publicKeyHex).getD ByteArray.empty
   if pubKeyBytes != expectedPubBytes then
     panic! "public key mismatch"
 
-def testPureX25519BasepointDecode : IO Unit := do
-  let basepoint := CryptWalker.nike.x25519pure.basepoint
+def testX25519BasepointDecode : IO Unit := do
+  let basepoint := CryptWalker.nike.x25519.basepoint
   let basepoint2hex := "0900000000000000000000000000000000000000000000000000000000000000"
   let basepoint2bytes := (hexStringToByteArray basepoint2hex).getD ByteArray.empty
-  let basepoint2 := CryptWalker.nike.x25519pure.toField basepoint2bytes
+  let basepoint2 := CryptWalker.nike.x25519.toField basepoint2bytes
   if basepoint.val != basepoint2.val then
     panic! "incorrectly decoded basepoint"
-  let basepoint3bytes := CryptWalker.nike.x25519pure.fromField basepoint
+  let basepoint3bytes := CryptWalker.nike.x25519.fromField basepoint
   IO.println s!"expected hex {basepoint2bytes}"
   IO.println s!"computed hex {basepoint3bytes}"
   if basepoint2bytes != basepoint2bytes then
     panic! "basepoint decoding to hex failure"
 
 def testX25519 : IO Unit := do
-  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519pure.X25519Scheme)
+  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
   let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
   let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
 
@@ -145,7 +152,7 @@ def testX25519 : IO Unit := do
   let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
 
   if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
-    IO.println "shared secrets match!"
+    IO.println "X25519 shared secrets match!"
   else
     panic! "testX25519 failed!"
 
@@ -158,7 +165,7 @@ def testX448 : IO Unit := do
   let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
 
   if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
-    IO.println "shared secrets match!"
+    IO.println "X448 shared secrets match!"
   else
     panic! "testX448 failed!"
 
@@ -192,42 +199,23 @@ def testX41417 : IO Unit := do
   let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
 
   if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
-    IO.println "shared secrets match!"
+    IO.println "X41417 shared secrets match!"
   else
     panic! "testX41417 failed!"
 
 
 def main : IO Unit := do
+  -- hash tree tests
   testUntilSet
   testMerkleHashTreeFromList
   testAddHashTree
   testAddHashTree1
   testMerkleHashTreeInclusionProof
+
+-- ecdh tests
   testX25519FFI
-  testPureX25519BasepointDecode
-  testPureX25519DerivePubKey
+  testX25519BasepointDecode
+  testX25519DerivePubKey
   testX25519
   testX448
   testX41417
-
-
-/-
-def runX25519Benchmarks : IO Unit := do
-  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519pure.X25519Scheme)
-  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
-  let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
-
-  let bobSharedSecret := scheme.groupAction bobPrivateKey alicePublicKey
-  let mut i := 0
-  while i < 10000 do
-    let _ := scheme.groupAction alicePrivateKey bobPublicKey
-    i := i + 1
-
-  let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
-  if scheme.encodePublicKey bobSharedSecret != scheme.encodePublicKey aliceSharedSecret then
-    panic! "testX25519 failed!"
-
-
-def main : IO Unit := do
-  runX25519Benchmarks
--/

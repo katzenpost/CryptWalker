@@ -9,7 +9,7 @@ https://github.com/haskell-crypto/cryptonite/blob/master/Crypto/PubKey/Curve2551
 import Mathlib.Data.ByteArray
 import CryptWalker.nike.nike
 
-namespace CryptWalker.nike.x25519
+namespace CryptWalker.nike.x25519ffi
 
 def keySize : Nat := 32
 
@@ -44,10 +44,6 @@ structure PrivateKey where
 
 structure PublicKey where
   data : ByteArray
-
-def defaultPublicKey : PublicKey :=
-  let defaultPrivateKey : ByteArray := ByteArray.mk (Array.mk (List.replicate 32 (0 : UInt8)))
-  PublicKey.mk (toPublic defaultPrivateKey)
 
 instance : nike.Key PrivateKey where
   encode : PrivateKey → ByteArray := fun (key : PrivateKey) => key.data
@@ -85,4 +81,4 @@ instance : nike.NIKE X25519Scheme where
   encodePublicKey : PublicKey → ByteArray := fun (pk : PublicKey) => nike.Key.encode pk
   decodePublicKey : ByteArray → Option PublicKey := fun (bytes : ByteArray) => nike.Key.decode bytes
 
-end CryptWalker.nike.x25519
+end CryptWalker.nike.x25519ffi
