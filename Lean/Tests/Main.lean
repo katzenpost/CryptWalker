@@ -7,6 +7,7 @@ import CryptWalker.nike.x25519
 import CryptWalker.nike.nike
 import CryptWalker.nike.x25519pure
 import CryptWalker.nike.x448
+import CryptWalker.nike.x41417
 
 
 def testUntilSet : IO Unit := do
@@ -182,6 +183,20 @@ def testX448KATs : IO Unit := do
   IO.println "All KATs passed for X448!"
 
 
+def testX41417 : IO Unit := do
+  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x41417.X41417Scheme)
+  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
+  let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
+
+  let bobSharedSecret := scheme.groupAction bobPrivateKey alicePublicKey
+  let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
+
+  if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
+    IO.println "shared secrets match!"
+  else
+    panic! "testX41417 failed!"
+
+
 def main : IO Unit := do
   testUntilSet
   testMerkleHashTreeFromList
@@ -193,6 +208,7 @@ def main : IO Unit := do
   testPureX25519DerivePubKey
   testX25519
   testX448
+  testX41417
 
 
 /-

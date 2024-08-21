@@ -49,3 +49,11 @@ def hexStringToByteArray (s : String) : Option ByteArray :=
     match hexStringToByteArrayAux s 0 [] with
     | some bytes => some (ByteArray.mk (Array.mk bytes))
     | none => none
+
+def infalliableHexStringToByteArray (s : String) : ByteArray :=
+  if s.length % 2 ≠ 0 then
+    panic! "Hex string length must be even."
+  else
+    match hexStringToByteArrayAux s 0 [] with
+    | some bytes => ByteArray.mk (Array.mk bytes)
+    | none => panic! "Failed to convert hex string to ByteArray."
