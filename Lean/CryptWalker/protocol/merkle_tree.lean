@@ -4,7 +4,7 @@
 -/
 
 import Mathlib.Data.ByteArray
-import Lean.Data.HashMap
+import Std.Data.HashMap
 import Init.Data.ToString
 
 import CryptWalker.hash.sha1
