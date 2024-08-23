@@ -213,11 +213,15 @@ def shiftR1 (p : Nat × Nat) : Nat × Nat :=
 def untilSet (fst snd : Nat) : Nat × Nat :=
   match fst, snd with
   | 0, _ => (0, snd)
-  | f, s => if f % 2 != 0 then (f, s) else untilSet (f >>> 1) (s >>> 1)
-  termination_by fst
-  decreasing_by
-  sorry
-
+  | f, s =>
+    if h2 : f % 2 != 0 then
+      (f,s)
+    else
+      have : f >>> 1 < f := by
+        rw [Nat.shiftRight_eq_div_pow]
+        sorry
+      untilSet (f >>> 1) (s >>> 1)
+termination_by fst
 
 def verifyInclusionProof (α : Type) [Hashable α] (settings : Settings α) (leafHash : ByteArray) (rootHash : ByteArray) (proof : InclusionProof) : Bool :=
   if proof.index >= proof.treeSize then false else
