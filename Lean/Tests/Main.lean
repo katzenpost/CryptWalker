@@ -6,7 +6,6 @@ import CryptWalker.protocol.merkle_tree
 
 import CryptWalker.nike.nike
 import CryptWalker.nike.x25519
-import CryptWalker.nike.x25519ffi
 import CryptWalker.nike.x448
 import CryptWalker.nike.x41417
 import CryptWalker.kem.adapter
@@ -87,19 +86,6 @@ def testAddHashTree1 : IO Unit := do
 
 
 -- ECDH tests
-
-def testX25519FFI : IO Unit := do
-  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519ffi.X25519Scheme)
-  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
-  let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
-
-  let bobSharedSecret := scheme.groupAction bobPrivateKey alicePublicKey
-  let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
-
-  if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
-    IO.println "shared secrets match!"
-  else
-    panic! "testX25519 failed!"
 
 def testX25519Exchange : IO Unit := do
   let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
@@ -226,7 +212,6 @@ def main : IO Unit := do
   testMerkleHashTreeInclusionProof
 
 -- ECDH tests
-  testX25519FFI
   testX25519BasepointDecode
   testX25519DerivePubKey
   testX25519
