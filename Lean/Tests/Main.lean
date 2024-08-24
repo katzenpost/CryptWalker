@@ -9,9 +9,16 @@ import CryptWalker.nike.x25519
 import CryptWalker.nike.x448
 import CryptWalker.nike.x41417
 import CryptWalker.kem.adapter
+import CryptWalker.kem.schemes
+
+open CryptWalker.kem.adapter
+open CryptWalker.kem.schemes
 
 instance : BEq ByteArray where
   beq a b := a.data = b.data
+
+
+-- Merkle hash tree tests
 
 def testUntilSet : IO Unit := do
   let testCases := [
@@ -85,7 +92,7 @@ def testAddHashTree1 : IO Unit := do
   IO.println s!"tree size {size} root hash {rootHash}"
 
 
--- ECDH tests
+-- NIKE tests
 
 def testX25519Exchange : IO Unit := do
   let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
@@ -176,7 +183,6 @@ def testX448KATs : IO Unit := do
       panic! s!"Mismatch in KAT: expected {expectedHex}, got {result}"
   IO.println "All KATs passed for X448!"
 
-
 def testX41417 : IO Unit := do
   let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x41417.X41417Scheme)
   let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
@@ -191,11 +197,12 @@ def testX41417 : IO Unit := do
     panic! "testX41417 failed!"
 
 
+-- KEM tests
+
 def testX25519AsKEM : IO Unit := do
-  let kemInstance := inferInstanceAs (CryptWalker.kem.kem.KEM (CryptWalker.kem.adapter.Adapter CryptWalker.nike.x25519.X25519Scheme))
-  let (alicePublicKey, alicePrivateKey) ← kemInstance.generateKeyPair
-  let (ciphertext, bobSharedSecret) ← kemInstance.encapsulate alicePublicKey
-  let aliceSharedSecret := kemInstance.decapsulate alicePrivateKey ciphertext
+  let (alicePublicKey, alicePrivateKey) ← X25519AsKEM.generateKeyPair
+  let (ciphertext, bobSharedSecret) ← X25519AsKEM.encapsulate X25519Adapter alicePublicKey
+  let aliceSharedSecret := X25519AsKEM.decapsulate X25519Adapter alicePrivateKey ciphertext
   if bobSharedSecret == aliceSharedSecret then
     IO.println "X25519 as KEM shared secrets match!"
   else
@@ -204,14 +211,14 @@ def testX25519AsKEM : IO Unit := do
 
 
 def main : IO Unit := do
-  -- hash tree tests
+  -- Merkle hash tree tests
   testUntilSet
   testMerkleHashTreeFromList
   testAddHashTree
   testAddHashTree1
   testMerkleHashTreeInclusionProof
 
--- ECDH tests
+-- NIKE tests
   testX25519BasepointDecode
   testX25519DerivePubKey
   testX25519

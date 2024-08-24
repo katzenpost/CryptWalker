@@ -18,8 +18,8 @@ class KEM (scheme : Type) where
   PrivateKeyType : Type
 
   generateKeyPair : IO (PublicKeyType × PrivateKeyType)
-  encapsulate : PublicKeyType → IO (ByteArray × ByteArray)
-  decapsulate : PrivateKeyType → ByteArray → ByteArray
+  encapsulate : scheme → PublicKeyType → IO (ByteArray × ByteArray)
+  decapsulate : scheme → PrivateKeyType → ByteArray → ByteArray
   privateKeySize : Nat
   publicKeySize : Nat
   encodePrivateKey : PrivateKeyType → ByteArray

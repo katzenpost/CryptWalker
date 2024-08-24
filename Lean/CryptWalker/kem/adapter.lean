@@ -5,7 +5,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import CryptWalker.kem.kem
 import CryptWalker.nike.nike
-import CryptWalker.hash.Sha2
 
 -- NIKE to KEM adapter: a hashed ElGamal construction
 
@@ -29,6 +28,7 @@ instance : kem.Key PublicKey where
 
 structure Adapter (α : Type) [CryptWalker.nike.nike.NIKE α] where
   nikeScheme : α
+  hash : ByteArray → ByteArray
 
 instance {α : Type} [inst : CryptWalker.nike.nike.NIKE α] : CryptWalker.kem.kem.KEM (Adapter α) where
   PublicKeyType := PublicKey
@@ -42,7 +42,7 @@ instance {α : Type} [inst : CryptWalker.nike.nike.NIKE α] : CryptWalker.kem.ke
     let privkeyData := NIKE.encodePrivateKey privkey
     pure (PublicKey.mk pubkeyData, PrivateKey.mk privkeyData)
 
-  encapsulate (theirPubKey : PublicKey) : IO (ByteArray × ByteArray) := do
+  encapsulate (adapterInstance : Adapter α) (theirPubKey : PublicKey) : IO (ByteArray × ByteArray) := do
     let (pubkey, privkey) ← NIKE.generateKeyPair
     let theirNikePubKeyOpt : Option (NIKE.PublicKeyType α) := NIKE.decodePublicKey theirPubKey.data
     match theirNikePubKeyOpt with
@@ -52,11 +52,11 @@ instance {α : Type} [inst : CryptWalker.nike.nike.NIKE α] : CryptWalker.kem.ke
       let ss1Bytes := NIKE.encodePublicKey ss1
       let pubkeyBytes := NIKE.encodePublicKey pubkey
       let blob := ByteArray.append ss1Bytes $ ByteArray.append theirPubKey.data pubkeyBytes
-      let ss2 := CryptWalker.hash.Sha2.Sha256.Digest.toBytes $ CryptWalker.hash.Sha2.Sha256.hash blob
+      let ss2 := adapterInstance.hash blob
       let ciphertext := NIKE.encodePublicKey pubkey
       pure (ciphertext, ss2)
 
-  decapsulate (privKey : PrivateKey) (ct : ByteArray) : ByteArray :=
+  decapsulate (adapterInstance : Adapter α) (privKey : PrivateKey) (ct : ByteArray) : ByteArray :=
     let theirPubKeyOpt : Option (NIKE.PublicKeyType α) := NIKE.decodePublicKey ct
     match theirPubKeyOpt with
     | none => panic! "adapter decap failure: failed to decode NIKE public key"
@@ -72,7 +72,7 @@ instance {α : Type} [inst : CryptWalker.nike.nike.NIKE α] : CryptWalker.kem.ke
         let theirPubKeyBytes := NIKE.encodePublicKey theirPubKey
         let b := ByteArray.append myPubKeyBytes theirPubKeyBytes
         let blob := ByteArray.append a b
-        CryptWalker.hash.Sha2.Sha256.Digest.toBytes $ CryptWalker.hash.Sha2.Sha256.hash blob
+        adapterInstance.hash blob
 
   privateKeySize := inst.privateKeySize
   publicKeySize := inst.publicKeySize
