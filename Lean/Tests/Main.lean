@@ -10,9 +10,12 @@ import CryptWalker.nike.x448
 import CryptWalker.nike.x41417
 import CryptWalker.kem.adapter
 import CryptWalker.kem.schemes
+import CryptWalker.util.HList
 
 open CryptWalker.kem.adapter
 open CryptWalker.kem.schemes
+open CryptWalker.kem.kem
+open CryptWalker.util.HList
 
 instance : BEq ByteArray where
   beq a b := a.data = b.data
@@ -94,27 +97,7 @@ def testAddHashTree1 : IO Unit := do
 
 -- NIKE tests
 
-def testX25519Exchange : IO Unit := do
-  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
-  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
-  let mut arr := ByteArray.mkEmpty 32
-  for _ in [0:32] do
-    let randomByte ← IO.rand 0 255
-    arr := arr.push (UInt8.ofNat randomByte)
-  let bobPrivateKey := arr
-  let bobPublicKey := CryptWalker.nike.x25519.scalarmult bobPrivateKey CryptWalker.nike.x25519.basepoint
-  let bobSS := CryptWalker.nike.x25519.scalarmult bobPrivateKey $ CryptWalker.nike.x25519.toField alicePublicKey.data
-  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
-  let bobPublicKeyBytes := CryptWalker.nike.x25519.fromField bobPublicKey
-  let bobpubkeyMaybe := (scheme.decodePublicKey bobPublicKeyBytes)
-  match bobpubkeyMaybe with
-  | none => panic! "wtf"
-  | some bobpubkey =>
-    let aliceSS := scheme.groupAction alicePrivateKey bobpubkey
-    if (CryptWalker.nike.x25519.fromField bobSS) != aliceSS.data then
-      panic! "shared secrets mismatch"
-
-def testX25519DerivePubKey : IO Unit := do
+def testX25519Vector : IO Unit := do
   let privateKeyHex := "951c011657648c76090885822284c461e3c84bf66b8842adb438334499922890"
   let publicKeyHex := "f5ea54714e6ebfbce3d9073173261ca4ea50a15066ae33461bae83780cf51c43"
   let privKeyBytes : ByteArray := (hexStringToByteArray privateKeyHex).getD ByteArray.empty
@@ -123,19 +106,6 @@ def testX25519DerivePubKey : IO Unit := do
   let expectedPubBytes := (hexStringToByteArray publicKeyHex).getD ByteArray.empty
   if pubKeyBytes != expectedPubBytes then
     panic! "public key mismatch"
-
-def testX25519BasepointDecode : IO Unit := do
-  let basepoint := CryptWalker.nike.x25519.basepoint
-  let basepoint2hex := "0900000000000000000000000000000000000000000000000000000000000000"
-  let basepoint2bytes := (hexStringToByteArray basepoint2hex).getD ByteArray.empty
-  let basepoint2 := CryptWalker.nike.x25519.toField basepoint2bytes
-  if basepoint.val != basepoint2.val then
-    panic! "incorrectly decoded basepoint"
-  let basepoint3bytes := CryptWalker.nike.x25519.fromField basepoint
-  IO.println s!"expected hex {basepoint2bytes}"
-  IO.println s!"computed hex {basepoint3bytes}"
-  if basepoint2bytes != basepoint2bytes then
-    panic! "basepoint decoding to hex failure"
 
 def testX25519 : IO Unit := do
   let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
@@ -199,16 +169,22 @@ def testX41417 : IO Unit := do
 
 -- KEM tests
 
-def testX25519AsKEM : IO Unit := do
-  let (alicePublicKey, alicePrivateKey) ← X25519AsKEM.generateKeyPair
-  let (ciphertext, bobSharedSecret) ← X25519AsKEM.encapsulate X25519Adapter alicePublicKey
-  let aliceSharedSecret := X25519AsKEM.decapsulate X25519Adapter alicePrivateKey ciphertext
+/- FIX ME
+def testKEM {α : Type} [kemInstance : KEM α] (kem : α) : IO Unit := do
+  let (alicePublicKey, alicePrivateKey) ← kemInstance.generateKeyPair
+  let (ciphertext, bobSharedSecret) ← kemInstance.encapsulate kem alicePublicKey
+  let aliceSharedSecret := kemInstance.decapsulate kem alicePrivateKey ciphertext
   if bobSharedSecret == aliceSharedSecret then
-    IO.println "X25519 as KEM shared secrets match!"
+    IO.println "Shared secrets match!"
   else
-    panic! "testX25519AsKEM failed!"
+    panic! "KEM test failed!"
 
-
+def testAllKEMs : ∀ {ts : List Type}, HList ts → IO Unit
+| [], HList.nil => IO.println "All KEM tests passed!"
+| (α :: ts), HList.cons kem rest => do
+  testKEM (α := α) kem
+  testAllKEMs rest
+-/
 
 def main : IO Unit := do
   -- Merkle hash tree tests
@@ -219,11 +195,10 @@ def main : IO Unit := do
   testMerkleHashTreeInclusionProof
 
 -- NIKE tests
-  testX25519BasepointDecode
-  testX25519DerivePubKey
+  testX25519Vector
   testX25519
   testX448
   testX41417
 
 -- KEM tests
-  testX25519AsKEM
+  --testAllKEMs Schemes

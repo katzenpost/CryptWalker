@@ -129,7 +129,7 @@ instance : nike.Key PublicKey where
   encode : PublicKey → ByteArray := fun (key : PublicKey) => key.data
   decode : ByteArray → Option PublicKey := fun (bytes : ByteArray) => some (PublicKey.mk bytes)
 
-structure X41417Scheme
+class X41417Scheme
 
 def generatePrivateKey : IO PrivateKey := do
   let mut arr := ByteArray.mkEmpty keySize

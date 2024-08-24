@@ -122,8 +122,6 @@ instance : nike.Key PublicKey where
   encode : PublicKey → ByteArray := fun (key : PublicKey) => key.data
   decode : ByteArray → Option PublicKey := fun (bytes : ByteArray) => some (PublicKey.mk bytes)
 
-structure X25519Scheme
-
 def generatePrivateKey : IO PrivateKey := do
   let mut arr := ByteArray.mkEmpty keySize
   for _ in [0:keySize] do
@@ -133,6 +131,8 @@ def generatePrivateKey : IO PrivateKey := do
 
 def derivePublicKey (sk : PrivateKey) : PublicKey :=
     PublicKey.mk $ fromField $ (scalarmult sk.data basepoint)
+
+class X25519Scheme
 
 instance : nike.NIKE X25519Scheme where
   PublicKeyType := PublicKey
