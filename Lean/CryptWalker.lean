@@ -17,3 +17,4 @@ import CryptWalker.protocol.merkle_tree
 import CryptWalker.kem.kem
 import CryptWalker.kem.adapter
 import CryptWalker.kem.schemes
+import CryptWalker.sign.ed25519
