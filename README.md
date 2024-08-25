@@ -12,18 +12,23 @@ Implement cryptographic protocols and prove protocol properties.
 
 | NIKE: Non-Interactive Key Exchange |
 |:---:|
-* X41417
-* X448
+
+Classical NIKEs:
 * X25519
-* X25519 FFI
+* X448
+* X41417
 
 | KEM: Key Encapsulation Method |
 |:---:|
-* work-in-progress
+
+Classical NIKEs adapted to KEM via hashed ElGamal construction:
+* X25519
+* X448
+* X41417
 
 | SIGN: Cryptographic Signature Scheme |
 |:---:|
-* work-in-progress
+* work-in-progress: ed25519
 
 | PRF: Pseuodo Random Function |
 |:---:|
