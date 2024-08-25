@@ -5,9 +5,8 @@ open Lake DSL
 
 set_option diagnostics true
 
-require mathlib from git "https://github.com/leanprover-community/mathlib4"@"master"
-require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
-require LeanSha from git "https://github.com/Ferinko/LeanSha" @ "master"
+require "leanprover-community" / "batteries"
+require "leanprover-community" / "mathlib"
 
 package «crypt_walker» where
   srcDir := "Lean"

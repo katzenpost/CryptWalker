@@ -2,7 +2,6 @@ import CryptWalker.nike.x25519
 import CryptWalker.nike.x448
 import CryptWalker.nike.x41417
 import CryptWalker.nike.nike
-import CryptWalker.hash.sha1
 import CryptWalker.hash.Sha2
 import CryptWalker.hash.Sha512
 import CryptWalker.util.newnat
