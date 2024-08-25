@@ -27,9 +27,9 @@ structure Settings (α : Type) [Hashable α] where
   hash2 : ByteArray → ByteArray → ByteArray
 
 def sha256HashByteArraySettings : Settings ByteArray :=
-  { hash0 := CryptWalker.hash.Sha2.Sha256.Digest.toBytes $ Sha256.hash (ByteArray.empty),
-    hash1 :=  fun x => CryptWalker.hash.Sha2.Sha256.Digest.toBytes $ Sha256.hash (ByteArray.mk #[0x00] ++ x),
-    hash2 := fun x y => CryptWalker.hash.Sha2.Sha256.Digest.toBytes $ Sha256.hash (ByteArray.mk #[0x01] ++ x ++ y) }
+  { hash0 := Sha256.hash (ByteArray.empty),
+    hash1 :=  fun x => Sha256.hash (ByteArray.mk #[0x00] ++ x),
+    hash2 := fun x y => Sha256.hash (ByteArray.mk #[0x01] ++ x ++ y) }
 
 def sha1HashByteArraySettings : Settings ByteArray :=
   { hash0 := sha1hash (ByteArray.empty),

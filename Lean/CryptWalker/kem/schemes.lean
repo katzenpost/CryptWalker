@@ -19,7 +19,7 @@ open CryptWalker.util.HList
 
 namespace CryptWalker.kem.schemes
 
-def defaultHash := fun x => Sha256.Digest.toBytes $ Sha256.hash x
+def defaultHash := fun x => Sha256.hash x
 
 instance : Adapter X25519Scheme where
   hash := defaultHash
