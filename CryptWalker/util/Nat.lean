@@ -30,6 +30,19 @@ def Nat.fromUInt32Words (x: Subarray UInt32) (i: Nat := 0) (out: Nat := 0): Nat
       else out
 termination_by x.size - i
 
+-- UInt64
+
+def Nat.toUInt64Words (words: Nat) (val: Nat) (out: Array UInt64 := #[]): Array UInt64 :=
+  match words with
+  | 0 => out
+  | words + 1 => Nat.toUInt64Words words (val >>> 64) (out.push (UInt64.ofNat val))
+
+def Nat.fromUInt64Words (x: Subarray UInt64) (i: Nat := 0) (out: Nat := 0): Nat :=
+  if i < x.size then
+    Nat.fromUInt64Words x (i + 1) ((out <<< 64) ||| UInt64.toNat x[x.size - i - 1]!)
+  else out
+termination_by x.size - i
+
 /- Log2 -/
 
 partial def Nat.log2_ceil (value: Nat) (result: Nat := 0): Nat

@@ -7,7 +7,6 @@ import Mathlib.Data.ByteArray
 import Std.Data.HashMap
 import Init.Data.ToString
 
-import CryptWalker.hash.sha1
 import CryptWalker.hash.Sha2
 import CryptWalker.util.newnat
 import CryptWalker.util.newhex
@@ -27,14 +26,9 @@ structure Settings (α : Type) [Hashable α] where
   hash2 : ByteArray → ByteArray → ByteArray
 
 def sha256HashByteArraySettings : Settings ByteArray :=
-  { hash0 := CryptWalker.hash.Sha2.Sha256.Digest.toBytes $ Sha256.hash (ByteArray.empty),
-    hash1 :=  fun x => CryptWalker.hash.Sha2.Sha256.Digest.toBytes $ Sha256.hash (ByteArray.mk #[0x00] ++ x),
-    hash2 := fun x y => CryptWalker.hash.Sha2.Sha256.Digest.toBytes $ Sha256.hash (ByteArray.mk #[0x01] ++ x ++ y) }
-
-def sha1HashByteArraySettings : Settings ByteArray :=
-  { hash0 := sha1hash (ByteArray.empty),
-    hash1 :=  fun x => sha1hash (ByteArray.mk #[0x00] ++ x),
-    hash2 := fun x y => sha1hash (ByteArray.mk #[0x01] ++ x ++ y) }
+  { hash0 := Sha256.hash (ByteArray.empty),
+    hash1 :=  fun x => Sha256.hash (ByteArray.mk #[0x00] ++ x),
+    hash2 := fun x y => Sha256.hash (ByteArray.mk #[0x01] ++ x ++ y) }
 
 inductive HashTree (α : Type) where
   | empty (hash : ByteArray)

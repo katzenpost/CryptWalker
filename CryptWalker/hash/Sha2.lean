@@ -18,12 +18,10 @@ import CryptWalker.util.Hex
 import CryptWalker.util.ByteArray
 import CryptWalker.util.Nat
 import CryptWalker.util.UInt32
-import CryptWalker.hash.Hash
 import CryptWalker.util.Serial
 
 namespace CryptWalker.hash.Sha2
 
-open CryptWalker.hash.Hash
 open CryptWalker.util.ByteArray
 open CryptWalker.util.Nat
 open CryptWalker.util.UInt32
@@ -198,143 +196,11 @@ def compress (chunk: Array UInt32) (h: Digest): Digest :=
     let j := compress_loop chunk h
     Digest.add h j
 
-def hash (msg: ByteArray): Digest :=
+def hash (msg: ByteArray): ByteArray :=
   let padded := prepare msg
   let chunks := to_chunks padded
-  List.foldr compress init_hash chunks
-
-def hash_words (x: Subarray UInt32): Digest := hash (ByteArray.of_le32 x)
-
-def hash_pair (x y: Digest): Digest :=
-  let chunk := x.toArray ++ y.toArray
-  compress chunk init_hash
-
-def hash_array_array (pod: Array (Array UInt32)): Digest :=
-  let chunks :=
-    let msg := Array.foldl (fun x y => x ++ Array.map UInt32.swap_endian y) #[] pod
-    let padding_required :=
-      let rem := msg.size % 16
-      if rem == 0 then 0 else 16 - rem
-    to_chunks (msg ++ Array.mkArray padding_required 0x00)
-  List.foldr compress init_hash chunks
-
-
-structure Rng where
-  pool0: Digest
-  pool1: Digest
-  pool_used: USize
-
-def Rng.new: Rng := {
-  pool0 := Sha256.hash "Hello".toUTF8,
-  pool1 := Sha256.hash "World".toUTF8,
-  pool_used := 0
-}
-
-def Rng.step [Monad M] [MonadStateOf Rng M]: M Unit
-  := do let self <- get
-        let pool0 := Sha256.hash_pair self.pool0 self.pool1
-        let pool1 := Sha256.hash_pair pool0 self.pool1
-        set { self with
-          pool0,
-          pool1,
-          pool_used := 0
-        }
-
-def Rng.check_pool [Monad M] [MonadStateOf Rng M]: M Unit
-  := do let self <- get
-        if self.pool_used >= 8
-        then Rng.step
-        else return ()
-
-def Rng.mix [Monad M] [MonadStateOf Rng M] (val: Digest): M Unit
-  := do let self <- get
-        let p := Digest.xor self.pool0 val
-        set { self with pool0 := p }
-        Rng.step
-
-def Rng.nextUInt32 [Monad M] [MonadStateOf Rng M]: M UInt32
-  := do Rng.check_pool
-        let self <- get
-        let out := self.pool0.toArray[self.pool_used]!
-        set { self with pool_used := self.pool_used + 1 }
-        pure (UInt32.swap_endian out)
-
-def Rng.nextUInt64 [Monad M] [MonadStateOf Rng M]: M UInt64
-  := do let hi32 <- Rng.nextUInt32
-        let lo32 <- Rng.nextUInt32
-        let hi := UInt64.ofNat (UInt32.toNat hi32)
-        let lo := UInt64.ofNat (UInt32.toNat lo32)
-        return (hi <<< 32) ||| lo
-
-
-namespace Examples
-
-def sha_ex_1_in: ByteArray := "abc".toUTF8
-def sha_ex_1_out: Digest := Digest.ofArray #[0xba7816bf, 0x8f01cfea, 0x414140de, 0x5dae2223, 0xb00361a3, 0x96177a9c, 0xb410ff61, 0xf20015ad]
-#eval hash sha_ex_1_in == sha_ex_1_out
-#eval sha_ex_1_out.toBytes.data == #[0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad]
-
-def sha_ex_2_in: ByteArray := "".toUTF8
-def sha_ex_2_out: Digest := Digest.ofArray #[0xe3b0c442, 0x98fc1c14, 0x9afbf4c8, 0x996fb924, 0x27ae41e4, 0x649b934c, 0xa495991b, 0x7852b855]
-#eval hash sha_ex_2_in == sha_ex_2_out
-
-def sha_ex_3_in: ByteArray := "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu".toUTF8
-def sha_ex_3_out: Digest := Digest.ofArray #[0xcf5b16a7, 0x78af8380, 0x036ce59e, 0x7b049237, 0x0b249b11, 0xe8f07a51, 0xafac4503, 0x7afee9d1]
-#eval hash sha_ex_3_in == sha_ex_3_out
-
-def sha_ex_4_in_1: Digest := Digest.ofArray #[0x67e6096a, 0x85ae67bb, 0x72f36e3c, 0x3af54fa5, 0x7f520e51, 0x8c68059b, 0xabd9831f, 0x19cde05b]
-def sha_ex_4_in_2: Digest := Digest.ofArray #[0xad5c37ed, 0x90bb53c6, 0x04e9ce78, 0x7f6feeac, 0x7674bff2, 0x29c92dc9, 0x7ce2ba11, 0x15c0eb41]
-def sha_ex_4_out: Digest  := Digest.ofArray #[0x3aa2c47c, 0x47cd9e5c, 0x5259fd1c, 0x3428c30b, 0x9608201f, 0x5e163061, 0xdeea8d2d, 0x7c65f2c3]
-#eval hash_pair sha_ex_4_in_1 sha_ex_4_in_2 == sha_ex_4_out
-
-def sha_ex_5_in: Array (Array UInt32) := #[#[1]]
-def sha_ex_5_out: Digest := Digest.ofArray #[0xe3050856, 0xaac38966, 0x1ae49065, 0x6ad0ea57, 0xdf6aff0f, 0xf6eef306, 0xf8cc2eed, 0x4f240249]
-#eval hash_array_array sha_ex_5_in == sha_ex_5_out
-
-def sha_ex_6_in: Array (Array UInt32) := #[#[1], #[2]]
-def sha_ex_6_out: Digest := Digest.ofArray #[0x4138ebae, 0x12299733, 0xcc677d11, 0x50c2a013, 0x9454662f, 0xc76ec95d, 0xa75d2bf9, 0xefddc57a]
-#eval hash_array_array sha_ex_6_in == sha_ex_6_out
-
-def sha_ex_7_in: Array (Array UInt32) := #[#[0xffffffff]]
-def sha_ex_7_out: Digest := Digest.ofArray #[0xa3dba037, 0xd5617520, 0x9dfd4191, 0xf727e91c, 0x5feb67e6, 0x5a6ab5ed, 0x4daf0893, 0xc89598c8]
-#eval hash_array_array sha_ex_7_in == sha_ex_7_out
-
-def sha_ex_8_in: Array UInt32 := #[0xff000001, 0xcc000002]
-def sha_ex_8_out: Digest := Digest.ofArray #[0x063e9f8f, 0x3caaf995, 0xb23627ea, 0xaf57b218, 0x36b2986c, 0x99aa9767, 0xbdd1f5b6, 0x5b391101]
-#eval hash_words sha_ex_8_in.toSubarray == sha_ex_8_out
-
-def rng256_ex_1_in: StateM Rng (UInt32 × UInt32)
-  := do for _ in [0:10] do
-          let _ <- Rng.nextUInt32
-        let t1 <- Rng.nextUInt32
-        Rng.mix (hash "foo".toUTF8)
-        let t2 <- Rng.nextUInt32
-        return (t1, t2)
-def rng256_ex_1_out_1: UInt32 := 785921476
-def rng256_ex_1_out_2: UInt32 := 4167871101
-#eval (rng256_ex_1_in Rng.new).1 == (rng256_ex_1_out_1, rng256_ex_1_out_2)
-
-end Examples
+  Digest.toBytes $ List.foldr compress init_hash chunks
 
 end Sha256
-
-instance : SerialUInt32 Sha256.Digest where
-  words := 8
-  toUInt32Words digest := digest.toArray.map UInt32.swap_endian
-  fromUInt32Words words := Sha256.Digest.ofSubarray (words.toArray.map UInt32.swap_endian).toSubarray
-
-instance : Hash Sha256.Digest where
-  hash := Sha256.hash
-  hash_words := Sha256.hash_words
-  hash_pair := Sha256.hash_pair
-  hash_array_array := Sha256.hash_array_array
-
-instance [Monad M] [MonadStateOf Sha256.Rng M]: MonadRng M where
-  nextUInt32 := Sha256.Rng.nextUInt32
-  nextUInt64 := Sha256.Rng.nextUInt64
-
-instance [Monad M] [MonadStateOf Sha256.Rng M]: MonadMixRng Sha256.Digest M where
-  mix := Sha256.Rng.mix
-
 
 end CryptWalker.hash.Sha2

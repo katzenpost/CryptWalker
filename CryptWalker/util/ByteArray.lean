@@ -15,10 +15,12 @@
 -/
 
 import CryptWalker.util.UInt32
+import CryptWalker.util.UInt64
 
 namespace CryptWalker.util.ByteArray
 
 open CryptWalker.util.UInt32
+open CryptWalker.util.UInt64
 
 /- Endian helpers -/
 
@@ -44,5 +46,27 @@ partial def ByteArray.of_be32 (x: Subarray UInt32) (i: Nat := 0) (out: ByteArray
   := if h: i < x.size
       then ByteArray.of_be32 x (i + 1) (out ++ UInt32.to_be x[i])
       else out
+
+-- UInt64
+
+partial def ByteArray.to_be64 (x: ByteArray) (i: Nat := 0) (out: Array UInt64 := #[]): Array UInt64 :=
+  if i + 8 <= x.size then
+    ByteArray.to_be64 x (i + 8) (out.push (UInt64.of_be64 x[i+7]! x[i+6]! x[i+5]! x[i+4]! x[i+3]! x[i+2]! x[i+1]! x[i]!))
+  else out
+
+partial def ByteArray.to_le64 (x: ByteArray) (i: Nat := 0) (out: Array UInt64 := #[]): Array UInt64 :=
+  if i + 8 <= x.size then
+    ByteArray.to_le64 x (i + 8) (out.push (UInt64.of_be64 x[i]! x[i+1]! x[i+2]! x[i+3]! x[i+4]! x[i+5]! x[i+6]! x[i+7]!))
+  else out
+
+partial def ByteArray.of_le64 (x: Subarray UInt64) (i: Nat := 0) (out: ByteArray := ByteArray.mkEmpty (x.size * 8)): ByteArray :=
+  if h: i < x.size then
+    ByteArray.of_le64 x (i + 1) (out ++ UInt64.to_le x[i])
+  else out
+
+partial def ByteArray.of_be64 (x: Subarray UInt64) (i: Nat := 0) (out: ByteArray := ByteArray.mkEmpty (x.size * 8)): ByteArray :=
+  if h: i < x.size then
+    ByteArray.of_be64 x (i + 1) (out ++ UInt64.to_be x[i])
+  else out
 
 end CryptWalker.util.ByteArray

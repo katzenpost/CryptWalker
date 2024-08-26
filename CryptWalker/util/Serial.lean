@@ -26,4 +26,21 @@ instance : SerialUInt32 UInt32 where
   toUInt32Words x := #[x]
   fromUInt32Words x := x[0]!
 
+
+class SerialWords (Word : Type) (X : Type) where
+  words : Nat
+  toWords : X -> Array Word
+  fromWords : Subarray Word -> X
+
+instance : SerialWords UInt32 UInt32 where
+  words := 1
+  toWords x := #[x]
+  fromWords x := x[0]!
+
+instance : SerialWords UInt64 UInt64 where
+  words := 1
+  toWords x := #[x]
+  fromWords x := x[0]!
+
+
 end CryptWalker.util.Serial

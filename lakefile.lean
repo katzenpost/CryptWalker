@@ -1,16 +1,16 @@
 import Lake
-import Lake.Build.Job
 open Lake DSL
-
 
 set_option diagnostics true
 
-require mathlib from git "https://github.com/leanprover-community/mathlib4"@"master"
-require batteries from git "https://github.com/leanprover-community/batteries" @ "main"
-require LeanSha from git "https://github.com/Ferinko/LeanSha" @ "master"
+package "new" where
+  -- Settings applied to both builds and interactive editing
+  leanOptions := #[
+    ⟨`pp.unicode.fun, true⟩ -- pretty-prints `fun a ↦ b`
+  ]
+  -- add any additional package configuration options here
 
-package «crypt_walker» where
-  srcDir := "Lean"
+require "leanprover-community" / "mathlib"
 
 @[default_target]
 lean_lib «CryptWalker» where
