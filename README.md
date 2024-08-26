@@ -1,11 +1,11 @@
 # Crypt Walker
 
-A cryptographic library for Lean.
+*A cryptographic library for Lean.*
 
 
-## abstract
-
-Implement cryptographic protocols and prove protocol properties.
+The hope is that this Lean library will allow you to
+write a cryptographic protocol prototype or model.
+Then you can write theorems and proofs about your model!
 
 
 ## cryptographic primitives
@@ -32,9 +32,8 @@ Classical NIKEs adapted to KEM via hashed ElGamal construction:
 
 | PRF: Pseuodo Random Function |
 |:---:|
-* SHA1
 * SHA256
-
+* work-in-progress: SHA512
 
 ## licensing
 
