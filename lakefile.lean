@@ -1,15 +1,16 @@
 import Lake
-import Lake.Build.Job
 open Lake DSL
-
 
 set_option diagnostics true
 
-require "leanprover-community" / "batteries"
-require "leanprover-community" / "mathlib"
+package "new" where
+  -- Settings applied to both builds and interactive editing
+  leanOptions := #[
+    ⟨`pp.unicode.fun, true⟩ -- pretty-prints `fun a ↦ b`
+  ]
+  -- add any additional package configuration options here
 
-package «crypt_walker» where
-  srcDir := "Lean"
+require "leanprover-community" / "mathlib"
 
 @[default_target]
 lean_lib «CryptWalker» where
