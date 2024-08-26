@@ -221,4 +221,4 @@ def main : IO Unit := do
   --testAllKEMs Schemes
 
 -- Hash tests
-  --testSha512
+  testSha512
