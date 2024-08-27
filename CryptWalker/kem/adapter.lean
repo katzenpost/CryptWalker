@@ -44,7 +44,7 @@ instance {α : Type} [nikeInstance : NIKE α] [adapter : Adapter α] : KEM α wh
     let privkeyData := NIKE.encodePrivateKey privkey
     pure (PublicKey.mk pubkeyData, PrivateKey.mk privkeyData)
 
-  encapsulate (self : α) (theirPubKey : PublicKey) : IO (ByteArray × ByteArray) := do
+  encapsulate (_self : α) (theirPubKey : PublicKey) : IO (ByteArray × ByteArray) := do
     let (pubkey, privkey) ← NIKE.generateKeyPair
     let theirNikePubKeyOpt : Option (NIKE.PublicKeyType α) := NIKE.decodePublicKey theirPubKey.data
     match theirNikePubKeyOpt with
@@ -58,7 +58,7 @@ instance {α : Type} [nikeInstance : NIKE α] [adapter : Adapter α] : KEM α wh
       let ciphertext := NIKE.encodePublicKey pubkey
       pure (ciphertext, ss2)
 
-  decapsulate (self : α) (privKey : PrivateKey) (ct : ByteArray) : ByteArray :=
+  decapsulate (_self : α) (privKey : PrivateKey) (ct : ByteArray) : ByteArray :=
     let theirPubKeyOpt : Option (NIKE.PublicKeyType α) := NIKE.decodePublicKey ct
     match theirPubKeyOpt with
     | none => panic! "adapter decap failure: failed to decode NIKE public key"

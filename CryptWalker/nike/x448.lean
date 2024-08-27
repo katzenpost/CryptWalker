@@ -13,7 +13,7 @@ import CryptWalker.nike.nike
 
 namespace CryptWalker.nike.x448
 
-set_option exponentiation.threshold 500
+--set_option exponentiation.threshold 500
 
 def p : ℕ := 2^448 - 2^224 - 1
 def basepoint : ZMod p := 5

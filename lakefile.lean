@@ -3,6 +3,7 @@ open Lake DSL
 
 set_option diagnostics true
 
+
 package "new" where
   -- Settings applied to both builds and interactive editing
   leanOptions := #[
@@ -10,7 +11,10 @@ package "new" where
   ]
   -- add any additional package configuration options here
 
-require "leanprover-community" / "mathlib"
+
+require mathlib from git
+  "https://github.com/leanprover-community/mathlib4"@"v4.10.0"
+
 
 @[default_target]
 lean_lib «CryptWalker» where

@@ -3,7 +3,6 @@ import Lean
 import Mathlib.Data.ByteArray
 
 import CryptWalker.protocol.merkle_tree
-
 import CryptWalker.nike.nike
 import CryptWalker.nike.x25519
 import CryptWalker.nike.x448
@@ -57,6 +56,7 @@ def testMerkleHashTreeInclusionProof : IO Unit := do
           IO.println "Merkle Hash Tree inclusion proof is correct"
         else
           panic! "inclusion proof is false"
+
 
 /-Creating a Merkle Hash Tree from a list of elements. O(n log n)-/
 def testMerkleHashTreeFromList : IO Unit := do
