@@ -1,16 +1,11 @@
 import Lake
 open Lake DSL
 
--- XXX how can we set these options globally throughout the source code from this lakefile?
---set_option diagnostics true
---set_option autoImplicit false
-
-package "new" where
-  -- Settings applied to both builds and interactive editing
+package "CryptWalker" where
   leanOptions := #[
-    ⟨`pp.unicode.fun, true⟩ -- pretty-prints `fun a ↦ b`
-  ]
-  -- add any additional package configuration options here
+    ⟨`pp.unicode.fun, true⟩,
+    ⟨`autoImplicit, false⟩,
+    ⟨`relaxedAutoImplicit, false⟩]
 
 require mathlib from git
   "https://github.com/leanprover-community/mathlib4"@"v4.10.0"
