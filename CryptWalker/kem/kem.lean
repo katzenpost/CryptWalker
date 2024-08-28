@@ -17,6 +17,7 @@ class KEM (scheme : Type) where
   PublicKeyType : Type
   PrivateKeyType : Type
 
+  name : String
   generateKeyPair : IO (PublicKeyType × PrivateKeyType)
   encapsulate : scheme → PublicKeyType → IO (ByteArray × ByteArray)
   decapsulate : scheme → PrivateKeyType → ByteArray → ByteArray

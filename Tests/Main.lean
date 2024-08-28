@@ -9,13 +9,11 @@ import CryptWalker.nike.x448
 import CryptWalker.nike.x41417
 import CryptWalker.kem.adapter
 import CryptWalker.kem.schemes
-import CryptWalker.util.HList
 import CryptWalker.hash.Sha512
 
 open CryptWalker.kem.adapter
 open CryptWalker.kem.schemes
 open CryptWalker.kem.kem
-open CryptWalker.util.HList
 
 
 instance : BEq ByteArray where
@@ -176,7 +174,7 @@ def testKEM {α : Type} [kemInstance : KEM α] (kem : α) : IO Unit := do
   let (ciphertext, bobSharedSecret) ← kemInstance.encapsulate kem alicePublicKey
   let aliceSharedSecret := kemInstance.decapsulate kem alicePrivateKey ciphertext
   if bobSharedSecret == aliceSharedSecret then
-    IO.println "Shared secrets match!"
+    IO.println s!"KEM test for {kemInstance.name} PASSED."
   else
     panic! "KEM test failed!"
 

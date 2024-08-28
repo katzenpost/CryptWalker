@@ -6,7 +6,6 @@ import CryptWalker.nike.nike
 import CryptWalker.kem.kem
 import CryptWalker.kem.adapter
 import CryptWalker.hash.Sha2
-import CryptWalker.util.HList
 
 open CryptWalker.nike.x25519
 open CryptWalker.nike.x448
@@ -15,7 +14,6 @@ open CryptWalker.nike.nike
 open CryptWalker.kem.kem
 open CryptWalker.kem.adapter
 open CryptWalker.hash.Sha2
-open CryptWalker.util.HList
 
 namespace CryptWalker.kem.schemes
 

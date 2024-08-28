@@ -17,12 +17,14 @@ class NIKE (scheme : Type) where
   PublicKeyType : Type
   PrivateKeyType : Type
 
+  name : String
+  privateKeySize : Nat
+  publicKeySize : Nat
+
   generatePrivateKey : IO PrivateKeyType
   derivePublicKey : PrivateKeyType → PublicKeyType
   generateKeyPair : IO (PublicKeyType × PrivateKeyType)
   groupAction : PrivateKeyType → PublicKeyType → PublicKeyType
-  privateKeySize : Nat
-  publicKeySize : Nat
   encodePrivateKey : PrivateKeyType → ByteArray
   decodePrivateKey : ByteArray → Option PrivateKeyType
   encodePublicKey : PublicKeyType → ByteArray

@@ -145,6 +145,8 @@ instance : nike.NIKE X41417Scheme where
   PublicKeyType := PublicKey
   PrivateKeyType := PrivateKey
 
+  name : String := "X41417"
+
   generatePrivateKey : IO PrivateKey := do
     generatePrivateKey
 

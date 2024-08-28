@@ -36,6 +36,8 @@ instance {α : Type} [nikeInstance : NIKE α] [adapter : Adapter α] : KEM α wh
   PublicKeyType := PublicKey
   PrivateKeyType := PrivateKey
 
+  name : String := NIKE.name α
+
   generateKeyPair : IO (PublicKey × PrivateKey) := do
     let keyPair ← nikeInstance.generateKeyPair
     let pubkey := keyPair.1

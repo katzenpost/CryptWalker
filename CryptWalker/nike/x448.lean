@@ -140,6 +140,8 @@ instance : nike.NIKE X448Scheme where
   PublicKeyType := PublicKey
   PrivateKeyType := PrivateKey
 
+  name : String := "X448"
+
   generatePrivateKey : IO PrivateKey := do
     generatePrivateKey
 
