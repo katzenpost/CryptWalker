@@ -171,7 +171,6 @@ def testX41417 : IO Unit := do
 
 -- KEM tests
 
-/- FIX ME
 def testKEM {α : Type} [kemInstance : KEM α] (kem : α) : IO Unit := do
   let (alicePublicKey, alicePrivateKey) ← kemInstance.generateKeyPair
   let (ciphertext, bobSharedSecret) ← kemInstance.encapsulate kem alicePublicKey
@@ -181,12 +180,12 @@ def testKEM {α : Type} [kemInstance : KEM α] (kem : α) : IO Unit := do
   else
     panic! "KEM test failed!"
 
+
 def testAllKEMs : ∀ {ts : List Type}, HList ts → IO Unit
 | [], HList.nil => IO.println "All KEM tests passed!"
 | (α :: ts), HList.cons kem rest => do
-  testKEM (α := α) kem
+  @testKEM kem
   testAllKEMs rest
--/
 
 
 def testSha512 : IO Unit := do
@@ -218,7 +217,7 @@ def main : IO Unit := do
   testX41417
 
 -- KEM tests
-  --testAllKEMs Schemes
+  testAllKEMs Schemes
 
 -- Hash tests
 --  testSha512

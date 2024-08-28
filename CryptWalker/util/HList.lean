@@ -3,6 +3,13 @@ namespace CryptWalker.util.HList
 
 universe u
 
+inductive HList : List (Type u) → Type (u+1)
+  | nil  : HList []
+  | cons : α → HList αs → HList (α::αs)
+
+/-
+universe u
+
 def HList (τs : List (Type u)) : Type u := τs.foldr Prod PUnit
 
 @[match_pattern] def HList.nil : HList [] := PUnit.unit
@@ -18,5 +25,6 @@ def HList.rec {motive : (τs : List (Type u)) → HList τs → Sort u}
   match τs, xs with
   | [], PUnit.unit => nil
   | _ :: _, (x, xs) => cons x xs (HList.rec nil cons xs)
+-/
 
 end CryptWalker.util.HList
