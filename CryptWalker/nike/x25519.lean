@@ -132,7 +132,7 @@ def generatePrivateKey : IO PrivateKey := do
 def derivePublicKey (sk : PrivateKey) : PublicKey :=
     PublicKey.mk $ fromField $ (scalarmult sk.data basepoint)
 
-class X25519Scheme
+structure X25519Scheme
 
 instance : nike.NIKE X25519Scheme where
   PublicKeyType := PublicKey

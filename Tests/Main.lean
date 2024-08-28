@@ -180,11 +180,10 @@ def testKEM {α : Type} [kemInstance : KEM α] (kem : α) : IO Unit := do
   else
     panic! "KEM test failed!"
 
-
-def testAllKEMs : ∀ {ts : List Type}, HList ts → IO Unit
-| [], HList.nil => IO.println "All KEM tests passed!"
-| (α :: ts), HList.cons kem rest => do
-  @testKEM kem
+def testAllKEMs : List (Σ α : Type, KEM α × α) → IO Unit
+| [] => IO.println "All KEM tests passed!"
+| ⟨_, _, kem⟩ :: rest => do
+  testKEM kem
   testAllKEMs rest
 
 

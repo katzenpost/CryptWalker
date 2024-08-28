@@ -34,10 +34,15 @@ def X25519AsKEM : KEM X25519Scheme := inferInstance
 def X448AsKEM : KEM X448Scheme := inferInstance
 def X41417AsKEM : KEM X41417Scheme := inferInstance
 
-def Schemes : HList [KEM X25519Scheme, KEM X448Scheme, KEM X41417Scheme] :=
-  HList.cons (X25519AsKEM) $
-  HList.cons (X448AsKEM) $
-  HList.cons (X41417AsKEM) $
-  HList.nil
+def X25519Instance : X25519Scheme := {}
+def X448Instance : X448Scheme := {}
+def X41417Instance : X41417Scheme := {}
+
+def Schemes : List (Σ α : Type, KEM α × α) :=
+  [
+    ⟨X25519Scheme, (X25519AsKEM, X25519Instance)⟩,
+    ⟨X448Scheme, (X448AsKEM, X448Instance)⟩,
+    ⟨X41417Scheme, (X41417AsKEM, X41417Instance)⟩,
+  ]
 
 end CryptWalker.kem.schemes
