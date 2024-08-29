@@ -6,6 +6,7 @@
 --import Mathlib.Data.ByteArray
 import Lean.Data.HashMap
 import Init.Data.ToString
+import Mathlib.Tactic
 
 import CryptWalker.hash.Sha2
 import CryptWalker.util.newnat
@@ -206,11 +207,7 @@ def untilSet (fst snd : Nat) : Nat × Nat :=
     if h2 : fst % 2 != 0 then
       (fst,snd)
     else
-      have : fst >>> 1 < fst := by
-        rw [Nat.shiftRight_eq_div_pow]
-        have h3 := Nat.bitwise_rec_lemma h
-        simp_arith
-        exact h3
+      have : fst >>> 1 < fst := by omega
       untilSet (fst >>> 1) (snd >>> 1)
 termination_by fst
 
