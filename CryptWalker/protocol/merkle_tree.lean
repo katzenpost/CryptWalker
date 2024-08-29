@@ -200,16 +200,18 @@ def shiftR1 (p : Nat × Nat) : Nat × Nat :=
   (p.fst >>> 1, p.snd >>> 1)
 
 def untilSet (fst snd : Nat) : Nat × Nat :=
-  match fst, snd with
-  | 0, _ => (0, snd)
-  | f, s =>
-    if h2 : f % 2 != 0 then
-      (f,s)
+  if h:fst = 0 then
+    (0,snd)
+  else
+    if h2 : fst % 2 != 0 then
+      (fst,snd)
     else
-      have : f >>> 1 < f := by
+      have : fst >>> 1 < fst := by
         rw [Nat.shiftRight_eq_div_pow]
-        sorry
-      untilSet (f >>> 1) (s >>> 1)
+        have h3 := Nat.bitwise_rec_lemma h
+        simp_arith
+        exact h3
+      untilSet (fst >>> 1) (snd >>> 1)
 termination_by fst
 
 def verifyInclusionProof (α : Type) [Hashable α] (settings : Settings α) (leafHash : ByteArray) (rootHash : ByteArray) (proof : InclusionProof) : Bool :=
