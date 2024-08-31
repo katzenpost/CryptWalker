@@ -7,9 +7,13 @@ import CryptWalker.nike.nike
 import CryptWalker.nike.x25519
 import CryptWalker.nike.x448
 import CryptWalker.nike.x41417
+import CryptWalker.nike.schemes
+
 import CryptWalker.kem.adapter
 import CryptWalker.kem.schemes
 import CryptWalker.hash.Sha512
+
+open CryptWalker.nike.nike
 
 open CryptWalker.kem.adapter
 open CryptWalker.kem.schemes
@@ -107,33 +111,7 @@ def testX25519Vector : IO Unit := do
   if pubKeyBytes != expectedPubBytes then
     panic! "public key mismatch"
 
-def testX25519 : IO Unit := do
-  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x25519.X25519Scheme)
-  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
-  let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
-
-  let bobSharedSecret := scheme.groupAction bobPrivateKey alicePublicKey
-  let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
-
-  if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
-    IO.println "X25519 shared secrets match!"
-  else
-    panic! "testX25519 failed!"
-
-def testX448 : IO Unit := do
-  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x448.X448Scheme)
-  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
-  let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
-
-  let bobSharedSecret := scheme.groupAction bobPrivateKey alicePublicKey
-  let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
-
-  if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
-    IO.println "X448 shared secrets match!"
-  else
-    panic! "testX448 failed!"
-
-def testX448KATs : IO Unit := do
+def testX448VectorKATs : IO Unit := do
   let vectors := #[
     ( "3d262fddf9ec8e88495266fea19a34d28882acef045104d0d1aae121700a779c984c24f8cdd78fbff44943eba368f54b29259a4f1c600ad3",
       "06fce640fa3487bfda5f6cf2d5263f8aad88334cbd07437f020f08f9814dc031ddbdc38c19c6da2583fa5429db94ada18aa7a7fb4ef8a086",
@@ -153,38 +131,44 @@ def testX448KATs : IO Unit := do
       panic! s!"Mismatch in KAT: expected {expectedHex}, got {result}"
   IO.println "All KATs passed for X448!"
 
-def testX41417 : IO Unit := do
-  let scheme := inferInstanceAs (CryptWalker.nike.nike.NIKE CryptWalker.nike.x41417.X41417Scheme)
+def testNIKE (scheme : NIKE) : IO Unit := do
   let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
   let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
-
   let bobSharedSecret := scheme.groupAction bobPrivateKey alicePublicKey
   let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
-
   if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
-    IO.println "X41417 shared secrets match!"
+    IO.println s!"NIKE test for {scheme.name} PASSED."
   else
-    panic! "testX41417 failed!"
+    panic! s!"NIKE test of {scheme.name} failed!"
+
+def testAllNIKEs (schemes : List NIKE): IO Unit := do
+match schemes with
+| [] => IO.println "All NIKE tests passed!"
+| nike :: rest => do
+  testNIKE nike
+  testAllNIKEs rest
+
 
 
 -- KEM tests
+def testKEM (scheme : KEM) : IO Unit := do
+  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
+  let (ct, ss) ← scheme.encapsulate alicePublicKey
+  let ss2 := scheme.decapsulate alicePrivateKey ct
+  if ss != ss2 then
+    panic! "test failed"
+  pure ()
 
-def testKEM {α : Type} [kemInstance : KEM α] (kem : α) : IO Unit := do
-  let (alicePublicKey, alicePrivateKey) ← kemInstance.generateKeyPair
-  let (ciphertext, bobSharedSecret) ← kemInstance.encapsulate kem alicePublicKey
-  let aliceSharedSecret := kemInstance.decapsulate kem alicePrivateKey ciphertext
-  if bobSharedSecret == aliceSharedSecret then
-    IO.println s!"KEM test for {kemInstance.name} PASSED."
-  else
-    panic! "KEM test failed!"
-
-def testAllKEMs : List (Σ α : Type, KEM α × α) → IO Unit
-| [] => IO.println "All KEM tests passed!"
-| ⟨_, _, kem⟩ :: rest => do
+def testAllKEMs (schemes : List KEM): IO Unit := do
+match schemes with
+| [] => IO.println "All NIKE tests passed!"
+| kem :: rest => do
   testKEM kem
   testAllKEMs rest
 
 
+
+/--/
 def testSha512 : IO Unit := do
   let sha512KATs := #[
     ("", "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"),
@@ -198,6 +182,7 @@ def testSha512 : IO Unit := do
     if output != expectedBytes then
       panic! s!"Mismatch in KAT: expected {expectedHex}, got {output}"
   pure ()
+-/
 
 def main : IO Unit := do
   -- Merkle hash tree tests
@@ -209,12 +194,10 @@ def main : IO Unit := do
 
 -- NIKE tests
   testX25519Vector
-  testX25519
-  testX448
-  testX41417
+  testAllNIKEs CryptWalker.nike.schemes.Schemes
 
 -- KEM tests
-  testAllKEMs Schemes
+  testAllKEMs CryptWalker.kem.schemes.Schemes
 
 -- Hash tests
 --  testSha512

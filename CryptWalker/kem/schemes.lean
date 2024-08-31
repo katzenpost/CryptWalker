@@ -7,9 +7,7 @@ import CryptWalker.kem.kem
 import CryptWalker.kem.adapter
 import CryptWalker.hash.Sha2
 
-open CryptWalker.nike.x25519
-open CryptWalker.nike.x448
-open CryptWalker.nike.x41417
+open CryptWalker.nike
 open CryptWalker.nike.nike
 open CryptWalker.kem.kem
 open CryptWalker.kem.adapter
@@ -17,30 +15,47 @@ open CryptWalker.hash.Sha2
 
 namespace CryptWalker.kem.schemes
 
-def defaultHash := fun x => Sha256.hash x
+def toKEM (adapter : Adapter) : KEM :=
+  {
+    PublicKeyType := PublicKey,
+    PrivateKeyType := PrivateKey,
+    name := adapter.nike.name,
+    generateKeyPair := do
+      let keyPair ← adapter.nike.generateKeyPair
+      let pubkey := PublicKey.mk (adapter.nike.encodePublicKey keyPair.1)
+      let privkey := PrivateKey.mk (adapter.nike.encodePrivateKey keyPair.2)
+      pure (pubkey, privkey),
+    encapsulate := fun theirPubKey => do
+      let (pubkey, privkey) ← adapter.nike.generateKeyPair
+      match adapter.nike.decodePublicKey theirPubKey.data with
+      | none => panic! "type coercion failure"
+      | some pubkey2 =>
+        let ss1 := adapter.nike.groupAction privkey pubkey2
+        let ss2 := adapter.hash (adapter.nike.encodePublicKey ss1)
+        let ciphertext := adapter.nike.encodePublicKey pubkey
+        pure (ciphertext, ss2),
+    decapsulate := fun privKey ct =>
+      match adapter.nike.decodePublicKey ct with
+      | none => panic! "type coercion failure"
+      | some pubkey2 =>
+        match adapter.nike.decodePrivateKey privKey.data with
+        | none => panic! "type coercion failure"
+        | some privkey2 =>
+          let ss1 := adapter.nike.groupAction privkey2 pubkey2
+          adapter.hash (adapter.nike.encodePublicKey ss1),
+    privateKeySize := adapter.nike.privateKeySize,
+    publicKeySize := adapter.nike.publicKeySize,
+    encodePrivateKey := fun sk => sk.data,
+    decodePrivateKey := fun bytes => some {data := bytes},
+    encodePublicKey := fun pk => pk.data,
+    decodePublicKey := fun bytes => some {data := bytes}
+  }
 
-instance : Adapter X25519Scheme where
-  hash := defaultHash
-
-instance : Adapter X448Scheme where
-  hash := defaultHash
-
-instance : Adapter X41417Scheme where
-  hash := defaultHash
-
-def X25519AsKEM : KEM X25519Scheme := inferInstance
-def X448AsKEM : KEM X448Scheme := inferInstance
-def X41417AsKEM : KEM X41417Scheme := inferInstance
-
-def X25519Instance : X25519Scheme := {}
-def X448Instance : X448Scheme := {}
-def X41417Instance : X41417Scheme := {}
-
-def Schemes : List (Σ α : Type, KEM α × α) :=
-  [
-    ⟨X25519Scheme, (X25519AsKEM, X25519Instance)⟩,
-    ⟨X448Scheme, (X448AsKEM, X448Instance)⟩,
-    ⟨X41417Scheme, (X41417AsKEM, X41417Instance)⟩,
-  ]
+def Schemes : List KEM :=
+[
+    toKEM $ Adapter.mk Sha256.hash x25519.Scheme,
+    toKEM $ Adapter.mk Sha256.hash x448.Scheme,
+    toKEM $ Adapter.mk Sha256.hash x41417.Scheme
+]
 
 end CryptWalker.kem.schemes

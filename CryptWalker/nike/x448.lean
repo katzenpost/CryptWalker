@@ -11,6 +11,8 @@ import CryptWalker.util.newnat
 import CryptWalker.util.newhex
 import CryptWalker.nike.nike
 
+open CryptWalker.nike.nike
+
 namespace CryptWalker.nike.x448
 
 --set_option exponentiation.threshold 500
@@ -118,13 +120,13 @@ structure PublicKey where
 
 instance : nike.Key PrivateKey where
   encode : PrivateKey → ByteArray := fun (key : PrivateKey) => key.data
-  decode : ByteArray → Option PrivateKey := fun (bytes : ByteArray) => some (PrivateKey.mk bytes)
+  decode (α : nike.NIKE) (bytes : ByteArray) : Option PrivateKey :=
+    some (PrivateKey.mk bytes)
 
 instance : nike.Key PublicKey where
   encode : PublicKey → ByteArray := fun (key : PublicKey) => key.data
-  decode : ByteArray → Option PublicKey := fun (bytes : ByteArray) => some (PublicKey.mk bytes)
-
-structure X448Scheme
+  decode (α : nike.NIKE) (bytes : ByteArray) : Option PublicKey :=
+    some (PublicKey.mk bytes)
 
 def generatePrivateKey : IO PrivateKey := do
   let mut arr := ByteArray.mkEmpty keySize
@@ -136,30 +138,33 @@ def generatePrivateKey : IO PrivateKey := do
 def derivePublicKey (sk : PrivateKey) : PublicKey :=
     PublicKey.mk $ fromField $ (scalarmult sk.data basepoint)
 
-instance : nike.NIKE X448Scheme where
+def SchemeName := "X448"
+
+def Scheme : NIKE :=
+{
   PublicKeyType := PublicKey
   PrivateKeyType := PrivateKey
 
-  name : String := "X448"
+  privateKeySize := keySize
+  publicKeySize := keySize
 
-  generatePrivateKey : IO PrivateKey := do
-    generatePrivateKey
+  name := SchemeName
 
-  generateKeyPair : IO (PublicKey × PrivateKey) := do
+  generatePrivateKey := generatePrivateKey,
+
+  generateKeyPair := do
     let privKey ← generatePrivateKey
     let pubKey := derivePublicKey privKey
-    pure (pubKey, privKey)
+    pure (pubKey, privKey),
 
-  derivePublicKey (sk : PrivateKey) : PublicKey := derivePublicKey sk
+  derivePublicKey := fun (sk : PrivateKey) => derivePublicKey sk,
 
-  groupAction (sk : PrivateKey) (pk : PublicKey) : PublicKey := PublicKey.mk $ curve448 sk.data pk.data
+  groupAction := fun (sk : PrivateKey) (pk : PublicKey) => PublicKey.mk $ curve448 sk.data pk.data,
 
-  privateKeySize : Nat := keySize
-  publicKeySize : Nat := keySize
-
-  encodePrivateKey : PrivateKey → ByteArray := fun (sk : PrivateKey) => nike.Key.encode sk
-  decodePrivateKey : ByteArray → Option PrivateKey := fun (bytes : ByteArray) => nike.Key.decode bytes
-  encodePublicKey : PublicKey → ByteArray := fun (pk : PublicKey) => nike.Key.encode pk
-  decodePublicKey : ByteArray → Option PublicKey := fun (bytes : ByteArray) => nike.Key.decode bytes
+  encodePrivateKey := fun (sk : PrivateKey) => sk.data,
+  decodePrivateKey := fun (bytes : ByteArray) => some { data := bytes },
+  encodePublicKey := fun (pk : PublicKey) => pk.data,
+  decodePublicKey := fun (bytes : ByteArray) => some { data := bytes }
+}
 
 end CryptWalker.nike.x448
