@@ -161,7 +161,7 @@ def testKEM (scheme : KEM) : IO Unit := do
 
 def testAllKEMs (schemes : List KEM): IO Unit := do
 match schemes with
-| [] => IO.println "All NIKE tests passed!"
+| [] => IO.println "All KEM tests passed!"
 | kem :: rest => do
   testKEM kem
   testAllKEMs rest
