@@ -13,112 +13,51 @@ namespace CryptWalker.kem.adapter
 open CryptWalker.nike.nike
 open CryptWalker.kem.kem
 
-
 structure PrivateKey where
   data : ByteArray
 
 structure PublicKey where
   data : ByteArray
 
-structure Adapter where
-  hash : ByteArray → ByteArray
-  nike : NIKE
+def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
+{
+  PublicKeyType := PublicKey,
+  PrivateKeyType := PrivateKey,
+  privateKeySize := nike.privateKeySize,
+  publicKeySize := nike.publicKeySize,
+  ciphertextSize := nike.publicKeySize,
+  name := nike.name,
 
-instance (adapter : Adapter) : KEM where
-  PublicKeyType := PublicKey
-  PrivateKeyType := PrivateKey
+  generateKeyPair := do
+    let keyPair ← nike.generateKeyPair
+    let pubkey := PublicKey.mk (nike.encodePublicKey keyPair.1)
+    let privkey := PrivateKey.mk (nike.encodePrivateKey keyPair.2)
+    pure (pubkey, privkey),
 
-  privateKeySize := adapter.nike.privateKeySize
-  publicKeySize := adapter.nike.publicKeySize
-  ciphertextSize := adapter.nike.publicKeySize
-
-  name : String := adapter.nike.name
-
-  generateKeyPair : IO (PublicKey × PrivateKey) := do
-    let keyPair ← adapter.nike.generateKeyPair
-    let pubkey := keyPair.1
-    let privkey := keyPair.2
-    let pubkeyData := adapter.nike.encodePublicKey pubkey
-    let privkeyData := adapter.nike.encodePrivateKey privkey
-    pure (PublicKey.mk pubkeyData, PrivateKey.mk privkeyData)
-
-  encapsulate (theirPubKey : PublicKey) : IO (ByteArray × ByteArray) := do
-    let (pubkey, privkey) ← adapter.nike.generateKeyPair
-    let theirNikePubKeyOpt : Option (adapter.nike.PublicKeyType) := adapter.nike.decodePublicKey theirPubKey.data
-    match theirNikePubKeyOpt with
+  encapsulate := fun theirPubKey => do
+    let (pubkey, privkey) ← nike.generateKeyPair
+    match nike.decodePublicKey theirPubKey.data with
     | none => panic! "Failed to decode NIKE public key"
-    | some theirNikePubKey =>
-      let ss1 := adapter.nike.groupAction privkey theirNikePubKey
-      let ss1Bytes := adapter.nike.encodePublicKey ss1
-      let pubkeyBytes := adapter.nike.encodePublicKey pubkey
-      let blob := ByteArray.append ss1Bytes $ ByteArray.append theirPubKey.data pubkeyBytes
-      let ss2 := adapter.hash blob
-      let ciphertext := adapter.nike.encodePublicKey pubkey
-      pure (ciphertext, ss2)
+    | some pubkey2 =>
+      let ss1 := nike.groupAction privkey pubkey2
+      let ss2 := hash (nike.encodePublicKey ss1)
+      let ciphertext := nike.encodePublicKey pubkey
+      pure (ciphertext, ss2),
 
-  decapsulate (privKey : PrivateKey) (ct : ByteArray) : ByteArray :=
-    let theirPubKeyOpt : Option (adapter.nike.PublicKeyType) := adapter.nike.decodePublicKey ct
-    match theirPubKeyOpt with
-    | none => panic! "adapter decap failure: failed to decode NIKE public key"
-    | some theirPubKey =>
-      let myPrivKeyOpt : Option (adapter.nike.PrivateKeyType) := adapter.nike.decodePrivateKey privKey.data
-      match myPrivKeyOpt with
-      | none => panic! "adapter decap failure: failed to decode NIKE private key"
-      | some myPrivKey =>
-        let ss1 := adapter.nike.groupAction myPrivKey theirPubKey
-        let a := adapter.nike.encodePublicKey ss1
-        let myPubKey := adapter.nike.derivePublicKey myPrivKey
-        let myPubKeyBytes := adapter.nike.encodePublicKey myPubKey
-        let theirPubKeyBytes := adapter.nike.encodePublicKey theirPubKey
-        let b := ByteArray.append myPubKeyBytes theirPubKeyBytes
-        let blob := ByteArray.append a b
-        adapter.hash blob
+  decapsulate := fun privKey ct =>
+    match nike.decodePublicKey ct with
+    | none => panic! "Failed to decode NIKE public key"
+    | some pubkey2 =>
+      match nike.decodePrivateKey privKey.data with
+      | none => panic! "Failed to decode NIKE private key"
+      | some privkey2 =>
+        let ss1 := nike.groupAction privkey2 pubkey2
+        hash (nike.encodePublicKey ss1),
 
-  encodePrivateKey (sk : PrivateKey) : ByteArray := sk.data
-  decodePrivateKey (bytes : ByteArray) : Option PrivateKey := some {data := bytes}
-  encodePublicKey (pk : PublicKey) : ByteArray := pk.data
-  decodePublicKey (bytes : ByteArray) : Option PublicKey := some {data := bytes}
-
-
-def toKEM (adapter : Adapter) : KEM :=
-  {
-    PublicKeyType := PublicKey,
-    PrivateKeyType := PrivateKey,
-
-    privateKeySize := adapter.nike.privateKeySize,
-    publicKeySize := adapter.nike.publicKeySize,
-    ciphertextSize := adapter.nike.publicKeySize,
-
-    name := adapter.nike.name,
-
-    generateKeyPair := do
-      let keyPair ← adapter.nike.generateKeyPair
-      let pubkey := PublicKey.mk (adapter.nike.encodePublicKey keyPair.1)
-      let privkey := PrivateKey.mk (adapter.nike.encodePrivateKey keyPair.2)
-      pure (pubkey, privkey),
-    encapsulate := fun theirPubKey => do
-      let (pubkey, privkey) ← adapter.nike.generateKeyPair
-      match adapter.nike.decodePublicKey theirPubKey.data with
-      | none => panic! "type coercion failure"
-      | some pubkey2 =>
-        let ss1 := adapter.nike.groupAction privkey pubkey2
-        let ss2 := adapter.hash (adapter.nike.encodePublicKey ss1)
-        let ciphertext := adapter.nike.encodePublicKey pubkey
-        pure (ciphertext, ss2),
-    decapsulate := fun privKey ct =>
-      match adapter.nike.decodePublicKey ct with
-      | none => panic! "type coercion failure"
-      | some pubkey2 =>
-        match adapter.nike.decodePrivateKey privKey.data with
-        | none => panic! "type coercion failure"
-        | some privkey2 =>
-          let ss1 := adapter.nike.groupAction privkey2 pubkey2
-          adapter.hash (adapter.nike.encodePublicKey ss1),
-
-    encodePrivateKey := fun sk => sk.data,
-    decodePrivateKey := fun bytes => some {data := bytes},
-    encodePublicKey := fun pk => pk.data,
-    decodePublicKey := fun bytes => some {data := bytes}
-  }
+  encodePrivateKey := fun sk => sk.data,
+  decodePrivateKey := fun bytes => some { data := bytes },
+  encodePublicKey := fun pk => pk.data,
+  decodePublicKey := fun bytes => some { data := bytes }
+}
 
 end CryptWalker.kem.adapter

@@ -17,17 +17,18 @@ open CryptWalker.hash.Sha2
 
 namespace CryptWalker.kem.schemes
 
-def kemX25519 := toKEM $ Adapter.mk Sha256.hash x25519.Scheme
-def kemX448 := toKEM $ Adapter.mk Sha256.hash x448.Scheme
-def kem41417 := toKEM $ Adapter.mk Sha256.hash x41417.Scheme
-def combinedKEM := createKEMCombiner "CombinedKEM" Sha256.hash [kemX25519, kemX448, kem41417]
+def kemX25519 := createKEMAdapter Sha256.hash x25519.Scheme
+def kemX448 := createKEMAdapter Sha256.hash x448.Scheme
+def kemX41417 := createKEMAdapter Sha256.hash x41417.Scheme
+
+def combinedClassicalKEM := createKEMCombiner "combinedClassicalKEM" Sha256.hash [kemX25519, kemX448, kemX41417]
 
 def Schemes : List KEM :=
 [
-    toKEM $ Adapter.mk Sha256.hash x25519.Scheme,
-    toKEM $ Adapter.mk Sha256.hash x448.Scheme,
-    toKEM $ Adapter.mk Sha256.hash x41417.Scheme,
-    combinedKEM
+    kemX25519,
+    kemX448,
+    kemX41417,
+    combinedClassicalKEM
 ]
 
 end CryptWalker.kem.schemes
