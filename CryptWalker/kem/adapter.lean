@@ -20,17 +20,6 @@ structure PrivateKey where
 structure PublicKey where
   data : ByteArray
 
-instance : kem.Key PrivateKey where
-  encode : PrivateKey → ByteArray := fun (key : PrivateKey) => key.data
-  decode (_kem : KEM) (bytes : ByteArray) : Option PrivateKey :=
-    some (PrivateKey.mk bytes)
-
-instance : kem.Key PublicKey where
-  encode : PublicKey → ByteArray := fun (key : PublicKey) => key.data
-  decode (_kem : KEM) (bytes : ByteArray) : Option PublicKey :=
-    some (PublicKey.mk bytes)
-
-
 structure Adapter where
   hash : ByteArray → ByteArray
   nike : NIKE
@@ -38,6 +27,10 @@ structure Adapter where
 instance (adapter : Adapter) : KEM where
   PublicKeyType := PublicKey
   PrivateKeyType := PrivateKey
+
+  privateKeySize := adapter.nike.privateKeySize
+  publicKeySize := adapter.nike.publicKeySize
+  ciphertextSize := adapter.nike.publicKeySize
 
   name : String := adapter.nike.name
 
@@ -81,9 +74,6 @@ instance (adapter : Adapter) : KEM where
         let blob := ByteArray.append a b
         adapter.hash blob
 
-  privateKeySize := adapter.nike.privateKeySize
-  publicKeySize := adapter.nike.publicKeySize
-
   encodePrivateKey (sk : PrivateKey) : ByteArray := sk.data
   decodePrivateKey (bytes : ByteArray) : Option PrivateKey := some {data := bytes}
   encodePublicKey (pk : PublicKey) : ByteArray := pk.data
@@ -94,7 +84,13 @@ def toKEM (adapter : Adapter) : KEM :=
   {
     PublicKeyType := PublicKey,
     PrivateKeyType := PrivateKey,
+
+    privateKeySize := adapter.nike.privateKeySize,
+    publicKeySize := adapter.nike.publicKeySize,
+    ciphertextSize := adapter.nike.publicKeySize,
+
     name := adapter.nike.name,
+
     generateKeyPair := do
       let keyPair ← adapter.nike.generateKeyPair
       let pubkey := PublicKey.mk (adapter.nike.encodePublicKey keyPair.1)
@@ -118,8 +114,7 @@ def toKEM (adapter : Adapter) : KEM :=
         | some privkey2 =>
           let ss1 := adapter.nike.groupAction privkey2 pubkey2
           adapter.hash (adapter.nike.encodePublicKey ss1),
-    privateKeySize := adapter.nike.privateKeySize,
-    publicKeySize := adapter.nike.publicKeySize,
+
     encodePrivateKey := fun sk => sk.data,
     decodePrivateKey := fun bytes => some {data := bytes},
     encodePublicKey := fun pk => pk.data,

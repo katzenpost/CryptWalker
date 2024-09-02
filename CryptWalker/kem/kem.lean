@@ -9,6 +9,7 @@ namespace CryptWalker.kem.kem
     name : String
     privateKeySize : Nat
     publicKeySize : Nat
+    ciphertextSize : Nat
 
     generateKeyPair : IO (PublicKeyType × PrivateKeyType)
     encapsulate : PublicKeyType → IO (ByteArray × ByteArray)
@@ -17,13 +18,5 @@ namespace CryptWalker.kem.kem
     decodePrivateKey : ByteArray → Option PrivateKeyType
     encodePublicKey : PublicKeyType → ByteArray
     decodePublicKey : ByteArray → Option PublicKeyType
-
-  structure Key (key : Type) where
-    encode : key → ByteArray
-    decode : KEM → ByteArray → Option key
-
-  structure PrivateKey (privkey : Type) extends Key privkey
-
-  structure PublicKey (pubkey : Type) extends Key pubkey
 
 end CryptWalker.kem.kem
