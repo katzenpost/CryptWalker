@@ -204,7 +204,7 @@ def untilSet (fst snd : Nat) : Nat × Nat :=
   if h:fst = 0 then
     (0,snd)
   else
-    if h2 : fst % 2 != 0 then
+    if fst % 2 != 0 then
       (fst,snd)
     else
       have : fst >>> 1 < fst := by omega
