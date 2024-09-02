@@ -2,7 +2,7 @@ import Batteries.Classes.SatisfiesM
 
 namespace CryptWalker.kem.kem
 
-  structure KEM where
+  class KEM where
     PublicKeyType : Type
     PrivateKeyType : Type
 

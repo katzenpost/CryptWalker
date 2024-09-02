@@ -4,7 +4,6 @@ SPDX-License-Identifier: AGPL-3.0-only
  -/
 
 import Mathlib.Data.ByteArray
-
 import CryptWalker.kem.kem
 
 namespace CryptWalker.kem.combiner
@@ -17,7 +16,7 @@ SplitPRF can be used with any number of KEMs
 and it implement split PRF KEM combiner as:
 
   cct := cct1 || cct2 || cct3 || ...
-	return H(ss1 || cct) XOR H(ss2 || cct) XOR H(ss3 || cct)
+       return H(ss1 || cct) XOR H(ss2 || cct) XOR H(ss3 || cct)
 
 in order to retain IND-CCA2 security
 as described in KEM Combiners  https://eprint.iacr.org/2018/024.pdf
@@ -28,7 +27,7 @@ def hashSize := 32
 
 def xorByteArrays (a b : ByteArray) : ByteArray :=
   if a.size ≠ b.size then
-    panic! "ByteArrays must be of equal size"
+    panic! "xorByteArrays: ByteArrays must be of equal size"
   else
     ByteArray.mk (Array.zipWith a.data b.data fun x y => x ^^^ y)
 
@@ -37,7 +36,7 @@ def splitPRF (hash : ByteArray → ByteArray) (ss : List ByteArray) (ct : List B
     panic! "splitPRF failure: mismatched List lengths"
   else
     let bigCt : ByteArray := ct.foldl (fun acc blob => acc ++ blob) ByteArray.empty
-    (ss.map (fun x => hash (x ++ bigCt))).foldl (fun acc h => xorByteArrays acc h) (ByteArray.mkEmpty hashSize)
+    (ss.map (fun x => hash (x ++ bigCt))).foldl (fun acc h => xorByteArrays acc h) (ByteArray.mk (Array.mkArray hashSize 0))
 
 structure PrivateKey where
   data : List ByteArray
@@ -66,35 +65,29 @@ def splitByteArrayIntoChunks (bytes : ByteArray) (sizes : List Nat) : Option (Li
         aux part2 sizesTail (part1 :: acc)
   aux bytes sizes []
 
+def createKEMCombiner (name : String) (hash : ByteArray → ByteArray) (KEMs : List KEM) : KEM :=
+{
+  PublicKeyType := PublicKey,
+  PrivateKeyType := PrivateKey,
+  privateKeySize := KEMs.foldl (fun acc x => acc + x.privateKeySize) 0,
+  publicKeySize := KEMs.foldl (fun acc x => acc + x.publicKeySize) 0,
+  ciphertextSize := KEMs.foldl (fun acc x => acc + x.ciphertextSize) 0,
+  name := name,
 
-structure Combiner where
-  hash : ByteArray → ByteArray
-  KEMs : List KEM
-
-instance (combiner : Combiner) (name : String) : KEM where
-  PublicKeyType := PublicKey
-  PrivateKeyType := PrivateKey
-
-  privateKeySize := combiner.KEMs.foldl (fun acc x => acc + x.privateKeySize) 0
-  publicKeySize := combiner.KEMs.foldl (fun acc x => acc + x.publicKeySize) 0
-  ciphertextSize := combiner.KEMs.foldl (fun acc x => acc + x.ciphertextSize) 0
-
-  name : String := name
-
-  generateKeyPair : IO (PublicKey × PrivateKey) := do
+  generateKeyPair := do
     let mut pubkeyData : List ByteArray := []
     let mut privkeyData : List ByteArray := []
-    for kem in combiner.KEMs do
+    for kem in KEMs do
       let (newpubkey, newprivkey) ← kem.generateKeyPair
       pubkeyData := pubkeyData ++ [kem.encodePublicKey newpubkey]
       privkeyData := privkeyData ++ [kem.encodePrivateKey newprivkey]
-    pure ({ data := pubkeyData }, { data := privkeyData })
+    pure ({ data := pubkeyData }, { data := privkeyData }),
 
-  encapsulate : PublicKey → IO (ByteArray × ByteArray) := fun pubkey => do
+  encapsulate := fun pubkey => do
     let mut sharedSecrets : List ByteArray := []
     let mut ciphertexts : List ByteArray := []
-    let mut ciphertext : ByteArray := ByteArray.mkEmpty 0
-    for (kem, pubKeyChunk) in combiner.KEMs.zip pubkey.data do
+    let mut ciphertext : ByteArray := ByteArray.empty
+    for (kem, pubKeyChunk) in KEMs.zip pubkey.data do
       match kem.decodePublicKey pubKeyChunk with
       | none => panic! "failed to decode pub key"
       | some pubkey =>
@@ -102,39 +95,37 @@ instance (combiner : Combiner) (name : String) : KEM where
         sharedSecrets := sharedSecrets ++ [ss]
         ciphertexts := ciphertexts ++ [ct]
         ciphertext := ciphertext ++ ct
-    pure (ciphertext, splitPRF combiner.hash sharedSecrets ciphertexts)
+    pure (ciphertext, splitPRF hash sharedSecrets ciphertexts),
 
-  decapsulate : PrivateKey → ByteArray → ByteArray := fun privkey ciphertext =>
-    let sizes : List Nat := combiner.KEMs.foldl (fun acc x => acc ++ [x.ciphertextSize]) []
+  decapsulate := fun privkey ciphertext =>
+    let sizes := KEMs.map (fun x => x.ciphertextSize)
     match splitByteArrayIntoChunks ciphertext sizes with
     | none => panic! "failed to parse ciphertext"
     | some ciphertexts =>
-        let pairs := List.zip combiner.KEMs ciphertexts
-        let pairs3 := List.zip pairs privkey.data
-        let sharedSecrets : List ByteArray := pairs3.map (fun x =>
-          match x.fst.fst.decodePrivateKey x.fst.snd with
+        let sharedSecrets := KEMs.zip ciphertexts |>.zip privkey.data |>.map (fun ((kem, ct), privKeyChunk) =>
+          match kem.decodePrivateKey privKeyChunk with
           | none => panic! "decode private key failure"
-          | some innerPrivkey =>
-            x.fst.fst.decapsulate innerPrivkey x.fst.snd
+          | some innerPrivkey => kem.decapsulate innerPrivkey ct
         )
-      splitPRF combiner.hash sharedSecrets ciphertexts
+        splitPRF hash sharedSecrets ciphertexts
 
-  encodePrivateKey : PrivateKey → ByteArray := fun privkey =>
-    privkey.data.foldl (fun acc key => acc ++ key) ByteArray.empty
+  encodePrivateKey := fun privkey =>
+    privkey.data.foldl (fun acc key => acc ++ key) ByteArray.empty,
 
-  decodePrivateKey : ByteArray → Option PrivateKey := fun bytes =>
-    let sizes : List Nat := combiner.KEMs.map (fun kem => kem.privateKeySize)
+  decodePrivateKey := fun bytes =>
+    let sizes : List Nat := KEMs.map (fun kem => kem.privateKeySize)
+    match splitByteArrayIntoChunks bytes sizes with
+    | none => none
+    | some keys => some { data := keys },
+
+  encodePublicKey := fun pubkey =>
+    pubkey.data.foldl (fun acc key => acc ++ key) ByteArray.empty,
+
+  decodePublicKey := fun bytes =>
+    let sizes : List Nat := KEMs.map (fun kem => kem.publicKeySize)
     match splitByteArrayIntoChunks bytes sizes with
     | none => none
     | some keys => some { data := keys }
-
-  encodePublicKey : PublicKey → ByteArray := fun pubkey =>
-    pubkey.data.foldl (fun acc key => acc ++ key) ByteArray.empty
-
-  decodePublicKey : ByteArray → Option PublicKey := fun bytes =>
-    let sizes : List Nat := combiner.KEMs.map (fun kem => kem.publicKeySize)
-    match splitByteArrayIntoChunks bytes sizes with
-    | none => none
-    | some keys => some { data := keys }
+}
 
 end CryptWalker.kem.combiner
