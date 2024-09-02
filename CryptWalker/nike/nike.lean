@@ -23,12 +23,4 @@ structure NIKE where
   encodePublicKey : PublicKeyType → ByteArray
   decodePublicKey : ByteArray → Option PublicKeyType
 
-structure Key (key : Type) where
-  encode : key → ByteArray
-  decode : NIKE → ByteArray → Option key
-
-structure PrivateKey (privkey : Type) extends Key privkey
-
-structure PublicKey (pubkey : Type) extends Key pubkey
-
 end CryptWalker.nike.nike

@@ -117,16 +117,6 @@ structure PrivateKey where
 structure PublicKey where
   data : ByteArray
 
-instance : nike.Key PrivateKey where
-  encode : PrivateKey → ByteArray := fun (key : PrivateKey) => key.data
-  decode (α : nike.NIKE) (bytes : ByteArray) : Option PrivateKey :=
-    some (PrivateKey.mk bytes)
-
-instance : nike.Key PublicKey where
-  encode : PublicKey → ByteArray := fun (key : PublicKey) => key.data
-  decode (α : nike.NIKE) (bytes : ByteArray) : Option PublicKey :=
-    some (PublicKey.mk bytes)
-
 def generatePrivateKey : IO PrivateKey := do
   let mut arr := ByteArray.mkEmpty keySize
   for _ in [0:keySize] do
