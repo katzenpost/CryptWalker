@@ -12,7 +12,9 @@ import CryptWalker.nike.schemes
 import CryptWalker.kem.adapter
 import CryptWalker.kem.schemes
 import CryptWalker.hash.Sha512
+import CryptWalker.util.newhex
 
+open CryptWalker.util.newhex
 open CryptWalker.nike.nike
 
 open CryptWalker.kem.adapter
@@ -105,8 +107,13 @@ def testX25519Vector : IO Unit := do
   let privateKeyHex := "951c011657648c76090885822284c461e3c84bf66b8842adb438334499922890"
   let publicKeyHex := "f5ea54714e6ebfbce3d9073173261ca4ea50a15066ae33461bae83780cf51c43"
   let privKeyBytes : ByteArray := (hexStringToByteArray privateKeyHex).getD ByteArray.empty
-  let pubKey := CryptWalker.nike.x25519.scalarmult privKeyBytes CryptWalker.nike.x25519.basepoint
-  let pubKeyBytes := CryptWalker.nike.x25519.fromField pubKey
+  IO.println s!"priv key {privKeyBytes}"
+  let s := CryptWalker.nike.x25519.Scheme
+  let privkey := CryptWalker.nike.x25519.PrivateKey.mk privKeyBytes
+  IO.println "before derivePublicKey"
+  let pubkey := s.derivePublicKey privkey
+  IO.println "after derivePublicKey"
+  let pubKeyBytes := pubkey.data
   let expectedPubBytes := (hexStringToByteArray publicKeyHex).getD ByteArray.empty
   if pubKeyBytes != expectedPubBytes then
     panic! "public key mismatch"

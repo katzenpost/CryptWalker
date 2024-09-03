@@ -10,112 +10,42 @@ import Mathlib.Data.ByteArray
 import CryptWalker.util.newnat
 import CryptWalker.util.newhex
 import CryptWalker.nike.nike
+import CryptWalker.nike.MontgomeryLadder
 
 open CryptWalker.nike.nike
+open CryptWalker.nike.MontgomeryLadder
+open CryptWalker.util.newhex
 
 namespace CryptWalker.nike.x41417
 
 set_option exponentiation.threshold 414
 
-def p : ℕ := 2^414 - 17
-def keySize : ℕ := 52
-
-theorem p_is_prime : Nat.Prime p := by sorry
-instance fact_p_is_prime : Fact (Nat.Prime p) := ⟨p_is_prime⟩
-instance : Field (ZMod p) := ZMod.instField p
-
-def clampScalarBytes (scalarBytes : ByteArray) : ByteArray :=
-  let clamped1 := scalarBytes.set! 0 (scalarBytes.get! 0 &&& 248)
-  let clamped2 := clamped1.set! 51 ((clamped1.get! 51 &&& 63) ||| 32)
-  clamped2
-
-def fromField (x : ZMod p) : ByteArray :=
-  let bytes := ByteArray.mk $ Array.mk $ (ByteArray.toList $ natToBytes x.val).reverse
-  bytes ++ ByteArray.mk (Array.mk (List.replicate (keySize - bytes.size) 0))
-
-def toField (ba : ByteArray) : ZMod p :=
+def mytoField (p : ℕ) (ba : ByteArray) : ZMod p :=
   let n := (ByteArray.mk $ Array.mk ba.toList.reverse).foldl (fun acc b => acc * 256 + b.toNat) 0
   n
 
-def clampScalar (scalar : ZMod p) : ZMod p :=
-  let b := fromField scalar
-  let newB := clampScalarBytes b
-  toField newB
+def scheme : Scheme := {
+  primeOrder := 2^414 - 17,
+  basepoint := mytoField (2^414 - 17) $ falliableHexStringToByteArray "0e7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7c3c",
+  keySize := 52,
+  a24 := mytoField (2^414 - 17) $ falliableHexStringToByteArray "543668f26583265f3668f26583265f3668f26583265f3668f26583265f3668f26583265f3626",
+  ladderSteps := 414,
+  clampScalar := fun scalarBytes =>
+    let c := scalarBytes.set! 0 (scalarBytes.get! 0 &&& 248)
+    c.set! 51 ((c.get! 51 &&& 63) ||| 32)
+}
 
-structure LadderState :=
-  (a : ZMod p)
-  (b : ZMod p)
-  (c : ZMod p)
-  (d : ZMod p)
-  (e : ZMod p)
-  (f : ZMod p)
-  (r : UInt8)
+def ecdh := newECDH scheme
 
-def A24 : ZMod p := toField $ infalliableHexStringToByteArray "543668f26583265f3668f26583265f3668f26583265f3668f26583265f3668f26583265f3626"
-def basepoint : ZMod p := toField $ infalliableHexStringToByteArray "0e7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7c3c"
-
-def cswap (swap : UInt8) (x y : ZMod p) : (ZMod p × ZMod p) :=
-  if swap == 1 then (y, x) else (x, y)
-
-def montgomery_step (state : LadderState) (z : ByteArray) (i : Nat) (pe : ZMod p) : LadderState :=
-  let r : UInt8 := (z.get! (i / 8) >>> UInt8.ofNat (i % 8)) &&& 1
-  let (a, b) := cswap r state.a state.b
-  let (c, d) := cswap r state.c state.d
-  let e := a + c
-  let a := a - c
-  let c := b + d
-  let b := b - d
-  let d := e^2
-  let f := a^2
-  let a := a * c
-  let c := b * e
-  let e := a + c
-  let a := a - c
-  let b := a^2
-  let c := d - f
-  let a := c * A24
-  let a := a + d
-  let c := c * a
-  let a := d * f
-  let d := b * pe
-  let b := e^2
-  let (a, b) := cswap r a b
-  let (c, d) := cswap r c d
-  { a := a, b := b, c := c, d := d, e := e, f := f, r := r }
-
-def montgomery_ladder (scalar : ZMod p) (point : ZMod p) : LadderState :=
-  let e : ByteArray := fromField scalar
-  let initState : LadderState := {
-    a := 1,
-    b := point,
-    c := 0,
-    d := 1,
-    e := 0,
-    f := 0,
-    r := 0,
-  }
-  let rec ladderRec (state : LadderState) (i : Nat) : LadderState :=
-    if i = 0 then
-      state
-    else
-      let newState := montgomery_step state e (i - 1) point
-      ladderRec newState (i - 1)
-  ladderRec initState 414
-
-def scalarmult (scalarBytes : ByteArray) (point : ZMod p) : ZMod p :=
-  let clampedScalar := toField $ clampScalarBytes scalarBytes
-  let finalState := montgomery_ladder clampedScalar point
-  finalState.a * finalState.c⁻¹
-
-def curve41417 (scalarBytes : ByteArray) (point : ByteArray) : ByteArray :=
-  fromField $ scalarmult scalarBytes $ toField point
+def curve41417 (point : ByteArray) (scalarBytes : ByteArray): ByteArray :=
+  ecdh.curve scalarBytes point
 
 /-
   NIKE type classes instances for x41417
 -/
 
-def PublicKeySize := keySize
-def PrivateKeySize := keySize
+def PublicKeySize := scheme.keySize
+def PrivateKeySize := scheme.keySize
 
 structure PrivateKey where
   data : ByteArray
@@ -124,14 +54,14 @@ structure PublicKey where
   data : ByteArray
 
 def generatePrivateKey : IO PrivateKey := do
-  let mut arr := ByteArray.mkEmpty keySize
-  for _ in [0:keySize] do
+  let mut arr := ByteArray.mkEmpty scheme.keySize
+  for _ in [0:scheme.keySize] do
     let randomByte ← IO.rand 0 255
     arr := arr.push (UInt8.ofNat randomByte)
   pure { data := arr }
 
 def derivePublicKey (sk : PrivateKey) : PublicKey :=
-    PublicKey.mk $ fromField $ (scalarmult sk.data basepoint)
+    PublicKey.mk $ ecdh.fromField $ (ecdh.scalarmult sk.data scheme.basepoint)
 
 def SchemeName := "X41417"
 
@@ -140,8 +70,8 @@ def Scheme : NIKE :=
   PublicKeyType := PublicKey
   PrivateKeyType := PrivateKey
 
-  privateKeySize := keySize,
-  publicKeySize := keySize,
+  privateKeySize := scheme.keySize,
+  publicKeySize := scheme.keySize,
 
   name := "X41417"
 
@@ -154,7 +84,7 @@ def Scheme : NIKE :=
 
   derivePublicKey := fun (sk : PrivateKey) => derivePublicKey sk,
 
-  groupAction := fun (sk : PrivateKey) (pk : PublicKey) => PublicKey.mk $ curve41417 sk.data pk.data,
+  groupAction := fun (sk : PrivateKey) (pk : PublicKey) => PublicKey.mk $ curve41417 pk.data sk.data,
 
   encodePrivateKey := fun (sk : PrivateKey) => sk.data,
   decodePrivateKey := fun (bytes : ByteArray) => some { data := bytes },

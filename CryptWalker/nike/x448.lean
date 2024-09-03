@@ -10,107 +10,39 @@ import Mathlib.Data.ByteArray
 import CryptWalker.util.newnat
 import CryptWalker.util.newhex
 import CryptWalker.nike.nike
+import CryptWalker.nike.MontgomeryLadder
 
 open CryptWalker.nike.nike
+open CryptWalker.nike.MontgomeryLadder
 
 namespace CryptWalker.nike.x448
 
 set_option exponentiation.threshold 448
 
-def p : ℕ := 2^448 - 2^224 - 1
-def basepoint : ZMod p := 5
-def keySize : ℕ := 56
 
-theorem p_is_prime : Nat.Prime p := by sorry
-instance fact_p_is_prime : Fact (Nat.Prime p) := ⟨p_is_prime⟩
-instance : Field (ZMod p) := ZMod.instField p
+def scheme : Scheme := {
+  primeOrder := 2^448 - 2^224 - 1,
+  basepoint := 5
+  keySize := 56
+  a24 := 39081
+  ladderSteps := 447
+  clampScalar := fun scalarBytes =>
+    let c := scalarBytes.set! 0 (scalarBytes.get! 0 &&& 0xfc)
+    c.set! 55 (c.get! 55 ||| 0x80)
+}
 
-def clampScalarBytes (scalarBytes : ByteArray) : ByteArray :=
-  let clamped1 := scalarBytes.set! 0 (scalarBytes.get! 0 &&& 0xfc)
-  let clamped2 := clamped1.set! 55 (clamped1.get! 55 ||| 0x80)
-  clamped2
+def ecdh := newECDH scheme
 
-def fromField (x : ZMod p) : ByteArray :=
-  let bytes := ByteArray.mk $ Array.mk $ (ByteArray.toList $ natToBytes x.val).reverse
-  bytes ++ ByteArray.mk (Array.mk (List.replicate (keySize - bytes.size) 0))
+def curve448 (point : ByteArray) (scalarBytes : ByteArray): ByteArray :=
+  ecdh.curve scalarBytes point
 
-def toField (ba : ByteArray) : ZMod p :=
-  let n := (ByteArray.mk $ Array.mk ba.toList.reverse).foldl (fun acc b => acc * 256 + b.toNat) 0
-  n
-
-def clampScalar (scalar : ZMod p) : ZMod p :=
-  let b := fromField scalar
-  let newB := clampScalarBytes b
-  toField newB
-
-structure LadderState :=
-  (x1 : ZMod p)
-  (x2 : ZMod p)
-  (z2 : ZMod p)
-  (x3 : ZMod p)
-  (z3 : ZMod p)
-
-def montgomery_step (s : LadderState) : LadderState :=
-  let tmp0 := s.x3 - s.z3
-  let tmp1 := s.x2 - s.z2
-  let x2 := s.x2 + s.z2
-  let z2 := s.x3 + s.z3
-  let z3 := (tmp0 * x2)
-  let z2 := z2 * tmp1
-  let tmp0 := tmp1^2
-  let tmp1 := x2^2
-  let x3 := z3 + z2
-  let z2 := z3 - z2
-  let x2 := tmp1 * tmp0
-  let tmp1 := tmp1 - tmp0
-  let z2 := z2^2
-  let z3 := tmp1 * 39081
-  let x3 := x3^2
-  let tmp0 := tmp0 + z3
-  let z3 := s.x1 * z2
-  let z2 := tmp1 * tmp0
-  { s with x2 := x2, z2 := z2, x3 := x3, z3 := z3 }
-
-def montgomery_ladder (scalar : ZMod p) (point : ZMod p) : LadderState :=
-  let e : ByteArray := fromField scalar
-  let initState : LadderState := {
-    x1 := point,
-    x2 := 1,
-    z2 := 0,
-    x3 := point,
-    z3 := 1
-  }
-  let finalState := (List.range 447).reverse.foldl (fun (state, swap) pos =>
-    let byteIndex := pos / 8
-    let bitIndex := pos % 8
-    let b : UInt8 := Nat.toUInt8 ((e.get! byteIndex).toNat >>> bitIndex) &&& 1
-    let newSwap := swap ^^^ b
-    let (x2, x3) := if newSwap == 1 then (state.x3, state.x2) else (state.x2, state.x3)
-    let (z2, z3) := if newSwap == 1 then (state.z3, state.z2) else (state.z2, state.z3)
-    let newState := montgomery_step { state with x2 := x2, x3 := x3, z2 := z2, z3 := z3 }
-    (newState, b)
-  ) (initState, 0)
-
-  let finalSwap := finalState.snd
-  let finalState := finalState.fst
-  let (x2, x3) := if finalSwap == 1 then (finalState.x3, finalState.x2) else (finalState.x2, finalState.x3)
-  let (z2, z3) := if finalSwap == 1 then (finalState.z3, finalState.z2) else (finalState.z2, finalState.z3)
-  { finalState with x2 := x2, x3 := x3, z2 := z2, z3 := z3 }
-
-def scalarmult (scalarBytes : ByteArray) (point : ZMod p) : ZMod p :=
-  let clampedScalar := toField $ clampScalarBytes scalarBytes
-  let finalState := montgomery_ladder clampedScalar point
-  finalState.x2 * finalState.z2⁻¹
-
-def curve448 (scalarBytes : ByteArray) (point : ByteArray) : ByteArray :=
-  fromField $ scalarmult scalarBytes $ toField point
 
 /-
   NIKE type classes instances for x448
 -/
 
-def PublicKeySize := keySize
-def PrivateKeySize := keySize
+def PublicKeySize := scheme.keySize
+def PrivateKeySize := scheme.keySize
 
 structure PrivateKey where
   data : ByteArray
@@ -119,14 +51,14 @@ structure PublicKey where
   data : ByteArray
 
 def generatePrivateKey : IO PrivateKey := do
-  let mut arr := ByteArray.mkEmpty keySize
-  for _ in [0:keySize] do
+  let mut arr := ByteArray.mkEmpty scheme.keySize
+  for _ in [0:scheme.keySize] do
     let randomByte ← IO.rand 0 255
     arr := arr.push (UInt8.ofNat randomByte)
   pure { data := arr }
 
 def derivePublicKey (sk : PrivateKey) : PublicKey :=
-    PublicKey.mk $ fromField $ (scalarmult sk.data basepoint)
+    PublicKey.mk $ ecdh.fromField $ (ecdh.scalarmult sk.data scheme.basepoint)
 
 def SchemeName := "X448"
 
@@ -135,8 +67,8 @@ def Scheme : NIKE :=
   PublicKeyType := PublicKey
   PrivateKeyType := PrivateKey
 
-  privateKeySize := keySize
-  publicKeySize := keySize
+  privateKeySize := scheme.keySize
+  publicKeySize := scheme.keySize
 
   name := SchemeName
 
@@ -149,7 +81,7 @@ def Scheme : NIKE :=
 
   derivePublicKey := fun (sk : PrivateKey) => derivePublicKey sk,
 
-  groupAction := fun (sk : PrivateKey) (pk : PublicKey) => PublicKey.mk $ curve448 sk.data pk.data,
+  groupAction := fun (sk : PrivateKey) (pk : PublicKey) => PublicKey.mk $ curve448 pk.data sk.data,
 
   encodePrivateKey := fun (sk : PrivateKey) => sk.data,
   decodePrivateKey := fun (bytes : ByteArray) => some { data := bytes },

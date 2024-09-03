@@ -10,6 +10,8 @@ import Mathlib.Data.ByteArray
 import CryptWalker.util.newnat
 import CryptWalker.util.newhex
 
+open CryptWalker.util.newhex
+
 namespace CryptWalker.sign.ed25519
 
 def p : ℕ := 2^255 - 19
@@ -27,7 +29,7 @@ def toField (ba : ByteArray) : ZMod p :=
   let n := (ByteArray.mk $ Array.mk ba.toList.reverse).foldl (fun acc b => acc * 256 + b.toNat) 0
   n
 
-def basepoint : ZMod p := toField $ infalliableHexStringToByteArray "5866666666666666666666666666666666666666666666666666666666666666"
+def basepoint : ZMod p := toField $ falliableHexStringToByteArray "5866666666666666666666666666666666666666666666666666666666666666"
 
 
 end CryptWalker.sign.ed25519

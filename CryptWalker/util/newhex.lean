@@ -1,6 +1,7 @@
 
 import Mathlib.Data.String.Basic
 
+namespace CryptWalker.util.newhex
 
 def byteToHex (b : UInt8) : String :=
   let high := hexDigitRepr (b.toNat / 16)
@@ -50,10 +51,12 @@ def hexStringToByteArray (s : String) : Option ByteArray :=
     | some bytes => some (ByteArray.mk (Array.mk bytes))
     | none => none
 
-def infalliableHexStringToByteArray (s : String) : ByteArray :=
+def falliableHexStringToByteArray (s : String) : ByteArray :=
   if s.length % 2 ≠ 0 then
     panic! "Hex string length must be even."
   else
     match hexStringToByteArrayAux s 0 [] with
     | some bytes => ByteArray.mk (Array.mk bytes)
     | none => panic! "Failed to convert hex string to ByteArray."
+
+end CryptWalker.util.newhex
