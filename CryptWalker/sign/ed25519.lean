@@ -17,10 +17,6 @@ namespace CryptWalker.sign.ed25519
 def p : ℕ := 2^255 - 19
 def keySize : ℕ := 32
 
-theorem p_is_prime : Nat.Prime p := by sorry
-instance fact_p_is_prime : Fact (Nat.Prime p) := ⟨p_is_prime⟩
-instance : Field (ZMod p) := ZMod.instField p
-
 def fromField (x : ZMod p) : ByteArray :=
   let bytes := ByteArray.mk $ Array.mk $ (ByteArray.toList $ natToBytes x.val).reverse
   bytes ++ ByteArray.mk (Array.mk (List.replicate (keySize - bytes.size) 0))
