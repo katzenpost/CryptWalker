@@ -5,8 +5,6 @@ import Mathlib.Data.ByteArray
 import CryptWalker.protocol.merkle_tree
 import CryptWalker.nike.nike
 import CryptWalker.nike.x25519
-import CryptWalker.nike.x448
-import CryptWalker.nike.x41417
 import CryptWalker.nike.schemes
 
 import CryptWalker.kem.adapter
@@ -46,8 +44,8 @@ def testUntilSet : IO Unit := do
 
 def testMerkleHashTreeInclusionProof : IO Unit := do
   let target := "3"
-  let targetByteArray := String.toAsciiByteArray target
-  let mht := fromList ByteArray sha256HashByteArraySettings (List.map String.toAsciiByteArray ["0", "1", "2", target, "4", "5", "6"])
+  let targetByteArray := String.toUTF8 target
+  let mht := fromList ByteArray sha256HashByteArraySettings (List.map String.toUTF8 ["0", "1", "2", target, "4", "5", "6"])
   let treeSize := 5
   let leafDigest := sha256HashByteArraySettings.hash1 targetByteArray
   let maybeProof := generateInclusionProof ByteArray leafDigest treeSize mht
@@ -64,7 +62,7 @@ def testMerkleHashTreeInclusionProof : IO Unit := do
 
 /-Creating a Merkle Hash Tree from a list of elements. O(n log n)-/
 def testMerkleHashTreeFromList : IO Unit := do
-  let mht := fromList ByteArray sha256HashByteArraySettings (List.map String.toAsciiByteArray ["0", "1", "2"])
+  let mht := fromList ByteArray sha256HashByteArraySettings (List.map String.toUTF8 ["0", "1", "2"])
   let (treeSize, rootHash) := info ByteArray mht
   if treeSize != 3 then
     panic! "wrong tree size"
@@ -89,7 +87,7 @@ def testAddHashTree : IO Unit := do
   IO.println s!"tree size {size} root hash {rootHash}"
 
 def testAddHashTree1 : IO Unit := do
-  let (size, rootHash) := info _ $ add _ (String.toAsciiByteArray "1") $ empty ByteArray sha256HashByteArraySettings
+  let (size, rootHash) := info _ $ add _ (String.toUTF8 "1") $ empty ByteArray sha256HashByteArraySettings
   if size != 1 then
     panic! "wrong tree size"
   else
@@ -104,39 +102,19 @@ def testAddHashTree1 : IO Unit := do
 -- NIKE tests
 
 def testX25519Vector : IO Unit := do
-  let privateKeyHex := "951c011657648c76090885822284c461e3c84bf66b8842adb438334499922890"
-  let publicKeyHex := "f5ea54714e6ebfbce3d9073173261ca4ea50a15066ae33461bae83780cf51c43"
-  let privKeyBytes : ByteArray := (hexStringToByteArray privateKeyHex).getD ByteArray.empty
-  IO.println s!"priv key {privKeyBytes}"
-  let s := CryptWalker.nike.x25519.Scheme
-  let privkey := CryptWalker.nike.x25519.PrivateKey.mk privKeyBytes
-  IO.println "before derivePublicKey"
-  let pubkey := s.derivePublicKey privkey
-  IO.println "after derivePublicKey"
-  let pubKeyBytes := pubkey.data
-  let expectedPubBytes := (hexStringToByteArray publicKeyHex).getD ByteArray.empty
-  if pubKeyBytes != expectedPubBytes then
-    panic! "public key mismatch"
-
-def testX448VectorKATs : IO Unit := do
   let vectors := #[
-    ( "3d262fddf9ec8e88495266fea19a34d28882acef045104d0d1aae121700a779c984c24f8cdd78fbff44943eba368f54b29259a4f1c600ad3",
-      "06fce640fa3487bfda5f6cf2d5263f8aad88334cbd07437f020f08f9814dc031ddbdc38c19c6da2583fa5429db94ada18aa7a7fb4ef8a086",
-      "ce3e4ff95a60dc6697da1db1d85e6afbd79b50a2412d7546d5f239fe14fbaadeb445fc66a01b0779d98223961111e21766282f73dd96b6f" ),
-
-    ( "203d494428b8399352665ddca42f9de8fef600908e0d461cb021f8c538345dd77c3e4806e25f46d3315c44e0a5b4371282dd2c8d5be3095f",
-      "0fbcc2f993cd56d3305b0b7d9e55d4c1a8fb5dbb52f8e9a1e9b6201b165d015894e56c4d3570bee52fe205e28a78b91cdfbde71ce8d157db",
-      "884a02576239ff7a2f2f63b2db6a9ff37047ac13568e1e30fe63c4a7ad1b3ee3a5700df34321d62077e63633c575c1c954514e99da7c179d" )
+    ( "a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4",
+      "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c",
+      "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552" )
   ]
-
   for (scalarHex, baseHex, expectedHex) in vectors do
     let scalarBytes : ByteArray := (hexStringToByteArray scalarHex).getD ByteArray.empty
     let baseBytes : ByteArray := (hexStringToByteArray baseHex).getD ByteArray.empty
     let expectedBytes : ByteArray := (hexStringToByteArray expectedHex).getD ByteArray.empty
-    let result := CryptWalker.nike.x448.curve448 scalarBytes baseBytes
+    let result := CryptWalker.nike.x25519.curve25519 baseBytes scalarBytes
     if result != expectedBytes then
       panic! s!"Mismatch in KAT: expected {expectedHex}, got {result}"
-  IO.println "All KATs passed for X448!"
+  IO.println "All vector tests passed for X25519!"
 
 def testNIKE (scheme : NIKE) : IO Unit := do
   let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair

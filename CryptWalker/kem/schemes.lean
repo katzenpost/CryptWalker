@@ -1,7 +1,5 @@
 
 import CryptWalker.nike.x25519
-import CryptWalker.nike.x448
-import CryptWalker.nike.x41417
 import CryptWalker.nike.nike
 import CryptWalker.kem.kem
 import CryptWalker.kem.adapter
@@ -18,18 +16,14 @@ open CryptWalker.hash.Sha2
 namespace CryptWalker.kem.schemes
 
 def kemX25519 := createKEMAdapter Sha256.hash x25519.Scheme
-def kemX448 := createKEMAdapter Sha256.hash x448.Scheme
-def kemX41417 := createKEMAdapter Sha256.hash x41417.Scheme
 
-def combinedClassicalKEM := createKEMCombiner "combinedClassicalKEM" Sha256.hash [kemX25519, kemX448, kemX41417]
+--def combinedClassicalKEM := createKEMCombiner "combinedClassicalKEM" Sha256.hash [kemX25519, kemX448, kemX41417]
 
 
 def Schemes : List KEM :=
 [
     kemX25519,
-    kemX448,
-    kemX41417,
-    combinedClassicalKEM
+--    combinedClassicalKEM
 ]
 
 end CryptWalker.kem.schemes
