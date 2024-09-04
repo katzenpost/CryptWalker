@@ -22,7 +22,7 @@ set_option exponentiation.threshold 415
 def p : ℕ := 2^414 - 17
 def keySize : ℕ := 52
 
-def clampScalarBytes (scalarBytes : ByteArray) : ByteArray :=
+def clampScalar (scalarBytes : ByteArray) : ByteArray :=
   let clamped1 := scalarBytes.set! 0 (scalarBytes.get! 0 &&& 248)
   let clamped2 := clamped1.set! 51 ((clamped1.get! 51 &&& 63) ||| 32)
   clamped2
@@ -34,11 +34,6 @@ def fromField (x : ZMod p) : ByteArray :=
 def toField (ba : ByteArray) : ZMod p :=
   let n := (ByteArray.mk $ Array.mk ba.toList.reverse).foldl (fun acc b => acc * 256 + b.toNat) 0
   n
-
-def clampScalar (scalar : ZMod p) : ZMod p :=
-  let b := fromField scalar
-  let newB := clampScalarBytes b
-  toField newB
 
 structure LadderState :=
   a : ZMod p
@@ -55,7 +50,7 @@ def cswap (swap : UInt8) (x y : ZMod p) : (ZMod p × ZMod p) :=
   if swap == 1 then (y, x) else (x, y)
 
 def scalar_mult (scalarBytes : ByteArray) (pointBytes : ByteArray) : LadderM Unit := do
-  let clampedScalar := clampScalarBytes scalarBytes
+  let clampedScalar := clampScalar scalarBytes
   let point := toField pointBytes
 
   let mut a : ZMod p := 1
