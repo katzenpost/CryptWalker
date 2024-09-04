@@ -5,6 +5,7 @@ import Mathlib.Data.ByteArray
 import CryptWalker.protocol.merkle_tree
 import CryptWalker.nike.nike
 import CryptWalker.nike.x25519
+import CryptWalker.nike.x41417
 import CryptWalker.nike.schemes
 
 import CryptWalker.kem.adapter
@@ -116,6 +117,21 @@ def testX25519Vector : IO Unit := do
       panic! s!"Mismatch in KAT: expected {expectedHex}, got {result}"
   IO.println "All vector tests passed for X25519!"
 
+def testX41417Vector : IO Unit := do
+  let vectors := #[
+    ( "75477721f3a25f894b1d9601f5cb7b16c9919533c62f549a4a8c4c1bd3efd32d5954cc76a24f0187413e97418d5b15f2714b7197",
+      "ce7576439e5505276992c0474f305752361ad87520b220b956b6a104e71faa23c18cc14000186fdd79266718a907112184b8d71c" )
+  ]
+  for (scalarHex, expectedHex) in vectors do
+    let scalarBytes : ByteArray := (hexStringToByteArray scalarHex).getD ByteArray.empty
+    let expectedBytes : ByteArray := (hexStringToByteArray expectedHex).getD ByteArray.empty
+    let privkey : CryptWalker.nike.x41417.PrivateKey := { data := scalarBytes }
+    let pubkey : CryptWalker.nike.x41417.PublicKey := CryptWalker.nike.x41417.derivePublicKey privkey
+    let result := pubkey.data
+    if result != expectedBytes then
+      panic! s!"Mismatch in KAT: expected {expectedHex}, got {result}"
+  IO.println "All vector tests passed for X25519!"
+
 def testNIKE (scheme : NIKE) : IO Unit := do
   let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
   let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
@@ -179,6 +195,7 @@ def main : IO Unit := do
 
 -- NIKE tests
   testX25519Vector
+  testX41417Vector
   testAllNIKEs CryptWalker.nike.schemes.Schemes
 
 -- KEM tests

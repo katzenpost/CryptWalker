@@ -15,16 +15,14 @@ Then you can write theorems and proofs about your model!
 
 Classical NIKEs:
 * X25519
-* X448
-* X41417
+* work-in-progress: X448
+* work-in-progres: X41417
 
 | KEM: Key Encapsulation Method |
 |:---:|
 
 Classical NIKEs adapted to KEM via hashed ElGamal construction:
 * X25519
-* X448
-* X41417
 
 | SIGN: Cryptographic Signature Scheme |
 |:---:|
