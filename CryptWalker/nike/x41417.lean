@@ -6,7 +6,8 @@ import Mathlib.Algebra.Field.Defs
 import Mathlib.Algebra.Field.Basic
 import Mathlib.Data.ZMod.Basic
 import Mathlib.Data.ByteArray
-import Batteries.Classes.SatisfiesM
+
+import Init.Control.State
 
 import CryptWalker.util.newnat
 import CryptWalker.util.newhex
@@ -44,7 +45,7 @@ structure LadderState :=
 abbrev LadderM := StateM LadderState
 
 def A24 : ZMod p := toField $ falliableHexStringToByteArray "543668f26583265f3668f26583265f3668f26583265f3668f26583265f3668f26583265f3626"
-def basepoint : ZMod p := toField $ falliableHexStringToByteArray "0e7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7c3c"
+def basepoint := falliableHexStringToByteArray "0e7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7cf0c1071f7c3c"
 
 def cswap (swap : UInt8) (x y : ZMod p) : (ZMod p × ZMod p) :=
   if swap == 1 then (y, x) else (x, y)
@@ -87,9 +88,9 @@ def scalar_mult (scalarBytes : ByteArray) (pointBytes : ByteArray) : LadderM Uni
   modify fun state => { state with a := a * c⁻¹ }
 
 def scalar_mult_base (scalarBytes : ByteArray) : ByteArray :=
-  let (_, st) := (scalar_mult scalarBytes $ fromField basepoint).run {
+  let (_, st) := (scalar_mult scalarBytes basepoint).run {
     a := 1,
-    b := basepoint,
+    b := toField basepoint,
     c := 0,
     d := 1
   }
