@@ -39,11 +39,11 @@ def clampScalar (scalar : ZMod p) : ZMod p :=
   toField newB
 
 structure LadderState :=
-  (x1 : ZMod p)
-  (x2 : ZMod p)
-  (z2 : ZMod p)
-  (x3 : ZMod p)
-  (z3 : ZMod p)
+  x1 : ZMod p
+  x2 : ZMod p
+  z2 : ZMod p
+  x3 : ZMod p
+  z3 : ZMod p
 
 def montgomery_step (s : LadderState) : LadderState :=
   let tmp0 := s.x3 - s.z3
