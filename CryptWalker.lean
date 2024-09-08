@@ -1,5 +1,4 @@
 import CryptWalker.nike.x25519
-import CryptWalker.nike.x448
 import CryptWalker.nike.nike
 import CryptWalker.nike.schemes
 import CryptWalker.hash.Sha2
