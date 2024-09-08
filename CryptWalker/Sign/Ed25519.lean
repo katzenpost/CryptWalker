@@ -7,12 +7,12 @@ import Mathlib.Algebra.Field.Basic
 import Mathlib.Data.ZMod.Basic
 import Mathlib.Data.ByteArray
 
-import CryptWalker.util.newnat
-import CryptWalker.util.newhex
+import CryptWalker.Util.newnat
+import CryptWalker.Util.newhex
 
-open CryptWalker.util.newhex
+open CryptWalker.Util.newhex
 
-namespace CryptWalker.sign.ed25519
+namespace CryptWalker.Sign.Ed25519
 
 def p : ℕ := 2^255 - 19
 def keySize : ℕ := 32
@@ -28,4 +28,4 @@ def toField (ba : ByteArray) : ZMod p :=
 def basepoint : ZMod p := toField $ falliableHexStringToByteArray "5866666666666666666666666666666666666666666666666666666666666666"
 
 
-end CryptWalker.sign.ed25519
+end CryptWalker.Sign.Ed25519

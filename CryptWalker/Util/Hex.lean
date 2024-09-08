@@ -14,7 +14,7 @@
  limitations under the License.
 -/
 
-namespace CryptWalker.util.Hex
+namespace CryptWalker.Util.Hex
 
 def charTable: Array Char
   := #[
@@ -45,4 +45,4 @@ def UInt32.toHex (val: UInt32): String
         let hi := UInt16.toHex (val >>> 16 &&& 0xffff).toNat.toUInt16
         hi ++ lo
 
-end CryptWalker.util.Hex
+end CryptWalker.Util.Hex

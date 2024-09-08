@@ -1,14 +1,14 @@
-import CryptWalker.util.Hex
-import CryptWalker.util.ByteArray
-import CryptWalker.util.UInt64
-import CryptWalker.util.Nat
+import CryptWalker.Util.Hex
+import CryptWalker.Util.ByteArray
+import CryptWalker.Util.UInt64
+import CryptWalker.Util.Nat
 
-open CryptWalker.util.Hex
-open CryptWalker.util.ByteArray
-open CryptWalker.util.UInt64
-open CryptWalker.util.Nat
+open CryptWalker.Util.Hex
+open CryptWalker.Util.ByteArray
+open CryptWalker.Util.UInt64
+open CryptWalker.Util.Nat
 
-namespace CryptWalker.hash.Sha2
+namespace CryptWalker.Hash.Sha2
 namespace Sha512
 
 def Nat.to_be64 (x: Nat): ByteArray := {
@@ -173,5 +173,4 @@ def hash (msg: ByteArray): ByteArray :=
 
 
 end Sha512
-end CryptWalker.hash.Sha2
-
+end CryptWalker.Hash.Sha2

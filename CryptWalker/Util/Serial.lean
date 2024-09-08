@@ -14,7 +14,7 @@
  limitations under the License.
 -/
 
-namespace CryptWalker.util.Serial
+namespace CryptWalker.Util.Serial
 
 class SerialUInt32 (X: Type) where
   words: Nat
@@ -43,4 +43,4 @@ instance : SerialWords UInt64 UInt64 where
   fromWords x := x[0]!
 
 
-end CryptWalker.util.Serial
+end CryptWalker.Util.Serial

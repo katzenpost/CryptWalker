@@ -3,15 +3,15 @@ SPDX-FileCopyrightText: Copyright (C) 2024 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
  -/
 
-import CryptWalker.kem.kem
-import CryptWalker.nike.nike
+import CryptWalker.KEM.KEM
+import CryptWalker.NIKE.NIKE
 
 -- NIKE to KEM adapter: a hashed ElGamal construction
 
-namespace CryptWalker.kem.adapter
+namespace CryptWalker.KEM.Adapter
 
-open CryptWalker.nike.nike
-open CryptWalker.kem.kem
+open CryptWalker.NIKE.NIKE
+open CryptWalker.KEM.KEM
 
 structure PrivateKey where
   data : ByteArray
@@ -60,4 +60,4 @@ def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
   decodePublicKey := fun bytes => some { data := bytes }
 }
 
-end CryptWalker.kem.adapter
+end CryptWalker.KEM.Adapter

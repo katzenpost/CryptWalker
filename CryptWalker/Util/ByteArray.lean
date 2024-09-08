@@ -14,13 +14,13 @@
  limitations under the License.
 -/
 
-import CryptWalker.util.UInt32
-import CryptWalker.util.UInt64
+import CryptWalker.Util.UInt32
+import CryptWalker.Util.UInt64
 
-namespace CryptWalker.util.ByteArray
+namespace CryptWalker.Util.ByteArray
 
-open CryptWalker.util.UInt32
-open CryptWalker.util.UInt64
+open CryptWalker.Util.UInt32
+open CryptWalker.Util.UInt64
 
 /- Endian helpers -/
 
@@ -69,4 +69,4 @@ partial def ByteArray.of_be64 (x: Subarray UInt64) (i: Nat := 0) (out: ByteArray
     ByteArray.of_be64 x (i + 1) (out ++ UInt64.to_be x[i])
   else out
 
-end CryptWalker.util.ByteArray
+end CryptWalker.Util.ByteArray

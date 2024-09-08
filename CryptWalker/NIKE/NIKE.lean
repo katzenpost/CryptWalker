@@ -2,9 +2,7 @@
 SPDX-FileCopyrightText: Copyright (C) 2024 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
  -/
-import Batteries.Classes.SatisfiesM
-
-namespace CryptWalker.nike.nike
+namespace CryptWalker.NIKE.NIKE
 
 structure NIKE where
   PublicKeyType : Type
@@ -23,4 +21,4 @@ structure NIKE where
   encodePublicKey : PublicKeyType → ByteArray
   decodePublicKey : ByteArray → Option PublicKeyType
 
-end CryptWalker.nike.nike
+end CryptWalker.NIKE.NIKE

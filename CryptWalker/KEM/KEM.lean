@@ -1,6 +1,5 @@
-import Batteries.Classes.SatisfiesM
 
-namespace CryptWalker.kem.kem
+namespace CryptWalker.KEM.KEM
 
   class KEM where
     PublicKeyType : Type
@@ -19,4 +18,4 @@ namespace CryptWalker.kem.kem
     encodePublicKey : PublicKeyType → ByteArray
     decodePublicKey : ByteArray → Option PublicKeyType
 
-end CryptWalker.kem.kem
+end CryptWalker.KEM.KEM

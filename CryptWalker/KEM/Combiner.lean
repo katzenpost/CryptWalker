@@ -4,10 +4,10 @@ SPDX-License-Identifier: AGPL-3.0-only
  -/
 
 import Mathlib.Data.ByteArray
-import CryptWalker.kem.kem
+import CryptWalker.KEM.KEM
 
-namespace CryptWalker.kem.combiner
-open CryptWalker.kem.kem
+namespace CryptWalker.KEM.Combiner
+open CryptWalker.KEM.KEM
 
 -- Security preserving KEM combiner
 
@@ -128,4 +128,4 @@ def createKEMCombiner (name : String) (hash : ByteArray → ByteArray) (KEMs : L
     | some keys => some { data := keys }
 }
 
-end CryptWalker.kem.combiner
+end CryptWalker.KEM.Combiner

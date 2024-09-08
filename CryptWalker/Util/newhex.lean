@@ -1,7 +1,7 @@
 
 import Mathlib.Data.String.Basic
 
-namespace CryptWalker.util.newhex
+namespace CryptWalker.Util.newhex
 
 def byteToHex (b : UInt8) : String :=
   let high := hexDigitRepr (b.toNat / 16)
@@ -59,4 +59,4 @@ def falliableHexStringToByteArray (s : String) : ByteArray :=
     | some bytes => ByteArray.mk (Array.mk bytes)
     | none => panic! "Failed to convert hex string to ByteArray."
 
-end CryptWalker.util.newhex
+end CryptWalker.Util.newhex

@@ -14,7 +14,7 @@
  limitations under the License.
 -/
 
-namespace CryptWalker.util.UInt64
+namespace CryptWalker.Util.UInt64
 
 def UInt64.test_bit (bit: Nat) (x: UInt64): Bool :=
   (1 <<< bit).toUInt64 &&& x != 0
@@ -78,4 +78,4 @@ def UInt64.to_be (x: UInt64): ByteArray :=
   let a7 := UInt8.ofNat <| UInt64.toNat <| (x >>> (8*7)) &&& 0xff
   { data := #[ a7, a6, a5, a4, a3, a2, a1, a0 ] }
 
-end CryptWalker.util.UInt64
+end CryptWalker.Util.UInt64

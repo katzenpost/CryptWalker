@@ -8,13 +8,13 @@ import Mathlib.Data.ZMod.Basic
 import Mathlib.Data.ByteArray
 import Mathlib.NumberTheory.LucasPrimality
 
-import CryptWalker.util.newnat
-import CryptWalker.util.newhex
-import CryptWalker.nike.nike
+import CryptWalker.Util.newnat
+import CryptWalker.Util.newhex
+import CryptWalker.NIKE.NIKE
 
-open CryptWalker.nike.nike
+open CryptWalker.NIKE.NIKE
 
-namespace CryptWalker.nike.x25519
+namespace CryptWalker.NIKE.X25519
 
 def p : ℕ := 2^255 - 19
 def basepoint : ZMod p := 9
@@ -153,4 +153,4 @@ def Scheme : NIKE :=
   decodePublicKey := fun (bytes : ByteArray) => some { data := bytes }
 }
 
-end CryptWalker.nike.x25519
+end CryptWalker.NIKE.X25519

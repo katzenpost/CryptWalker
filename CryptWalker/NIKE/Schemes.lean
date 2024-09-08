@@ -1,11 +1,11 @@
-import CryptWalker.nike.x25519
-import CryptWalker.nike.nike
+import CryptWalker.NIKE.X25519
+import CryptWalker.NIKE.NIKE
 
-namespace CryptWalker.nike.schemes
+namespace CryptWalker.NIKE
 
-def Schemes : List CryptWalker.nike.nike.NIKE :=
+def Schemes : List CryptWalker.NIKE.NIKE.NIKE :=
   [
-    CryptWalker.nike.x25519.Scheme,
+    CryptWalker.NIKE.X25519.Scheme,
   ]
 
-end CryptWalker.nike.schemes
+end CryptWalker.NIKE

@@ -14,18 +14,18 @@
  limitations under the License.
 -/
 
-import CryptWalker.util.Hex
-import CryptWalker.util.ByteArray
-import CryptWalker.util.Nat
-import CryptWalker.util.UInt32
-import CryptWalker.util.Serial
+import CryptWalker.Util.Hex
+import CryptWalker.Util.ByteArray
+import CryptWalker.Util.Nat
+import CryptWalker.Util.UInt32
+import CryptWalker.Util.Serial
 
-namespace CryptWalker.hash.Sha2
+namespace CryptWalker.Hash.Sha2
 
-open CryptWalker.util.ByteArray
-open CryptWalker.util.Nat
-open CryptWalker.util.UInt32
-open CryptWalker.util.Serial
+open CryptWalker.Util.ByteArray
+open CryptWalker.Util.Nat
+open CryptWalker.Util.UInt32
+open CryptWalker.Util.Serial
 
 namespace Sha256
 
@@ -203,4 +203,4 @@ def hash (msg: ByteArray): ByteArray :=
 
 end Sha256
 
-end CryptWalker.hash.Sha2
+end CryptWalker.Hash.Sha2

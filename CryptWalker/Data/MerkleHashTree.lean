@@ -8,9 +8,11 @@ import Lean.Data.HashMap
 import Init.Data.ToString
 import Mathlib.Tactic
 
-import CryptWalker.hash.Sha2
-import CryptWalker.util.newnat
-import CryptWalker.util.newhex
+import CryptWalker.Hash.Sha2
+import CryptWalker.Util.newnat
+import CryptWalker.Util.newhex
+
+namespace CryptWalker.Data.MerkleHashTree
 
 instance : BEq ByteArray where
   beq a b := a.data = b.data
@@ -22,9 +24,9 @@ structure Settings (α : Type) [Hashable α] where
   hash2 : ByteArray → ByteArray → ByteArray
 
 def sha256HashByteArraySettings : Settings ByteArray :=
-  { hash0 := CryptWalker.hash.Sha2.Sha256.hash (ByteArray.empty),
-    hash1 :=  fun x => CryptWalker.hash.Sha2.Sha256.hash (ByteArray.mk #[0x00] ++ x),
-    hash2 := fun x y => CryptWalker.hash.Sha2.Sha256.hash (ByteArray.mk #[0x01] ++ x ++ y) }
+  { hash0 := CryptWalker.Hash.Sha2.Sha256.hash (ByteArray.empty),
+    hash1 :=  fun x => CryptWalker.Hash.Sha2.Sha256.hash (ByteArray.mk #[0x00] ++ x),
+    hash2 := fun x y => CryptWalker.Hash.Sha2.Sha256.hash (ByteArray.mk #[0x01] ++ x ++ y) }
 
 inductive HashTree (α : Type) where
   | empty (hash : ByteArray)
@@ -227,3 +229,6 @@ def verifyInclusionProof (α : Type) [Hashable α] (settings : Settings α) (lea
           let (index', treeSize') := shiftR1 (index, treeSize)
           verify index' treeSize' currentHash' ps
     verify proof.index (proof.treeSize - 1) leafHash proof.proof
+
+
+end CryptWalker.Data.MerkleHashTree

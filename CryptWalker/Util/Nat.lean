@@ -14,7 +14,7 @@
  limitations under the License.
 -/
 
-namespace CryptWalker.util.Nat
+namespace CryptWalker.Util.Nat
 
 
 /- Serialize/deserialize helpers -/
@@ -51,4 +51,4 @@ partial def Nat.log2_ceil (value: Nat) (result: Nat := 0): Nat
 partial def Nat.log2_floor (value: Nat) (result: Nat := 0): Nat
   := if (1 <<< (result + 1)) > value then result else log2_floor value (result + 1)
 
-end CryptWalker.util.Nat
+end CryptWalker.Util.Nat
