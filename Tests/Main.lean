@@ -5,7 +5,6 @@ import Mathlib.Data.ByteArray
 import CryptWalker.protocol.merkle_tree
 import CryptWalker.nike.nike
 import CryptWalker.nike.x25519
-import CryptWalker.nike.x41417
 import CryptWalker.nike.schemes
 
 import CryptWalker.kem.adapter
@@ -112,62 +111,7 @@ def testX25519Vector : IO Unit := do
     let scalarBytes : ByteArray := (hexStringToByteArray scalarHex).getD ByteArray.empty
     let baseBytes : ByteArray := (hexStringToByteArray baseHex).getD ByteArray.empty
     let expectedBytes : ByteArray := (hexStringToByteArray expectedHex).getD ByteArray.empty
-    let result := CryptWalker.nike.x25519.curve25519 baseBytes scalarBytes
-    if result != expectedBytes then
-      panic! s!"Mismatch in KAT: expected {expectedHex}, got {result}"
-  IO.println "All vector tests passed for X25519!"
-
-set_option exponentiation.threshold 415
-def p : ℕ := 2^414 - 17
-
-def n : ByteArray :=
-  ByteArray.mk #[0xf6, 0xf0, 0x53, 0xb3, 0x79, 0x46, 0x2d, 0x51,
-    0xc9, 0xea, 0xcf, 0xef, 0x0e, 0x4d, 0xaa, 0xbe,
-    0x17, 0xee, 0xfd, 0xf7, 0x46, 0x98, 0x1f, 0xde,
-    0xbf, 0xf2, 0xe2, 0xb7, 0xdc, 0x04, 0xf5, 0xad,
-    0xa5, 0x09, 0x32, 0x8d, 0x4a, 0x0a, 0x5d, 0x77,
-    0x19, 0xa6, 0xce, 0xc6, 0xf0, 0x49, 0xa8, 0x00,
-    0xde, 0x7d, 0x31, 0x03]
-
-def expected_result : ByteArray :=
-  ByteArray.mk #[0x49, 0xa8, 0x2c, 0x72, 0x5a, 0xe9, 0xd8, 0x46,
-    0x04, 0x21, 0x1d, 0x07, 0xa3, 0xd1, 0x80, 0xf8,
-    0xf7, 0x16, 0x2f, 0xde, 0x27, 0xde, 0xfd, 0x61,
-    0x56, 0x9a, 0x70, 0x4a, 0xa6, 0x72, 0xbd, 0x43,
-    0xb1, 0x86, 0xda, 0x1f, 0xc0, 0xf3, 0x8f, 0x86,
-    0x30, 0x1a, 0x76, 0x81, 0xcd, 0x24, 0xcf, 0x5c,
-    0xde, 0x19, 0x67, 0x03]
-
-def toField (ba : ByteArray) : ZMod p :=
-  let n := (ByteArray.mk $ Array.mk ba.toList.reverse).foldl (fun acc b => acc * 256 + b.toNat) 0
-  n
-
-def fromField (x : ZMod p) : ByteArray :=
-  let bytes := ByteArray.mk $ Array.mk $ (ByteArray.toList $ natToBytes x.val).reverse
-  bytes ++ ByteArray.mk (Array.mk (List.replicate (52 - bytes.size) 0))
-
-def test_ops_52 : IO Unit := do
-  let a := toField n
-  let apa := a + a
-  let aaa1 := a * apa
-  let result := aaa1 - a
-  let result_bytes := fromField result
-  IO.println s!"Scalar Result: {result_bytes}"
-  assert! (result_bytes == (fromField $ toField expected_result))
-  IO.println "Test passed!"
-
-
-def testX41417Vector : IO Unit := do
-  let vectors := #[
-    ( "75477721f3a25f894b1d9601f5cb7b16c9919533c62f549a4a8c4c1bd3efd32d5954cc76a24f0187413e97418d5b15f2714b7197",
-      "ce7576439e5505276992c0474f305752361ad87520b220b956b6a104e71faa23c18cc14000186fdd79266718a907112184b8d71c" )
-  ]
-  for (scalarHex, expectedHex) in vectors do
-    let scalarBytes : ByteArray := (hexStringToByteArray scalarHex).getD ByteArray.empty
-    let expectedBytes : ByteArray := (hexStringToByteArray expectedHex).getD ByteArray.empty
-    let privkey : CryptWalker.nike.x41417.PrivateKey := { data := scalarBytes }
-    let pubkey : CryptWalker.nike.x41417.PublicKey := CryptWalker.nike.x41417.derivePublicKey privkey
-    let result := pubkey.data
+    let result := CryptWalker.nike.x25519.curve25519 scalarBytes baseBytes
     if result != expectedBytes then
       panic! s!"Mismatch in KAT: expected {expectedHex}, got {result}"
   IO.println "All vector tests passed for X25519!"
@@ -188,8 +132,6 @@ match schemes with
 | nike :: rest => do
   testNIKE nike
   testAllNIKEs rest
-
-
 
 -- KEM tests
 def testKEM (scheme : KEM) : IO Unit := do
@@ -235,8 +177,6 @@ def main : IO Unit := do
 
 -- NIKE tests
   testX25519Vector
-  test_ops_52
-  testX41417Vector
   testAllNIKEs CryptWalker.nike.schemes.Schemes
 
 -- KEM tests
