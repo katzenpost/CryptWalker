@@ -14,7 +14,7 @@ Then you can write theorems and proofs about your model!
 |:---:|
 
 Classical NIKEs:
-* X25519
+* X25519 (constant time Montgomery Ladder)
 * work-in-progress: X448
 * work-in-progres: X41417
 
@@ -32,6 +32,28 @@ Classical NIKEs adapted to KEM via hashed ElGamal construction:
 |:---:|
 * SHA256
 * work-in-progress: SHA512
+
+| DATAstructures |
+|:---:|
+* Binary Merkle Hash Tree polymorphic over the hash function
+
+
+## developer notes
+
+*building*
+
+```bash
+lake build
+```
+
+*testing*
+
+```bash
+lake env lean --run CryptWalker/Data/test.lean 
+lake env lean --run CryptWalker/NIKE/test.lean 
+lake env lean --run CryptWalker/KEM/test.lean 
+lake env lean --run CryptWalker/Sign/test.lean 
+```
 
 ## licensing
 

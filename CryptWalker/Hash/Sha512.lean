@@ -2,7 +2,9 @@ import CryptWalker.Util.Hex
 import CryptWalker.Util.ByteArray
 import CryptWalker.Util.UInt64
 import CryptWalker.Util.Nat
+import CryptWalker.Util.newhex
 
+open CryptWalker.Util.newhex
 open CryptWalker.Util.Hex
 open CryptWalker.Util.ByteArray
 open CryptWalker.Util.UInt64

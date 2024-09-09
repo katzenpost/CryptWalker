@@ -12,8 +12,3 @@ require mathlib from git
 
 @[default_target]
 lean_lib «CryptWalker» where
-
-@[test_driver]
-lean_exe tests {
-  root := `Tests.Main
-}
