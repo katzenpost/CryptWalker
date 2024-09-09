@@ -49,10 +49,10 @@ lake build
 *testing*
 
 ```bash
-lake env lean --run CryptWalker/Data/test.lean 
-lake env lean --run CryptWalker/NIKE/test.lean 
-lake env lean --run CryptWalker/KEM/test.lean 
-lake env lean --run CryptWalker/Sign/test.lean 
+lake env lean --run CryptWalker/Data/test.lean
+lake env lean --run CryptWalker/NIKE/test.lean
+lake env lean --run CryptWalker/KEM/test.lean
+lake env lean --run ./CryptWalker/Hash/test.lean
 ```
 
 ## licensing
