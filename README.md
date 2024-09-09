@@ -55,6 +55,13 @@ lake env lean --run CryptWalker/KEM/test.lean
 lake env lean --run ./CryptWalker/Hash/test.lean
 ```
 
+*benchmarks*
+
+```bash
+lake env lean --run CryptWalker/NIKE/benchmark.lean
+count: 1000 elapsed: 2765066159.000000 ns average 2765066.159000 ns
+```
+
 ## licensing
 
 AGPLv3
