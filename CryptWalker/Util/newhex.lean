@@ -52,11 +52,13 @@ def hexStringToByteArray (s : String) : Option ByteArray :=
     | none => none
 
 def falliableHexStringToByteArray (s : String) : ByteArray :=
-  if s.length % 2 ≠ 0 then
-    panic! "Hex string length must be even."
-  else
-    match hexStringToByteArrayAux s 0 [] with
-    | some bytes => ByteArray.mk (Array.mk bytes)
-    | none => panic! "Failed to convert hex string to ByteArray."
+  match s.length, s.length % 2 with
+  | 1, _ => match hexStringToByteArrayAux ("0" ++ s) 0 [] with
+        | some bytes => ByteArray.mk (Array.mk bytes)
+        | none => panic! "Failed to convert hex string to ByteArray."
+  | _, 0 => match hexStringToByteArrayAux s 0 [] with
+        | some bytes => ByteArray.mk (Array.mk bytes)
+        | none => panic! "Failed to convert hex string to ByteArray."
+  | _, _ => panic! "Hex string length must be even or 1."
 
 end CryptWalker.Util.newhex

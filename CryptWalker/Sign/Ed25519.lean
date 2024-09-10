@@ -11,6 +11,7 @@ import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 
 open CryptWalker.Util.newhex
+open CryptWalker.Util.newnat
 
 namespace CryptWalker.Sign.Ed25519
 

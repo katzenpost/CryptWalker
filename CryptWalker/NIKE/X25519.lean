@@ -12,6 +12,7 @@ import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 import CryptWalker.NIKE.NIKE
 
+open CryptWalker.Util.newnat
 open CryptWalker.NIKE.NIKE
 
 namespace CryptWalker.NIKE.X25519
