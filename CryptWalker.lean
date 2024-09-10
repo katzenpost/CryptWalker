@@ -16,3 +16,4 @@ import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Schemes
 import CryptWalker.KEM.Combiner
 import CryptWalker.Sign.Ed25519
+import CryptWalker.StreamCipher.Chacha20
