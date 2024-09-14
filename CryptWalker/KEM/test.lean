@@ -6,7 +6,6 @@ import CryptWalker.NIKE.X25519
 
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Schemes
-import CryptWalker.Hash.Sha512
 
 open CryptWalker.Util.newhex
 open CryptWalker.NIKE

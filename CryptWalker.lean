@@ -2,7 +2,6 @@ import CryptWalker.NIKE.X25519
 import CryptWalker.NIKE.NIKE
 import CryptWalker.NIKE.Schemes
 import CryptWalker.Hash.Sha2
-import CryptWalker.Hash.Sha512
 import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Hex

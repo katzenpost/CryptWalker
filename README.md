@@ -49,17 +49,17 @@ lake build
 *testing*
 
 ```bash
-lake env lean --run CryptWalker/Data/test.lean
-lake env lean --run CryptWalker/NIKE/test.lean
-lake env lean --run CryptWalker/KEM/test.lean
-lake env lean --run ./CryptWalker/Hash/test.lean
+lake exe CryptWalker.Data.test
+lake exe CryptWalker.NIKE.test
+lake exe CryptWalker.KEM.test
 ```
 
 *benchmarks*
 
 ```bash
-lake env lean --run CryptWalker/NIKE/benchmark.lean
-count: 1000 elapsed: 2765066159.000000 ns average 2765066.159000 ns
+lake exe CryptWalker.NIKE.benchmark
+
+Benchmark_X25519_ECDH        1000 iter      1253957 ns/op
 ```
 
 ## licensing

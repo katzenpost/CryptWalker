@@ -1,5 +1,3 @@
-
-import Lean
 import Mathlib.Data.ByteArray
 
 import CryptWalker.NIKE.NIKE
@@ -8,13 +6,12 @@ import CryptWalker.NIKE.Schemes
 import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 
+import Bench
+open Bench
+
 open CryptWalker.Util.newhex
 open CryptWalker.NIKE.NIKE
 open CryptWalker.NIKE.X25519
-
-instance : BEq ByteArray where
-  beq a b := a.data = b.data
-
 
 def genkey : IO ByteArray := do
   let mut arr := ByteArray.mkEmpty keySize
@@ -39,9 +36,12 @@ def benchmarkCurve25519ECDH : IO Unit := do
   startTime ← IO.monoNanosNow
 
   let mut results := []
+  let mut b := Bench.new
 
   for sk in privkeys do
+    b ← b.start
     let result := curve25519 sk pubkey
+    b ← b.stop
     results := results ++ [result]
 
   endTime ← IO.monoNanosNow
@@ -49,7 +49,7 @@ def benchmarkCurve25519ECDH : IO Unit := do
   let count := privkeys.length
   let average := elapsed / count.toFloat
   IO.println s!"count: {privkeys.length} elapsed: {elapsed} ns average {average} ns"
-
+  b.report "Benchmark_X25519_ECDH"
   pure ()
 
 
