@@ -22,34 +22,27 @@ def genkey : IO ByteArray := do
 
 
 def benchmarkCurve25519ECDH : IO Unit := do
+  let mut b := Bench.new
+
   let privkey : ByteArray ← genkey
   let pubkey := fromField $ (scalarmult privkey basepoint)
   let mut privkeys : List ByteArray := []
-  for _ in (List.range 1000) do
+
+  -- create b.N number of test cases
+  for _ in (List.range b.N) do
     let key ← genkey
     privkeys := privkeys ++ [key]
 
-  let mut startTime := 0
-  let mut endTime := 0
-  let mut elapsed := 0
-
-  startTime ← IO.monoNanosNow
-
-  let mut results := []
-  let mut b := Bench.new
-
+  let mut results :=  Array.mkArray 1000 ByteArray.empty
+  let mut i := 0
   for sk in privkeys do
     b ← b.start
     let result := curve25519 sk pubkey
     b ← b.stop
-    results := results ++ [result]
+    results := results.set! i result
+    i := i + 1
 
-  endTime ← IO.monoNanosNow
-  elapsed := (endTime - startTime).toFloat
-  let count := privkeys.length
-  let average := elapsed / count.toFloat
-  IO.println s!"count: {privkeys.length} elapsed: {elapsed} ns average {average} ns"
-  b.report "Benchmark_X25519_ECDH"
+  b.report "benchmarkCurve25519ECDH"
   pure ()
 
 

@@ -85,7 +85,7 @@
    "type": "git",
    "subDir": null,
    "scope": "",
-   "rev": "55ad9df36043b6ccd151ed47dbf58bbe7df0958c",
+   "rev": "08fdf8596388c9c00bb603f76e96953db891f5b7",
    "name": "Bench",
    "manifestFile": "lake-manifest.json",
    "inputRev": null,
