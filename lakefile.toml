@@ -1,0 +1,32 @@
+name = "CryptWalker"
+defaultTargets = ["CryptWalker"]
+
+[leanOptions]
+pp.unicode.fun = true
+autoImplicit = false
+relaxedAutoImplicit = false
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.31.0"
+
+[[require]]
+name = "Bench"
+git = "https://github.com/david415/bench"
+rev = "main"
+
+[[lean_lib]]
+name = "CryptWalker"
+
+[[lean_exe]]
+name = "CryptWalker.Data.test"
+
+[[lean_exe]]
+name = "CryptWalker.NIKE.test"
+
+[[lean_exe]]
+name = "CryptWalker.KEM.test"
+
+[[lean_exe]]
+name = "CryptWalker.NIKE.benchmark"

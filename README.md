@@ -15,8 +15,6 @@ Then you can write theorems and proofs about your model!
 
 Classical NIKEs:
 * X25519 (constant time Montgomery Ladder)
-* work-in-progress: X448
-* work-in-progres: X41417
 
 | KEM: Key Encapsulation Method |
 |:---:|
@@ -26,12 +24,10 @@ Classical NIKEs adapted to KEM via hashed ElGamal construction:
 
 | SIGN: Cryptographic Signature Scheme |
 |:---:|
-* work-in-progress: ed25519
 
 | PRF: Pseuodo Random Function |
 |:---:|
 * SHA256
-* work-in-progress: SHA512
 
 | DATAstructures |
 |:---:|
