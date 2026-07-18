@@ -3,8 +3,7 @@
  https://github.com/kazu-yamamoto/hash-tree/blob/main/Data/HashTree/Internal.hs
 -/
 
---import Mathlib.Data.ByteArray
-import Lean.Data.HashMap
+import Std.Data.HashMap
 import Init.Data.ToString
 import Mathlib.Tactic
 
@@ -16,6 +15,9 @@ namespace CryptWalker.Data.MerkleHashTree
 
 instance : BEq ByteArray where
   beq a b := a.data = b.data
+
+instance : Hashable ByteArray where
+  hash a := hash a.data
 
 /-! Settings for Merkle Hash Trees. -/
 structure Settings (α : Type) [Hashable α] where
@@ -52,14 +54,14 @@ instance {α : Type} : Inhabited (HashTree α) where
 structure MerkleHashTrees (α : Type) [Hashable α] :=
   (settings : Settings α)
   (size : Nat)
-  (hashtrees : (Lean.HashMap Nat (HashTree α)))
-  (indices : (Lean.HashMap ByteArray Nat))
+  (hashtrees : (Std.HashMap Nat (HashTree α)))
+  (indices : (Std.HashMap ByteArray Nat))
 
 /-! currentHead returns the current Merkle Tree head -/
 def currentHead (α : Type) [Hashable α] (tree : MerkleHashTrees α) : (HashTree α):=
-  match Lean.HashMap.findEntry? tree.hashtrees tree.size with
+  match tree.hashtrees[tree.size]? with
   | .none => panic! "current head not found"
-  | some (_, ht) => ht
+  | some ht => ht
 
 
 def printHashTree {α : Type} [Repr α] (tree : HashTree α) : IO Unit :=
@@ -81,17 +83,17 @@ def printMerkleHashTrees {α : Type} [Repr α] [Hashable α] (mht : MerkleHashTr
 
 /-! digest gets the current Merkle Tree hash value -/
 def digest (α : Type) [Hashable α] (treeSize : Nat) (tree : MerkleHashTrees α) : ByteArray :=
-  match Lean.HashMap.findEntry? tree.hashtrees treeSize with
+  match tree.hashtrees[treeSize]? with
   | .none => panic! "failed to find entry in hash tree"
-  | some (_, ht) =>
+  | some ht =>
     match ht with
     | HashTree.empty hash => hash
     | HashTree.leaf hash _ _ => hash
     | HashTree.node hash _ _ _ _ => hash
 
 def index (α : Type) [Hashable α] (tree : MerkleHashTrees α) (hash : ByteArray) : Nat :=
-  match Lean.HashMap.findEntry? tree.indices hash with
-  | some n => n.snd
+  match tree.indices[hash]? with
+  | some n => n
   | none => panic! "failed to find tree index"
 
 /-! info gets the root information of the Merkle Hash tree.
@@ -101,8 +103,8 @@ def info (α : Type) [Hashable α] (tree : MerkleHashTrees α) : (Nat × ByteArr
 
 /-! empty creates an empty 'MerkleHashTrees'. -/
 def empty (α : Type) [Hashable α] (settings : Settings α) : MerkleHashTrees α :=
-  let indices := (Lean.mkHashMap).insert 0 (HashTree.empty settings.hash0)
-  MerkleHashTrees.mk settings 0 indices (Lean.mkHashMap)
+  let hashtrees := (∅ : Std.HashMap Nat (HashTree α)).insert 0 (HashTree.empty settings.hash0)
+  MerkleHashTrees.mk settings 0 hashtrees ∅
 
 /-! hashValue returns the hash value for the given HashTree. -/
 def hashValue (α : Type) [Hashable α] (tree : HashTree α) : ByteArray :=
@@ -134,7 +136,7 @@ def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : Merkl
   else
     let newSize := tree.size + 1
     let newLeaf := HashTree.leaf hx tree.size inp
-    let newHt := match tree.hashtrees.find? tree.size with
+    let newHt := match tree.hashtrees[tree.size]? with
       | some ht => insert ht
       | none => newLeaf -- not reached
     let newHashTrees := tree.hashtrees.insert newSize newHt
@@ -176,7 +178,7 @@ instance : Inhabited InclusionProof where
   default := { index := 0, treeSize := 0, proof := [] }
 
 def sizeTree (α : Type) [Hashable α] (tree : MerkleHashTrees α) (treeSize : Nat) : (HashTree α) :=
-  match tree.hashtrees.find? treeSize with
+  match tree.hashtrees[treeSize]? with
   | none => panic! "failed to find hash tree entry"
   | .some x => x
 

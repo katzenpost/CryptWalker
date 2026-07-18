@@ -1,5 +1,4 @@
 
-import Mathlib.Data.ByteArray
 import CryptWalker.Data.MerkleHashTree
 import CryptWalker.Util.newhex
 

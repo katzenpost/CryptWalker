@@ -46,14 +46,14 @@ def UInt64.ror (x: UInt64) (n: Nat): UInt64 :=
   l ||| r
 
 def UInt64.of_be64 (b7 b6 b5 b4 b3 b2 b1 b0: UInt8): UInt64 :=
-  let c0 := UInt64.ofNat (b0.val.val)
-  let c1 := UInt64.ofNat (b1.val.val) <<< (8*1)
-  let c2 := UInt64.ofNat (b2.val.val) <<< (8*2)
-  let c3 := UInt64.ofNat (b3.val.val) <<< (8*3)
-  let c4 := UInt64.ofNat (b4.val.val) <<< (8*4)
-  let c5 := UInt64.ofNat (b5.val.val) <<< (8*5)
-  let c6 := UInt64.ofNat (b6.val.val) <<< (8*6)
-  let c7 := UInt64.ofNat (b7.val.val) <<< (8*7)
+  let c0 := UInt64.ofNat b0.toNat
+  let c1 := UInt64.ofNat b1.toNat <<< (8*1)
+  let c2 := UInt64.ofNat b2.toNat <<< (8*2)
+  let c3 := UInt64.ofNat b3.toNat <<< (8*3)
+  let c4 := UInt64.ofNat b4.toNat <<< (8*4)
+  let c5 := UInt64.ofNat b5.toNat <<< (8*5)
+  let c6 := UInt64.ofNat b6.toNat <<< (8*6)
+  let c7 := UInt64.ofNat b7.toNat <<< (8*7)
   c7 ||| c6 ||| c5 ||| c4 ||| c3 ||| c2 ||| c1 ||| c0
 
 def UInt64.to_le (x: UInt64): ByteArray :=

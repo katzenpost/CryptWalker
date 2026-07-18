@@ -5,7 +5,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Mathlib.Algebra.Field.Defs
 import Mathlib.Algebra.Field.Basic
 import Mathlib.Data.ZMod.Basic
-import Mathlib.Data.ByteArray
 import Mathlib.NumberTheory.LucasPrimality
 
 import CryptWalker.Util.newnat
@@ -118,7 +117,7 @@ structure PublicKey where
   data : ByteArray
 
 def generatePrivateKey : IO PrivateKey := do
-  let mut arr := ByteArray.mkEmpty keySize
+  let mut arr := ByteArray.emptyWithCapacity keySize
   for _ in [0:keySize] do
     let randomByte ← IO.rand 0 255
     arr := arr.push (UInt8.ofNat randomByte)
