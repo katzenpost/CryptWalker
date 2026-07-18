@@ -12,3 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@v1
+        with:
+          build-args: "CryptWalker CryptWalker.Data.test CryptWalker.NIKE.test CryptWalker.KEM.test CryptWalker.NIKE.benchmark"
+      - name: Run tests
+        env:
+          # panics in compiled Lean print a message but exit 0 unless this is set
+          LEAN_ABORT_ON_PANIC: "1"
+        run: |
+          ./.lake/build/bin/CryptWalker-Data-test
+          ./.lake/build/bin/CryptWalker-NIKE-test
+          ./.lake/build/bin/CryptWalker-KEM-test
