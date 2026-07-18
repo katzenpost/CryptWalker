@@ -3,7 +3,6 @@ SPDX-FileCopyrightText: Copyright (C) 2024 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
  -/
 
-import Mathlib.Data.ByteArray
 import CryptWalker.KEM.KEM
 
 namespace CryptWalker.KEM.Combiner
@@ -29,14 +28,14 @@ def xorByteArrays (a b : ByteArray) : ByteArray :=
   if a.size ≠ b.size then
     panic! "xorByteArrays: ByteArrays must be of equal size"
   else
-    ByteArray.mk (Array.zipWith a.data b.data fun x y => x ^^^ y)
+    ByteArray.mk (Array.zipWith (fun x y => x ^^^ y) a.data b.data)
 
 def splitPRF (hash : ByteArray → ByteArray) (ss : List ByteArray) (ct : List ByteArray) : ByteArray :=
   if ss.length != ct.length then
     panic! "splitPRF failure: mismatched List lengths"
   else
     let bigCt : ByteArray := ct.foldl (fun acc blob => acc ++ blob) ByteArray.empty
-    (ss.map (fun x => hash (x ++ bigCt))).foldl (fun acc h => xorByteArrays acc h) (ByteArray.mk (Array.mkArray hashSize 0))
+    (ss.map (fun x => hash (x ++ bigCt))).foldl (fun acc h => xorByteArrays acc h) (ByteArray.mk (Array.replicate hashSize 0))
 
 structure PrivateKey where
   data : List ByteArray

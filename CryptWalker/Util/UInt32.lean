@@ -39,10 +39,10 @@ def UInt32.ror (x: UInt32) (n: Nat): UInt32 :=
   l ||| r
 
 def UInt32.of_be32 (b3 b2 b1 b0: UInt8): UInt32 :=
-  let c0 := UInt32.ofNat (b0.val.val)
-  let c1 := UInt32.ofNat (b1.val.val) <<< (8*1)
-  let c2 := UInt32.ofNat (b2.val.val) <<< (8*2)
-  let c3 := UInt32.ofNat (b3.val.val) <<< (8*3)
+  let c0 := UInt32.ofNat b0.toNat
+  let c1 := UInt32.ofNat b1.toNat <<< (8*1)
+  let c2 := UInt32.ofNat b2.toNat <<< (8*2)
+  let c3 := UInt32.ofNat b3.toNat <<< (8*3)
   c3 ||| c2 ||| c1 ||| c0
 
 def UInt32.to_le (x: UInt32): ByteArray :=

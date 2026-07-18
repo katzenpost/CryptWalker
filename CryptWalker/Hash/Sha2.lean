@@ -135,7 +135,7 @@ def prepare (msg: ByteArray): Array UInt32 :=
       let size := msg.size + 1 + 8
       let rem := size % 64
       if rem == 0 then 0 else 64 - rem
-    { data := #[0x80] ++ Array.mkArray padding_required 0x00 }
+    { data := #[0x80] ++ Array.replicate padding_required 0x00 }
   let length := Nat.to_be64 (msg.size * 8)
   ByteArray.to_be32 (msg ++ padding ++ length)
 
@@ -150,7 +150,7 @@ def to_chunks (msg: Array UInt32): List (Array UInt32)
 
 def schedule (message: Array UInt32): Array UInt32
   := Id.run do
-        let mut w: Array UInt32 := Array.mkEmpty 64
+        let mut w: Array UInt32 := Array.emptyWithCapacity 64
         for i in [0:64] do
           if i < 16
             then w := w.push message[i]!

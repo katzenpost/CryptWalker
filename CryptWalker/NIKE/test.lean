@@ -1,6 +1,5 @@
 
 import Lean
-import Mathlib.Data.ByteArray
 
 import CryptWalker.NIKE.NIKE
 import CryptWalker.NIKE.X25519

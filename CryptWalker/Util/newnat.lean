@@ -1,6 +1,4 @@
 
-import Mathlib.Data.ByteArray
-
 namespace CryptWalker.Util.newnat
 
 def natToBytesAux (n : Nat) (acc : List UInt8) : List UInt8 :=

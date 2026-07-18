@@ -14,4 +14,3 @@ import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Schemes
 import CryptWalker.KEM.Combiner
-import CryptWalker.Sign.Ed25519
