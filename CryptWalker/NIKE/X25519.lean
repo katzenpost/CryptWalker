@@ -38,7 +38,7 @@ def clampScalar (scalar : ZMod p) : ZMod p :=
   let newB := clampScalarBytes b
   toField newB
 
-structure LadderState :=
+structure LadderState where
   x1 : ZMod p
   x2 : ZMod p
   z2 : ZMod p
