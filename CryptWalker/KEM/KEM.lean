@@ -1,7 +1,7 @@
 
 namespace CryptWalker.KEM.KEM
 
-  class KEM where
+  structure KEM where
     PublicKeyType : Type
     PrivateKeyType : Type
 
