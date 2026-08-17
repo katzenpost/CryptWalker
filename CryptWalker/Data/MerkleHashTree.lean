@@ -51,7 +51,7 @@ def reprHashTree {α : Type} [Repr α] (tree : HashTree α) (indent : String) (l
 instance {α : Type} : Inhabited (HashTree α) where
   default := HashTree.empty (ByteArray.mk #[])
 
-structure MerkleHashTrees (α : Type) [Hashable α] :=
+structure MerkleHashTrees (α : Type) [Hashable α] where
   (settings : Settings α)
   (size : Nat)
   (hashtrees : (Std.HashMap Nat (HashTree α)))
