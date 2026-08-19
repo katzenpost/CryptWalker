@@ -3,10 +3,27 @@ SPDX-FileCopyrightText: Copyright (C) 2024 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
  -/
 
+-- NIKE to KEM adapter: a hashed ElGamal construction
+/-
+Here's pseudo code of what we are implementing here:
+
+func ENCAPSULATE(their_pubkey publickey) ([]byte, []byte) {
+        my_privkey, my_pubkey = GEN_KEYPAIR(RNG)
+        ss = DH(my_privkey, their_pubkey)
+        ciphertext = ENCODE_PUBKEY(my_pubkey)
+        shared_secret = HASH(ENCODE_PUBKEY(ss))
+        return ciphertext, shared_secret
+}
+
+func DECAPSULATE(my_privkey privatekey, ciphertext []byte) []byte {
+        their_pubkey = DECODE_PUBKEY(ciphertext)
+        ss = DH(my_privkey, their_pubkey)
+        return HASH(ENCODE_PUBKEY(ss))
+}
+-/
+
 import CryptWalker.KEM.KEM
 import CryptWalker.NIKE.NIKE
-
--- NIKE to KEM adapter: a hashed ElGamal construction
 
 namespace CryptWalker.KEM.Adapter
 
@@ -18,6 +35,16 @@ structure PrivateKey where
 
 structure PublicKey where
   data : ByteArray
+
+/- returns the 2-tuple (ciphertext, shared_secret) -/
+def encapsulateWith (hash : ByteArray → ByteArray) (nike : NIKE)
+    (ephPriv : nike.PrivateKeyType) (theirPubBytes : ByteArray) :
+    Option (ByteArray × ByteArray) :=
+  match nike.decodePublicKey theirPubBytes with
+  | none => none
+  | some theirPub =>
+      some (nike.encodePublicKey (nike.derivePublicKey ephPriv),
+            hash (nike.encodePublicKey (nike.groupAction ephPriv theirPub)))
 
 def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
 {
@@ -35,14 +62,10 @@ def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
     pure (pubkey, privkey),
 
   encapsulate := fun theirPubKey => do
-    let (pubkey, privkey) ← nike.generateKeyPair
-    match nike.decodePublicKey theirPubKey.data with
+    let ephPriv ← nike.generatePrivateKey
+    match encapsulateWith hash nike ephPriv theirPubKey.data with
     | none => panic! "Failed to decode NIKE public key"
-    | some pubkey2 =>
-      let ss1 := nike.groupAction privkey pubkey2
-      let ss2 := hash (nike.encodePublicKey ss1)
-      let ciphertext := nike.encodePublicKey pubkey
-      pure (ciphertext, ss2),
+    | some result => pure result,
 
   decapsulate := fun privKey ct =>
     match nike.decodePublicKey ct with
