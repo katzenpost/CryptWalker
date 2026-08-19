@@ -21,10 +21,6 @@ structure NIKE where
   decodePublicKey : ByteArray → Option PublicKeyType
   validPublicKey : PublicKeyType → Bool
 
-def NIKE.genKeyPair (nike : NIKE) : IO (nike.PublicKeyType × nike.PrivateKeyType) := do
-  let sk ← nike.generatePrivateKey
-  pure (nike.derivePublicKey sk, sk)
-
 structure LawfulNIKE (nike : NIKE) : Prop where
   decode_encode_pub  : ∀ pk, nike.decodePublicKey (nike.encodePublicKey pk) = some pk
   decode_encode_priv : ∀ sk, nike.decodePrivateKey (nike.encodePrivateKey sk) = some sk

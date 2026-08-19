@@ -36,7 +36,7 @@ structure PrivateKey where
 structure PublicKey where
   data : ByteArray
 
-/- returns the 2-tuple (ciphertext, shared_secret) -/
+/- returns  2-tuple (ciphertext, shared_secret) -/
 def encapsulateWith (hash : ByteArray → ByteArray) (nike : NIKE)
     (ephPriv : nike.PrivateKeyType) (theirPubBytes : ByteArray) :
     Option (ByteArray × ByteArray) :=
@@ -56,9 +56,10 @@ def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
   name := nike.name,
 
   generateKeyPair := do
-    let keyPair ← nike.generateKeyPair
-    let pubkey := PublicKey.mk (nike.encodePublicKey keyPair.1)
-    let privkey := PrivateKey.mk (nike.encodePrivateKey keyPair.2)
+    let sk ← nike.generatePrivateKey
+    let pk := nike.derivePublicKey sk
+    let pubkey := PublicKey.mk (nike.encodePublicKey pk)
+    let privkey := PrivateKey.mk (nike.encodePrivateKey sk)
     pure (pubkey, privkey),
 
   encapsulate := fun theirPubKey => do
