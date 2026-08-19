@@ -29,6 +29,7 @@ namespace CryptWalker.KEM.Adapter
 
 open CryptWalker.NIKE.NIKE
 open CryptWalker.KEM.KEM
+open CryptWalker.NIKE
 
 structure PrivateKey where
   data : ByteArray
@@ -93,5 +94,12 @@ def createKEMAdapter (hash : ByteArray → { out : ByteArray // out.size = 32 })
   encodePublicKey := fun pk => pk.data,
   decodePublicKey := fun bytes => some { data := bytes }
 }
+
+theorem adapter_lawful (hash : ByteArray → { s : ByteArray // s.size = 32 })
+    (nike : NIKE) (h : LawfulNIKE nike) :
+    LawfulKEM (createKEMAdapter hash nike) where
+  correctness := by
+    intro kseed eseed pk sk ct ss hgen henc
+    sorry
 
 end CryptWalker.KEM.Adapter

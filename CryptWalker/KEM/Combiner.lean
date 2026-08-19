@@ -64,13 +64,11 @@ def splitByteArrayIntoChunks (bytes : ByteArray) (sizes : List Nat) : Option (Li
         aux part2 sizesTail (part1 :: acc)
   aux bytes sizes []
 
-
 def combinerEncapsulateWith (hash : ByteArray → { out : ByteArray // out.size = 32 }) (KEMs : List KEM)
-    (seed : ByteArray) (pubkey : PublicKey) : Option (ByteArray × ByteArray) := do
-  let seeds ← splitByteArrayIntoChunks seed (KEMs.map (·.privateKeySize))
-  let pairs ← ((KEMs.zip seeds).zip pubkey.data).mapM fun ((kem, s), pkChunk) => do
+    (seed : { s : ByteArray // s.size = 32 }) (pubkey : PublicKey) : Option (ByteArray × ByteArray) := do
+  let pairs ← (((List.range KEMs.length).zip KEMs).zip pubkey.data).mapM fun ((i, kem), pkChunk) => do
     let pk ← kem.decodePublicKey pkChunk
-    kem.encapsulateWith s pk
+    kem.encapsulateWith (hash (seed.val ++ ByteArray.mk #[UInt8.ofNat i])) pk
   let cts := pairs.map Prod.fst
   pure (cts.foldl (· ++ ·) ByteArray.empty, (splitPRF hash (pairs.map Prod.snd) cts).val)
 
@@ -102,11 +100,11 @@ def createKEMCombiner (name : String) (hash : ByteArray → { s : ByteArray // s
   encapsulateWith := combinerEncapsulateWith hash KEMs,
 
   encapsulate := fun pubkey => do
-    let mut seed : ByteArray := ByteArray.empty
-    for _ in [0:KEMs.foldl (fun acc k => acc + k.privateKeySize) 0] do
+    let mut raw : ByteArray := ByteArray.empty
+    for _ in [0:32] do
       let b ← IO.rand 0 255
-      seed := seed.push (UInt8.ofNat b)
-    match combinerEncapsulateWith hash KEMs seed pubkey with
+      raw := raw.push (UInt8.ofNat b)
+    match combinerEncapsulateWith hash KEMs (hash raw) pubkey with
     | none => panic! "encapsulation failed"
     | some result => pure result,
 
@@ -140,5 +138,12 @@ def createKEMCombiner (name : String) (hash : ByteArray → { s : ByteArray // s
     | none => none
     | some keys => some { data := keys }
 }
+
+theorem combiner_lawful (name : String)
+    (hash : ByteArray → { s : ByteArray // s.size = 32 })
+    (KEMs : List KEM) (h : ∀ kem ∈ KEMs, LawfulKEM kem) :
+    LawfulKEM (createKEMCombiner name hash KEMs) := by
+      sorry
+
 
 end CryptWalker.KEM.Combiner

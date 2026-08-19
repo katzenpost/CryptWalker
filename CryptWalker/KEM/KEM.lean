@@ -14,7 +14,7 @@ namespace CryptWalker.KEM.KEM
     generateKeyPairWith : { s : ByteArray // s.size = 32 } → (PublicKeyType × PrivateKeyType)
 
     encapsulate : PublicKeyType → IO (ByteArray × ByteArray)
-    encapsulateWith : ByteArray → PublicKeyType → Option (ByteArray × ByteArray)
+    encapsulateWith : { s : ByteArray // s.size = 32 } → PublicKeyType → Option (ByteArray × ByteArray)
 
     decapsulate : PrivateKeyType → ByteArray → ByteArray
 
@@ -24,11 +24,11 @@ namespace CryptWalker.KEM.KEM
     encodePublicKey : PublicKeyType → ByteArray
     decodePublicKey : ByteArray → Option PublicKeyType
 
-/-
-  structure LawfulKEM (kem : KEM) where
-    correctness : ∀ sk₁ pk₁ sk₂ pk₂,
-      have res := kem.encapsulateWith seed pk₁,
--/
 
+  structure LawfulKEM (kem : KEM) where
+    correctness : ∀ kseed eseed pk sk ct ss,
+      kem.generateKeyPairWith kseed = (pk, sk) →
+      kem.encapsulateWith eseed pk = some (ct, ss) →
+      kem.decapsulate sk ct = ss
 
 end CryptWalker.KEM.KEM
