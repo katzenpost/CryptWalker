@@ -37,16 +37,16 @@ structure PublicKey where
   data : ByteArray
 
 /- returns  2-tuple (ciphertext, shared_secret) -/
-def encapsulateWith (hash : ByteArray → ByteArray) (nike : NIKE)
+def encapsulateWith (hash : ByteArray → { out : ByteArray // out.size = 32 }) (nike : NIKE)
     (ephPriv : nike.PrivateKeyType) (theirPubBytes : ByteArray) :
     Option (ByteArray × ByteArray) :=
   match nike.decodePublicKey theirPubBytes with
   | none => none
   | some theirPub =>
       some (nike.encodePublicKey (nike.derivePublicKey ephPriv),
-            hash (nike.encodePublicKey (nike.groupAction ephPriv theirPub)))
+            (hash (nike.encodePublicKey (nike.groupAction ephPriv theirPub))).val)
 
-def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
+def createKEMAdapter (hash : ByteArray → { out : ByteArray // out.size = 32 }) (nike : NIKE) : KEM :=
 {
   PublicKeyType := PublicKey,
   PrivateKeyType := PrivateKey,
@@ -55,6 +55,11 @@ def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
   ciphertextSize := nike.publicKeySize,
   name := nike.name,
 
+  generateKeyPairWith := fun seed =>
+    let sk := nike.privateKeyFromSeed seed
+    (PublicKey.mk (nike.encodePublicKey (nike.derivePublicKey sk)),
+     PrivateKey.mk (nike.encodePrivateKey sk)),
+
   generateKeyPair := do
     let sk ← nike.generatePrivateKey
     let pk := nike.derivePublicKey sk
@@ -62,9 +67,14 @@ def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
     let privkey := PrivateKey.mk (nike.encodePrivateKey sk)
     pure (pubkey, privkey),
 
+  encapsulateWith := fun seed theirPubKey =>
+    match nike.decodePrivateKey seed with
+    | none => none
+    | some ephPriv => Adapter.encapsulateWith hash nike ephPriv theirPubKey.data,
+
   encapsulate := fun theirPubKey => do
     let ephPriv ← nike.generatePrivateKey
-    match encapsulateWith hash nike ephPriv theirPubKey.data with
+    match Adapter.encapsulateWith hash nike ephPriv theirPubKey.data with
     | none => panic! "Failed to decode NIKE public key"
     | some result => pure result,
 

@@ -12,6 +12,7 @@ structure NIKE where
   privateKeySize : Nat
   publicKeySize : Nat
 
+  privateKeyFromSeed : { s : ByteArray // s.size = 32 } → PrivateKeyType
   generatePrivateKey : IO PrivateKeyType
   derivePublicKey : PrivateKeyType → PublicKeyType
   groupAction : PrivateKeyType → PublicKeyType → PublicKeyType

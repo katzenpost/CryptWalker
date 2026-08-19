@@ -196,10 +196,11 @@ def compress (chunk: Array UInt32) (h: Digest): Digest :=
     let j := compress_loop chunk h
     Digest.add h j
 
-def hash (msg: ByteArray): ByteArray :=
+def hash (msg : ByteArray) : { out : ByteArray // out.size = 32 } :=
   let padded := prepare msg
   let chunks := to_chunks padded
-  Digest.toBytes $ List.foldr compress init_hash chunks
+  ⟨Digest.toBytes $ List.foldr compress init_hash chunks,
+   by simp [Digest.toBytes, UInt32.to_be, ByteArray.size]⟩
 
 end Sha256
 

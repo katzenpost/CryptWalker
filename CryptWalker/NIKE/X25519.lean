@@ -116,6 +116,9 @@ structure PrivateKey where
 structure PublicKey where
   data : ByteArray
 
+def generatePrivateKeyFromSeed (seed : { s : ByteArray // s.size = 32 }) : PrivateKey :=
+  { data := seed.val }
+
 def generatePrivateKey : IO PrivateKey := do
   let mut arr := ByteArray.emptyWithCapacity keySize
   for _ in [0:keySize] do
@@ -137,6 +140,7 @@ def Scheme : NIKE :=
   name := SchemeName,
 
   generatePrivateKey := generatePrivateKey,
+  privateKeyFromSeed := generatePrivateKeyFromSeed,
 
   derivePublicKey := fun (sk : PrivateKey) => derivePublicKey sk,
 

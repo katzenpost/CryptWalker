@@ -24,18 +24,18 @@ by Federico Giacon, Felix Heuer, and Bertram Poettering
 
 def hashSize := 32
 
-def xorByteArrays (a b : ByteArray) : ByteArray :=
-  if a.size ≠ b.size then
-    panic! "xorByteArrays: ByteArrays must be of equal size"
-  else
-    ByteArray.mk (Array.zipWith (fun x y => x ^^^ y) a.data b.data)
+def xorByteArrays (a b : { s : ByteArray // s.size = 32 }) : { s : ByteArray // s.size = 32 } :=
+  ⟨ByteArray.mk (Array.zipWith (fun x y => x ^^^ y) a.val.data b.val.data), by
+    have ha : a.val.data.size = 32 := a.property
+    have hb : b.val.data.size = 32 := b.property
+    simp only [ByteArray.size, Array.size_zipWith, ha, hb, Nat.min_self]
+    ⟩
 
-def splitPRF (hash : ByteArray → ByteArray) (ss : List ByteArray) (ct : List ByteArray) : ByteArray :=
-  if ss.length != ct.length then
-    panic! "splitPRF failure: mismatched List lengths"
-  else
-    let bigCt : ByteArray := ct.foldl (fun acc blob => acc ++ blob) ByteArray.empty
-    (ss.map (fun x => hash (x ++ bigCt))).foldl (fun acc h => xorByteArrays acc h) (ByteArray.mk (Array.replicate hashSize 0))
+def splitPRF (hash : ByteArray → { s : ByteArray // s.size = 32 })
+    (ss : List ByteArray) (ct : List ByteArray) : { s : ByteArray // s.size = 32 } :=
+  let bigCt := ct.foldl (· ++ ·) ByteArray.empty
+  (ss.map (fun x => hash (x ++ bigCt))).foldl xorByteArrays ⟨ByteArray.mk (Array.replicate 32 0), by
+    rfl⟩
 
 structure PrivateKey where
   data : List ByteArray
@@ -64,7 +64,17 @@ def splitByteArrayIntoChunks (bytes : ByteArray) (sizes : List Nat) : Option (Li
         aux part2 sizesTail (part1 :: acc)
   aux bytes sizes []
 
-def createKEMCombiner (name : String) (hash : ByteArray → ByteArray) (KEMs : List KEM) : KEM :=
+
+def combinerEncapsulateWith (hash : ByteArray → { out : ByteArray // out.size = 32 }) (KEMs : List KEM)
+    (seed : ByteArray) (pubkey : PublicKey) : Option (ByteArray × ByteArray) := do
+  let seeds ← splitByteArrayIntoChunks seed (KEMs.map (·.privateKeySize))
+  let pairs ← ((KEMs.zip seeds).zip pubkey.data).mapM fun ((kem, s), pkChunk) => do
+    let pk ← kem.decodePublicKey pkChunk
+    kem.encapsulateWith s pk
+  let cts := pairs.map Prod.fst
+  pure (cts.foldl (· ++ ·) ByteArray.empty, (splitPRF hash (pairs.map Prod.snd) cts).val)
+
+def createKEMCombiner (name : String) (hash : ByteArray → { s : ByteArray // s.size = 32 }) (KEMs : List KEM) : KEM :=
 {
   PublicKeyType := PublicKey,
   PrivateKeyType := PrivateKey,
@@ -82,19 +92,23 @@ def createKEMCombiner (name : String) (hash : ByteArray → ByteArray) (KEMs : L
       privkeyData := privkeyData ++ [kem.encodePrivateKey newprivkey]
     pure ({ data := pubkeyData }, { data := privkeyData }),
 
+  generateKeyPairWith := fun seed =>
+    let pairs := ((List.range KEMs.length).zip KEMs).map (fun (i, kem) =>
+      let derived := hash (seed.val ++ ByteArray.mk #[UInt8.ofNat i])
+      let (pk, sk) := kem.generateKeyPairWith derived
+      (kem.encodePublicKey pk, kem.encodePrivateKey sk))
+    ({ data := pairs.map Prod.fst }, { data := pairs.map Prod.snd }),
+
+  encapsulateWith := combinerEncapsulateWith hash KEMs,
+
   encapsulate := fun pubkey => do
-    let mut sharedSecrets : List ByteArray := []
-    let mut ciphertexts : List ByteArray := []
-    let mut ciphertext : ByteArray := ByteArray.empty
-    for (kem, pubKeyChunk) in KEMs.zip pubkey.data do
-      match kem.decodePublicKey pubKeyChunk with
-      | none => panic! "failed to decode pub key"
-      | some pubkey =>
-        let (ct, ss) ← kem.encapsulate pubkey
-        sharedSecrets := sharedSecrets ++ [ss]
-        ciphertexts := ciphertexts ++ [ct]
-        ciphertext := ciphertext ++ ct
-    pure (ciphertext, splitPRF hash sharedSecrets ciphertexts),
+    let mut seed : ByteArray := ByteArray.empty
+    for _ in [0:KEMs.foldl (fun acc k => acc + k.privateKeySize) 0] do
+      let b ← IO.rand 0 255
+      seed := seed.push (UInt8.ofNat b)
+    match combinerEncapsulateWith hash KEMs seed pubkey with
+    | none => panic! "encapsulation failed"
+    | some result => pure result,
 
   decapsulate := fun privkey ciphertext =>
     let sizes := KEMs.map (fun x => x.ciphertextSize)
@@ -106,7 +120,7 @@ def createKEMCombiner (name : String) (hash : ByteArray → ByteArray) (KEMs : L
           | none => panic! "decode private key failure"
           | some innerPrivkey => kem.decapsulate innerPrivkey ct
         )
-        splitPRF hash sharedSecrets ciphertexts
+        (splitPRF hash sharedSecrets ciphertexts).val,
 
   encodePrivateKey := fun privkey =>
     privkey.data.foldl (fun acc key => acc ++ key) ByteArray.empty,
