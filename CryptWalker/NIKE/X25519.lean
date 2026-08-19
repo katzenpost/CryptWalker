@@ -138,11 +138,6 @@ def Scheme : NIKE :=
 
   generatePrivateKey := generatePrivateKey,
 
-  generateKeyPair := do
-    let privKey ← generatePrivateKey
-    let pubKey := derivePublicKey privKey
-    pure (pubKey, privKey),
-
   derivePublicKey := fun (sk : PrivateKey) => derivePublicKey sk,
 
   groupAction := fun (sk : PrivateKey) (pk : PublicKey) => PublicKey.mk $ curve25519 sk.data pk.data,
@@ -151,6 +146,8 @@ def Scheme : NIKE :=
   decodePrivateKey := fun (bytes : ByteArray) => some { data := bytes },
   encodePublicKey := fun (pk : PublicKey) => pk.data,
   decodePublicKey := fun (bytes : ByteArray) => some { data := bytes }
+
+  validPublicKey := fun pk => pk.data.size == keySize /- XXX FIXME: do actual validation -/
 }
 
 end CryptWalker.NIKE.X25519

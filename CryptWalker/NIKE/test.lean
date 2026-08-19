@@ -28,8 +28,10 @@ def testX25519Vector : IO Unit := do
   IO.println "All vector tests passed for X25519!"
 
 def testNIKE (scheme : NIKE) : IO Unit := do
-  let (alicePublicKey, alicePrivateKey) ← scheme.generateKeyPair
-  let (bobPublicKey, bobPrivateKey) ← scheme.generateKeyPair
+  let alicePrivateKey ← scheme.generatePrivateKey
+  let alicePublicKey := scheme.derivePublicKey alicePrivateKey
+  let bobPrivateKey ← scheme.generatePrivateKey
+  let bobPublicKey := scheme.derivePublicKey bobPrivateKey
   let bobSharedSecret := scheme.groupAction bobPrivateKey alicePublicKey
   let aliceSharedSecret := scheme.groupAction alicePrivateKey bobPublicKey
   if scheme.encodePublicKey bobSharedSecret == scheme.encodePublicKey aliceSharedSecret then
