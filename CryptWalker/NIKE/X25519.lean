@@ -28,13 +28,25 @@ def clampScalarBytes (scalarBytes : ByteArray) : ByteArray :=
   let clamped2 := clamped1.set! 31 ((clamped1.get! 31 &&& 0x7f) ||| 0x40)
   clamped2
 
-def fromField (x : ZMod p) : ByteArray :=
-  let bytes := ByteArray.mk $ Array.mk $ (natToBytes x.val).data.toList.reverse
-  bytes ++ ByteArray.mk (Array.mk (List.replicate (keySize - bytes.size) 0))
-
 def toField (ba : ByteArray) : ZMod p :=
-  let n := (ByteArray.mk $ Array.mk ba.toList.reverse).foldl (fun acc b => acc * 256 + b.toNat) 0
+  let masked := ba.set! 31 ((ba.get! 31) &&& 0x7f)
+  let n := (ByteArray.mk $ Array.mk masked.toList.reverse).foldl (fun acc b => acc * 256 + b.toNat) 0
   n
+
+def fromFieldBytes (x : ZMod p) : ByteArray :=
+  ByteArray.mk $ Array.mk $ (natToBytes x.val).data.toList.reverse
+
+def fromField (x : ZMod p) : { s : ByteArray // s.size = 32 } :=
+  ⟨fromFieldBytes x
+     ++ ByteArray.mk (Array.mk (List.replicate (keySize - (fromFieldBytes x).size) 0)), by
+    simp only [fromFieldBytes, ByteArray.size, Array.size, List.length_reverse]
+    simp only [List.toArray_replicate, ByteArray.data_append, Array.toList_append,
+      Array.toList_replicate, List.length_append, List.length_reverse, List.length_replicate,
+      keySize]
+    exact Nat.add_sub_cancel' (natToBytes_length_le_32 _ (by
+      have hlt := ZMod.val_lt x
+      have hp : p < 256 ^ 32 := by norm_num [p]
+      omega))⟩
 
 def clampScalar (scalar : ZMod p) : ZMod p :=
   let b := fromField scalar
@@ -166,16 +178,8 @@ theorem X25519_is_lawful_NIKE : LawfulNIKE Scheme where
   decode_encode_priv := by intro pk; rfl
   derive_valid := by
     intro sk
-    simp only [Scheme, derivePublicKey, fromField, keySize]
-    simp only [ByteArray.size,
-               Array.size, List.length_reverse]
-    simp only [List.toArray_replicate, ByteArray.data_append, Array.toList_append,
-      Array.toList_replicate, List.length_append, List.length_reverse, List.length_replicate,
-      beq_iff_eq]
-    exact Nat.add_sub_cancel' (natToBytes_length_le_32 _ (by
-      have hlt := ZMod.val_lt (scalarmult sk.data basepoint)
-      have hp : p < 256 ^ 32 := by norm_num [p]
-      omega))
+    simp only [Scheme, derivePublicKey, keySize, beq_iff_eq]
+    exact (fromField (scalarmult sk.data basepoint)).property
   commutes := x25519_commutes
 
 end CryptWalker.NIKE.X25519
