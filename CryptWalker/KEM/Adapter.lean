@@ -47,6 +47,15 @@ def encapsulateWith (hash : ByteArray → { out : ByteArray // out.size = 32 }) 
       some (nike.encodePublicKey (nike.derivePublicKey ephPriv),
             (hash (nike.encodePublicKey (nike.groupAction ephPriv theirPub))).val)
 
+theorem adapter_encapsulateWith_of_encoded
+    (hash : ByteArray → { out : ByteArray // out.size = 32 })
+    (nike : NIKE) (h : LawfulNIKE nike)
+    (ephPriv : nike.PrivateKeyType) (theirPub : nike.PublicKeyType) :
+    encapsulateWith hash nike ephPriv (nike.encodePublicKey theirPub)
+      = some (nike.encodePublicKey (nike.derivePublicKey ephPriv),
+              (hash (nike.encodePublicKey (nike.groupAction ephPriv theirPub))).val) := by
+  simp only [encapsulateWith, h.decode_encode_pub]
+
 def createKEMAdapter (hash : ByteArray → { out : ByteArray // out.size = 32 }) (nike : NIKE) : KEM :=
 {
   PublicKeyType := PublicKey,
@@ -69,9 +78,7 @@ def createKEMAdapter (hash : ByteArray → { out : ByteArray // out.size = 32 })
     pure (pubkey, privkey),
 
   encapsulateWith := fun seed theirPubKey =>
-    match nike.decodePrivateKey seed with
-    | none => none
-    | some ephPriv => Adapter.encapsulateWith hash nike ephPriv theirPubKey.data,
+    Adapter.encapsulateWith hash nike (nike.privateKeyFromSeed seed) theirPubKey.data,
 
   encapsulate := fun theirPubKey => do
     let ephPriv ← nike.generatePrivateKey
@@ -100,6 +107,12 @@ theorem adapter_lawful (hash : ByteArray → { s : ByteArray // s.size = 32 })
     LawfulKEM (createKEMAdapter hash nike) where
   correctness := by
     intro kseed eseed pk sk ct ss hgen henc
-    sorry
+    simp only [createKEMAdapter] at hgen henc ⊢
+    obtain ⟨rfl, rfl⟩ := hgen
+    rw [h.decode_encode_priv]
+    simp only [Adapter.encapsulateWith, h.decode_encode_pub, Option.some.injEq,
+               Prod.mk.injEq] at henc
+    obtain ⟨rfl, rfl⟩ := henc
+    rw [h.decode_encode_pub, h.commutes]
 
 end CryptWalker.KEM.Adapter
