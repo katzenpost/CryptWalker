@@ -17,8 +17,11 @@ open CryptWalker.NIKE.NIKE
 namespace CryptWalker.NIKE.X25519
 
 def p : ℕ := 2^255 - 19
+instance : NeZero p := ⟨by norm_num [p]⟩
+
 def basepoint : ZMod p := 9
 def keySize : ℕ := 32
+
 
 def clampScalarBytes (scalarBytes : ByteArray) : ByteArray :=
   let clamped1 := scalarBytes.set! 0 (scalarBytes.get! 0 &&& 0xf8)
@@ -26,7 +29,7 @@ def clampScalarBytes (scalarBytes : ByteArray) : ByteArray :=
   clamped2
 
 def fromField (x : ZMod p) : ByteArray :=
-  let bytes := ByteArray.mk $ Array.mk $ (ByteArray.toList $ natToBytes x.val).reverse
+  let bytes := ByteArray.mk $ Array.mk $ (natToBytes x.val).data.toList.reverse
   bytes ++ ByteArray.mk (Array.mk (List.replicate (keySize - bytes.size) 0))
 
 def toField (ba : ByteArray) : ZMod p :=
@@ -153,5 +156,26 @@ def Scheme : NIKE :=
 
   validPublicKey := fun pk => pk.data.size == keySize /- XXX FIXME: do actual validation -/
 }
+
+axiom x25519_commutes : ∀ (sk₁ sk₂ : Scheme.PrivateKeyType),
+  Scheme.groupAction sk₁ (Scheme.derivePublicKey sk₂)
+    = Scheme.groupAction sk₂ (Scheme.derivePublicKey sk₁)
+
+theorem X25519_is_lawful_NIKE : LawfulNIKE Scheme where
+  decode_encode_pub := by intro pk; rfl
+  decode_encode_priv := by intro pk; rfl
+  derive_valid := by
+    intro sk
+    simp only [Scheme, derivePublicKey, fromField, keySize]
+    simp only [ByteArray.size,
+               Array.size, List.length_reverse]
+    simp only [List.toArray_replicate, ByteArray.data_append, Array.toList_append,
+      Array.toList_replicate, List.length_append, List.length_reverse, List.length_replicate,
+      beq_iff_eq]
+    exact Nat.add_sub_cancel' (natToBytes_length_le_32 _ (by
+      have hlt := ZMod.val_lt (scalarmult sk.data basepoint)
+      have hp : p < 256 ^ 32 := by norm_num [p]
+      omega))
+  commutes := x25519_commutes
 
 end CryptWalker.NIKE.X25519
