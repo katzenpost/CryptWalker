@@ -3,15 +3,33 @@ SPDX-FileCopyrightText: Copyright (C) 2024 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
  -/
 
+-- NIKE to KEM adapter: a hashed ElGamal construction
+/-
+Here's pseudo code of what we are implementing here:
+
+func ENCAPSULATE(their_pubkey publickey) ([]byte, []byte) {
+        my_privkey, my_pubkey = GEN_KEYPAIR(RNG)
+        ss = DH(my_privkey, their_pubkey)
+        ciphertext = ENCODE_PUBKEY(my_pubkey)
+        shared_secret = HASH(ENCODE_PUBKEY(ss))
+        return ciphertext, shared_secret
+}
+
+func DECAPSULATE(my_privkey privatekey, ciphertext []byte) []byte {
+        their_pubkey = DECODE_PUBKEY(ciphertext)
+        ss = DH(my_privkey, their_pubkey)
+        return HASH(ENCODE_PUBKEY(ss))
+}
+-/
+
 import CryptWalker.KEM.KEM
 import CryptWalker.NIKE.NIKE
-
--- NIKE to KEM adapter: a hashed ElGamal construction
 
 namespace CryptWalker.KEM.Adapter
 
 open CryptWalker.NIKE.NIKE
 open CryptWalker.KEM.KEM
+open CryptWalker.NIKE
 
 structure PrivateKey where
   data : ByteArray
@@ -19,7 +37,26 @@ structure PrivateKey where
 structure PublicKey where
   data : ByteArray
 
-def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
+/- returns  2-tuple (ciphertext, shared_secret) -/
+def encapsulateWith (hash : ByteArray → { out : ByteArray // out.size = 32 }) (nike : NIKE)
+    (ephPriv : nike.PrivateKeyType) (theirPubBytes : ByteArray) :
+    Option (ByteArray × ByteArray) :=
+  match nike.decodePublicKey theirPubBytes with
+  | none => none
+  | some theirPub =>
+      some (nike.encodePublicKey (nike.derivePublicKey ephPriv),
+            (hash (nike.encodePublicKey (nike.groupAction ephPriv theirPub))).val)
+
+theorem adapter_encapsulateWith_of_encoded
+    (hash : ByteArray → { out : ByteArray // out.size = 32 })
+    (nike : NIKE) (h : LawfulNIKE nike)
+    (ephPriv : nike.PrivateKeyType) (theirPub : nike.PublicKeyType) :
+    encapsulateWith hash nike ephPriv (nike.encodePublicKey theirPub)
+      = some (nike.encodePublicKey (nike.derivePublicKey ephPriv),
+              (hash (nike.encodePublicKey (nike.groupAction ephPriv theirPub))).val) := by
+  simp only [encapsulateWith, h.decode_encode_pub]
+
+def createKEMAdapter (hash : ByteArray → { out : ByteArray // out.size = 32 }) (nike : NIKE) : KEM :=
 {
   PublicKeyType := PublicKey,
   PrivateKeyType := PrivateKey,
@@ -28,21 +65,26 @@ def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
   ciphertextSize := nike.publicKeySize,
   name := nike.name,
 
+  generateKeyPairWith := fun seed =>
+    let sk := nike.privateKeyFromSeed seed
+    (PublicKey.mk (nike.encodePublicKey (nike.derivePublicKey sk)),
+     PrivateKey.mk (nike.encodePrivateKey sk)),
+
   generateKeyPair := do
-    let keyPair ← nike.generateKeyPair
-    let pubkey := PublicKey.mk (nike.encodePublicKey keyPair.1)
-    let privkey := PrivateKey.mk (nike.encodePrivateKey keyPair.2)
+    let sk ← nike.generatePrivateKey
+    let pk := nike.derivePublicKey sk
+    let pubkey := PublicKey.mk (nike.encodePublicKey pk)
+    let privkey := PrivateKey.mk (nike.encodePrivateKey sk)
     pure (pubkey, privkey),
 
+  encapsulateWith := fun seed theirPubKey =>
+    Adapter.encapsulateWith hash nike (nike.privateKeyFromSeed seed) theirPubKey.data,
+
   encapsulate := fun theirPubKey => do
-    let (pubkey, privkey) ← nike.generateKeyPair
-    match nike.decodePublicKey theirPubKey.data with
+    let ephPriv ← nike.generatePrivateKey
+    match Adapter.encapsulateWith hash nike ephPriv theirPubKey.data with
     | none => panic! "Failed to decode NIKE public key"
-    | some pubkey2 =>
-      let ss1 := nike.groupAction privkey pubkey2
-      let ss2 := hash (nike.encodePublicKey ss1)
-      let ciphertext := nike.encodePublicKey pubkey
-      pure (ciphertext, ss2),
+    | some result => pure result,
 
   decapsulate := fun privKey ct =>
     match nike.decodePublicKey ct with
@@ -59,5 +101,18 @@ def createKEMAdapter (hash : ByteArray → ByteArray) (nike : NIKE) : KEM :=
   encodePublicKey := fun pk => pk.data,
   decodePublicKey := fun bytes => some { data := bytes }
 }
+
+theorem adapter_lawful (hash : ByteArray → { s : ByteArray // s.size = 32 })
+    (nike : NIKE) (h : LawfulNIKE nike) :
+    LawfulKEM (createKEMAdapter hash nike) where
+  correctness := by
+    intro kseed eseed pk sk ct ss hgen henc
+    simp only [createKEMAdapter] at hgen henc ⊢
+    obtain ⟨rfl, rfl⟩ := hgen
+    rw [h.decode_encode_priv]
+    simp only [Adapter.encapsulateWith, h.decode_encode_pub, Option.some.injEq,
+               Prod.mk.injEq] at henc
+    obtain ⟨rfl, rfl⟩ := henc
+    rw [h.decode_encode_pub, h.commutes]
 
 end CryptWalker.KEM.Adapter
