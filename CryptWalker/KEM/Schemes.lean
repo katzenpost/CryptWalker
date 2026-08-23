@@ -15,15 +15,16 @@ open CryptWalker.Hash.Sha2
 
 namespace CryptWalker.KEM
 
-def kemX25519 := createKEMAdapter Sha256.hash X25519.Scheme
 
---def combinedClassicalKEM := createKEMCombiner "combinedClassicalKEM" Sha256.hash [kemX25519, kemX448, kemX41417]
+/-- SHA-256 as the adapter's hash, retyped to `Vector UInt8 32`. -/
+def sha256V (b : ByteArray) : Vector UInt8 32 :=
+  let r := Sha256.hash b
+  ⟨r.val.data, r.property⟩
 
 
-def Schemes : List KEM :=
-[
-    kemX25519,
---    combinedClassicalKEM
-]
+def kemX25519 : KEM := kemOfNike sha256V X25519.Scheme
+
+def Schemes : List String := ["X25519"]
+
 
 end CryptWalker.KEM

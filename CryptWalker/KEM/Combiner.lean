@@ -22,128 +22,117 @@ as described in KEM Combiners  https://eprint.iacr.org/2018/024.pdf
 by Federico Giacon, Felix Heuer, and Bertram Poettering
 -/
 
-def hashSize := 32
+abbrev Bytes32 := Vector UInt8 32
 
-def xorByteArrays (a b : { s : ByteArray // s.size = 32 }) : { s : ByteArray // s.size = 32 } :=
-  ⟨ByteArray.mk (Array.zipWith (fun x y => x ^^^ y) a.val.data b.val.data), by
-    have ha : a.val.data.size = 32 := a.property
-    have hb : b.val.data.size = 32 := b.property
-    simp only [ByteArray.size, Array.size_zipWith, ha, hb, Nat.min_self]
-    ⟩
+def toBytes {n} (v : Vector UInt8 n) : ByteArray := ⟨v.toArray⟩
 
-def splitPRF (hash : ByteArray → { s : ByteArray // s.size = 32 })
-    (ss : List ByteArray) (ct : List ByteArray) : { s : ByteArray // s.size = 32 } :=
-  let bigCt := ct.foldl (· ++ ·) ByteArray.empty
-  (ss.map (fun x => hash (x ++ bigCt))).foldl xorByteArrays ⟨ByteArray.mk (Array.replicate 32 0), by
-    rfl⟩
+def xorBytes (a b : Bytes32) : Bytes32 :=
+  Vector.ofFn (fun i => a[i] ^^^ b[i])
 
-structure PrivateKey where
-  data : List ByteArray
+variable (hash : ByteArray → Bytes32) (k₁ k₂ : KEM)
 
-structure PublicKey where
-  data : List ByteArray
+/-- Run a `k₁` action against the left half of a product state. -/
+def liftFst {α} (x : EStateM KEMError k₁.State α) :
+    EStateM KEMError (k₁.State × k₂.State) α :=
+  fun (s₁, s₂) => match x s₁ with
+    | .ok a s₁'    => .ok a (s₁', s₂)
+    | .error e s₁' => .error e (s₁', s₂)
 
-def splitByteArray (bytes : ByteArray) (n : Nat) : ByteArray × ByteArray :=
-  let part1 := bytes.extract 0 n
-  let part2 := bytes.extract n bytes.size
-  (part1, part2)
+def liftSnd {α} (x : EStateM KEMError k₂.State α) :
+    EStateM KEMError (k₁.State × k₂.State) α :=
+  fun (s₁, s₂) => match x s₂ with
+    | .ok a s₂'    => .ok a (s₁, s₂')
+    | .error e s₂' => .error e (s₁, s₂')
 
-def splitByteArrayIntoChunks (bytes : ByteArray) (sizes : List Nat) : Option (List ByteArray) :=
-  let rec aux (bytes : ByteArray) (sizes : List Nat) (acc : List ByteArray) : Option (List ByteArray) :=
-    match sizes with
-    | [] =>
-      if bytes.isEmpty then
-        some acc.reverse
-      else
-        none
-    | size :: sizesTail =>
-      if bytes.size < size then
-        none
-      else
-        let (part1, part2) := splitByteArray bytes size
-        aux part2 sizesTail (part1 :: acc)
-  aux bytes sizes []
+/-- The combined shared secret, as a pure function of both secrets and both ciphertexts. -/
+def combine (p₁ : k₁.Plaintext) (p₂ : k₂.Plaintext)
+    (c₁ : k₁.Ciphertext) (c₂ : k₂.Ciphertext) : Bytes32 :=
+  let cct := toBytes (k₁.encodeCiphertext c₁) ++ toBytes (k₂.encodeCiphertext c₂)
+  xorBytes (hash (toBytes (k₁.encodePlaintext p₁) ++ cct))
+           (hash (toBytes (k₂.encodePlaintext p₂) ++ cct))
 
-def combinerEncapsulateWith (hash : ByteArray → { out : ByteArray // out.size = 32 }) (KEMs : List KEM)
-    (seed : { s : ByteArray // s.size = 32 }) (pubkey : PublicKey) : Option (ByteArray × ByteArray) := do
-  let pairs ← (((List.range KEMs.length).zip KEMs).zip pubkey.data).mapM fun ((i, kem), pkChunk) => do
-    let pk ← kem.decodePublicKey pkChunk
-    kem.encapsulateWith (hash (seed.val ++ ByteArray.mk #[UInt8.ofNat i])) pk
-  let cts := pairs.map Prod.fst
-  pure (cts.foldl (· ++ ·) ByteArray.empty, (splitPRF hash (pairs.map Prod.snd) cts).val)
+def encapM (pk : k₁.PublicKey × k₂.PublicKey) :
+    EStateM KEMError (k₁.State × k₂.State)
+      ((k₁.Ciphertext × k₂.Ciphertext) × Bytes32) := do
+  let (c₁, p₁) ← liftFst k₁ k₂ (k₁.encap pk.1)
+  let (c₂, p₂) ← liftSnd k₁ k₂ (k₂.encap pk.2)
+  pure ((c₁, c₂), combine hash k₁ k₂ p₁ p₂ c₁ c₂)
 
-def createKEMCombiner (name : String) (hash : ByteArray → { s : ByteArray // s.size = 32 }) (KEMs : List KEM) : KEM :=
-{
-  PublicKeyType := PublicKey,
-  PrivateKeyType := PrivateKey,
-  privateKeySize := KEMs.foldl (fun acc x => acc + x.privateKeySize) 0,
-  publicKeySize := KEMs.foldl (fun acc x => acc + x.publicKeySize) 0,
-  ciphertextSize := KEMs.foldl (fun acc x => acc + x.ciphertextSize) 0,
-  name := name,
+def decapM (sk : k₁.PrivateKey × k₂.PrivateKey)
+    (ct : k₁.Ciphertext × k₂.Ciphertext) :
+    EStateM KEMError (k₁.State × k₂.State) Bytes32 := do
+  let p₁ ← liftFst k₁ k₂ (k₁.decap sk.1 ct.1)
+  let p₂ ← liftSnd k₁ k₂ (k₂.decap sk.2 ct.2)
+  pure (combine hash k₁ k₂ p₁ p₂ ct.1 ct.2)
 
-  generateKeyPair := do
-    let mut pubkeyData : List ByteArray := []
-    let mut privkeyData : List ByteArray := []
-    for kem in KEMs do
-      let (newpubkey, newprivkey) ← kem.generateKeyPair
-      pubkeyData := pubkeyData ++ [kem.encodePublicKey newpubkey]
-      privkeyData := privkeyData ++ [kem.encodePrivateKey newprivkey]
-    pure ({ data := pubkeyData }, { data := privkeyData }),
 
-  generateKeyPairWith := fun seed =>
-    let pairs := ((List.range KEMs.length).zip KEMs).map (fun (i, kem) =>
-      let derived := hash (seed.val ++ ByteArray.mk #[UInt8.ofNat i])
-      let (pk, sk) := kem.generateKeyPairWith derived
-      (kem.encodePublicKey pk, kem.encodePrivateKey sk))
-    ({ data := pairs.map Prod.fst }, { data := pairs.map Prod.snd }),
+theorem combinedRoundTrip
+    (pk₁ : k₁.PublicKey) (pk₂ : k₂.PublicKey)
+    (sk₁ : k₁.PrivateKey) (sk₂ : k₂.PrivateKey)
+    (h₁ : ∀ s c p s', k₁.encap pk₁ s = .ok (c, p) s' →
+            ∀ t, ∃ t', k₁.decap sk₁ c t = .ok p t')
+    (h₂ : ∀ s c p s', k₂.encap pk₂ s = .ok (c, p) s' →
+            ∀ t, ∃ t', k₂.decap sk₂ c t = .ok p t') :
+    ∀ s c k s', encapM hash k₁ k₂ (pk₁, pk₂) s = .ok (c, k) s' →
+      ∀ t, ∃ t', decapM hash k₁ k₂ (sk₁, sk₂) c t = .ok k t' := by
+  sorry
 
-  encapsulateWith := combinerEncapsulateWith hash KEMs,
+def splitL {a b : Nat} (v : Vector UInt8 (a + b)) : Vector UInt8 a :=
+  (v.take a).cast (by omega)
 
-  encapsulate := fun pubkey => do
-    let mut raw : ByteArray := ByteArray.empty
-    for _ in [0:32] do
-      let b ← IO.rand 0 255
-      raw := raw.push (UInt8.ofNat b)
-    match combinerEncapsulateWith hash KEMs (hash raw) pubkey with
-    | none => panic! "encapsulation failed"
-    | some result => pure result,
+def splitR {a b : Nat} (v : Vector UInt8 (a + b)) : Vector UInt8 b :=
+  (v.drop a).cast (by omega)
 
-  decapsulate := fun privkey ciphertext =>
-    let sizes := KEMs.map (fun x => x.ciphertextSize)
-    match splitByteArrayIntoChunks ciphertext sizes with
-    | none => panic! "failed to parse ciphertext"
-    | some ciphertexts =>
-        let sharedSecrets := KEMs.zip ciphertexts |>.zip privkey.data |>.map (fun ((kem, ct), privKeyChunk) =>
-          match kem.decodePrivateKey privKeyChunk with
-          | none => panic! "decode private key failure"
-          | some innerPrivkey => kem.decapsulate innerPrivkey ct
-        )
-        (splitPRF hash sharedSecrets ciphertexts).val,
+def combineKEM : KEM where
+  State      := k₁.State × k₂.State
+  PublicKey  := k₁.PublicKey × k₂.PublicKey
+  PrivateKey := k₁.PrivateKey × k₂.PrivateKey
+  Ciphertext := k₁.Ciphertext × k₂.Ciphertext
+  Plaintext  := Bytes32
 
-  encodePrivateKey := fun privkey =>
-    privkey.data.foldl (fun acc key => acc ++ key) ByteArray.empty,
+  pubI  := ⟨(k₁.pubI.default,  k₂.pubI.default)⟩
+  privI := ⟨(k₁.privI.default, k₂.privI.default)⟩
+  ctI   := ⟨(k₁.ctI.default,   k₂.ctI.default)⟩
+  ptI   := ⟨Vector.replicate 32 0⟩
 
-  decodePrivateKey := fun bytes =>
-    let sizes : List Nat := KEMs.map (fun kem => kem.privateKeySize)
-    match splitByteArrayIntoChunks bytes sizes with
-    | none => none
-    | some keys => some { data := keys },
+  publicKeySize  := k₁.publicKeySize  + k₂.publicKeySize
+  privateKeySize := k₁.privateKeySize + k₂.privateKeySize
+  ciphertextSize := k₁.ciphertextSize + k₂.ciphertextSize
+  plaintextSize  := 32
 
-  encodePublicKey := fun pubkey =>
-    pubkey.data.foldl (fun acc key => acc ++ key) ByteArray.empty,
+  decodePublicKey  := fun v => do
+    let a ← k₁.decodePublicKey (splitL v)
+    let b ← k₂.decodePublicKey (splitR v)
+    pure (a, b)
+  decodePrivateKey := fun v => do
+    let a ← k₁.decodePrivateKey (splitL v)
+    let b ← k₂.decodePrivateKey (splitR v)
+    pure (a, b)
+  decodeCiphertext := fun v => do
+    let a ← k₁.decodeCiphertext (splitL v)
+    let b ← k₂.decodeCiphertext (splitR v)
+    pure (a, b)
 
-  decodePublicKey := fun bytes =>
-    let sizes : List Nat := KEMs.map (fun kem => kem.publicKeySize)
-    match splitByteArrayIntoChunks bytes sizes with
-    | none => none
-    | some keys => some { data := keys }
-}
+  encodePublicKey  := fun p => k₁.encodePublicKey p.1 ++ k₂.encodePublicKey p.2
+  encodePrivateKey := fun p => k₁.encodePrivateKey p.1 ++ k₂.encodePrivateKey p.2
+  encodeCiphertext := fun c => k₁.encodeCiphertext c.1 ++ k₂.encodeCiphertext c.2
+  encodePlaintext  := id
 
-theorem combiner_lawful (name : String)
-    (hash : ByteArray → { s : ByteArray // s.size = 32 })
-    (KEMs : List KEM) (h : ∀ kem ∈ KEMs, LawfulKEM kem) :
-    LawfulKEM (createKEMCombiner name hash KEMs) := by
-      sorry
+  encap := encapM hash k₁ k₂
+  decap := decapM hash k₁ k₂
+  init  := (k₁.init, k₂.init)
+
+  generate := do
+    let ⟨pk₁, sk₁, h₁⟩ ← liftFst k₁ k₂ k₁.generate
+    let ⟨pk₂, sk₂, h₂⟩ ← liftSnd k₁ k₂ k₂.generate
+    pure ⟨(pk₁, pk₂), (sk₁, sk₂),
+      combinedRoundTrip hash k₁ k₂ pk₁ pk₂ sk₁ sk₂ h₁ h₂⟩
+
+
+  decode_encode_pub  := by sorry
+  decode_encode_priv := by sorry
+  decode_encode_ct   := by sorry
+
 
 
 end CryptWalker.KEM.Combiner
