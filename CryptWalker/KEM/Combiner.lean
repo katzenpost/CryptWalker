@@ -265,7 +265,9 @@ def combineKEM : KEM where
 
   encap := encapM F k₁ k₂
   decap := decapM F k₁ k₂
-  init  := (k₁.init, k₂.init)
+  -- Inhabitance only, inherited from the components. A real combined state is
+  -- the pair of the components' own caller-supplied states.
+  stateI := ⟨(k₁.stateI.default, k₂.stateI.default)⟩
 
   generate := do
     let ⟨pk₁, sk₁, h₁⟩ ← liftFst k₁ k₂ k₁.generate

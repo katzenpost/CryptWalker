@@ -20,6 +20,10 @@ structure KEM where
   [privI : Inhabited PrivateKey]
   [ctI   : Inhabited Ciphertext]
   [ptI   : Inhabited Plaintext]
+  /-- Inhabitance witness for `State`, nothing more. The state a scheme is
+  actually run against carries its randomness and must be supplied by the
+  caller; never execute against `stateI.default`. -/
+  [stateI : Inhabited State]
 
   publicKeySize  : Nat
   privateKeySize : Nat
@@ -36,7 +40,6 @@ structure KEM where
 
   decap : PrivateKey → Ciphertext → EStateM KEMError State Plaintext
   encap : PublicKey → EStateM KEMError State (Ciphertext × Plaintext)
-  init : State
   generate : EStateM KEMError State (Σ' (pk : PublicKey), {sk : PrivateKey //
     ∀ s c k s', encap pk s = .ok (c, k) s' → ∀ t, ∃ t', decap sk c t = .ok k t'})
 
@@ -69,7 +72,6 @@ instance : Inhabited KEM := ⟨{
 
   decap := fun _ _ => pure ()
   encap := fun _ => pure ((), ())
-  init := ()
   generate := pure ⟨(), (), fun _ _ _ _ _ t => ⟨t, rfl⟩⟩
 
   decode_encode_pub  := fun _ => rfl
@@ -79,39 +81,43 @@ instance : Inhabited KEM := ⟨{
   plaintextEq := inferInstance
 }⟩
 
-opaque kemSpec : KEM
+section Spec
 
-instance : Inhabited kemSpec.State := ⟨kemSpec.init⟩
+variable (kemSpec : KEM)
+
+instance : Inhabited kemSpec.State := kemSpec.stateI
 
 abbrev KEMM := EStateM KEMError kemSpec.State
 
 abbrev PublicKey : Type := kemSpec.PublicKey
-instance : Inhabited PublicKey := kemSpec.pubI
+instance : Inhabited (PublicKey kemSpec) := kemSpec.pubI
 
 abbrev PrivateKey : Type := kemSpec.PrivateKey
-instance : Inhabited PrivateKey := kemSpec.privI
+instance : Inhabited (PrivateKey kemSpec) := kemSpec.privI
 
 abbrev Ciphertext : Type := kemSpec.Ciphertext
-instance : Inhabited Ciphertext := kemSpec.ctI
+instance : Inhabited (Ciphertext kemSpec) := kemSpec.ctI
 
 abbrev Plaintext : Type := kemSpec.Plaintext
-instance : Inhabited Plaintext := kemSpec.ptI
+instance : Inhabited (Plaintext kemSpec) := kemSpec.ptI
 
-instance : DecidableEq Plaintext := kemSpec.plaintextEq
+instance : DecidableEq (Plaintext kemSpec) := kemSpec.plaintextEq
 
-def generate : KEMM (PublicKey × PrivateKey) := do
+def generate : KEMM kemSpec (PublicKey kemSpec × PrivateKey kemSpec) := do
   let ⟨pk, sk, _⟩ ← kemSpec.generate
   pure (pk, sk)
 
-def encap : PublicKey → KEMM (Ciphertext × Plaintext) := kemSpec.encap
+def encap : PublicKey kemSpec → KEMM kemSpec (Ciphertext kemSpec × Plaintext kemSpec) :=
+  kemSpec.encap
 
-def decap : PrivateKey → Ciphertext → KEMM Plaintext := kemSpec.decap
+def decap : PrivateKey kemSpec → Ciphertext kemSpec → KEMM kemSpec (Plaintext kemSpec) :=
+  kemSpec.decap
 
-def IsEncapsulation (sk : PrivateKey) (c : Ciphertext) (k : Plaintext) :=
-  ∀ t, ∃ t', decap sk c t = .ok k t'
+def IsEncapsulation (sk : PrivateKey kemSpec) (c : Ciphertext kemSpec) (k : Plaintext kemSpec) :=
+  ∀ t, ∃ t', decap kemSpec sk c t = .ok k t'
 
-def KeyPair (pk : PublicKey) (sk : PrivateKey) :=
-  ∀ s c k s', encap pk s = .ok (c, k) s' → IsEncapsulation sk c k
+def KeyPair (pk : PublicKey kemSpec) (sk : PrivateKey kemSpec) :=
+  ∀ s c k s', encap kemSpec pk s = .ok (c, k) s' → IsEncapsulation kemSpec sk c k
 
 theorem EStateM_triple {ε σ α} {p : α → Prop} {x : EStateM ε σ α}
     (h : ∀ t, ∃ a t', x t = .ok a t' ∧ p a) :
@@ -121,25 +127,29 @@ theorem EStateM_triple {ε σ α} {p : α → Prop} {x : EStateM ε σ α}
   sorry
 
 @[spec] theorem generate_ok :
-    ⦃⌜True⌝⦄ generate ⦃post⟨fun (pk, sk) => ⌜KeyPair pk sk⌝, fun _ => ⌜False⌝⟩⦄ := by
+    ⦃⌜True⌝⦄ generate kemSpec
+    ⦃post⟨fun (pk, sk) => ⌜KeyPair kemSpec pk sk⌝, fun _ => ⌜False⌝⟩⦄ := by
   sorry
 
-@[spec] theorem encap_ok {pk sk} (h : KeyPair pk sk) :
-    ⦃⌜True⌝⦄ encap pk ⦃post⟨fun (c, k) => ⌜IsEncapsulation sk c k⌝, fun _ => ⌜False⌝⟩⦄ := by
+@[spec] theorem encap_ok {pk sk} (h : KeyPair kemSpec pk sk) :
+    ⦃⌜True⌝⦄ encap kemSpec pk
+    ⦃post⟨fun (c, k) => ⌜IsEncapsulation kemSpec sk c k⌝, fun _ => ⌜False⌝⟩⦄ := by
   sorry
 
-@[spec] theorem decap_ok {sk ct k} (h : IsEncapsulation sk ct k) :
-    ⦃⌜True⌝⦄ decap sk ct ⦃post⟨fun k' => ⌜k' = k⌝, fun _ => ⌜False⌝⟩⦄ :=
+@[spec] theorem decap_ok {sk ct k} (h : IsEncapsulation kemSpec sk ct k) :
+    ⦃⌜True⌝⦄ decap kemSpec sk ct ⦃post⟨fun k' => ⌜k' = k⌝, fun _ => ⌜False⌝⟩⦄ :=
   EStateM_triple fun t => let ⟨t', ht⟩ := h t; ⟨k, t', ht, rfl⟩
 
-def roundTrip : KEMM Bool := do
-  let (pk, sk) ← generate
-  let (c, k)   ← encap pk
-  let k'       ← decap sk c
+def roundTrip : KEMM kemSpec Bool := do
+  let (pk, sk) ← generate kemSpec
+  let (c, k)   ← encap kemSpec pk
+  let k'       ← decap kemSpec sk c
   return k' == k
 
 theorem roundTrip_ok :
-    ⦃⌜True⌝⦄ roundTrip ⦃post⟨fun b => ⌜b = true⌝, fun _ => ⌜False⌝⟩⦄ := by
+    ⦃⌜True⌝⦄ roundTrip kemSpec ⦃post⟨fun b => ⌜b = true⌝, fun _ => ⌜False⌝⟩⦄ := by
   mvcgen [roundTrip] with grind
+
+end Spec
 
 end CryptWalker.KEM.KEM

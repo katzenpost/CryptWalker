@@ -7,6 +7,7 @@ import CryptWalker.KEM.Schemes
 
 open CryptWalker.KEM
 open CryptWalker.KEM.KEM
+open CryptWalker.KEM.Adapter
 
 def kemRoundTrip (k : KEM) : EStateM KEMError k.State Bool :=
   haveI := k.plaintextEq
@@ -28,5 +29,8 @@ def main : IO Unit := do
   let seed ← (Vector.range 32).mapM fun _ => do
     let b ← IO.rand 0 255
     pure (UInt8.ofNat b)
-  let str : Nat → Vector UInt8 32 := fun _ => seed
-  testKEM "X25519" kemX25519 (0, str)
+  -- A constant stream would make the ephemeral key equal the static key, so the
+  -- round trip would pass without ever exercising a real two-party exchange.
+  let str : Nat → Vector UInt8 32 := fun i =>
+    sha256V (Adapter.toBytes seed ++ ⟨#[i.toUInt8]⟩)
+  testKEM "X25519" kemX25519 (initWith str)
