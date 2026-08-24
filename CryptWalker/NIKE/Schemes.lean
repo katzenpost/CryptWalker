@@ -7,7 +7,7 @@ namespace CryptWalker.NIKE
 
 def Schemes : List NIKE :=
   [
-    CryptWalker.NIKE.X25519.Scheme,
+    CryptWalker.NIKE.X25519.Scheme
   ]
 
 end CryptWalker.NIKE

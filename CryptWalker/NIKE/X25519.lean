@@ -20,38 +20,23 @@ def p : ℕ := 2^255 - 19
 instance : NeZero p := ⟨by norm_num [p]⟩
 
 def basepoint : ZMod p := 9
-def keySize : ℕ := 32
+abbrev keySize : ℕ := 32
 
+/-- Little-endian byte decoding, with bit 255 masked per RFC 7748. -/
+def toField (v : Vector UInt8 keySize) : ZMod p :=
+  let masked := v.set 31 (v[31] &&& 0x7f)
+  (List.range keySize).foldr (fun i acc => acc * 256 + (masked[i]!).toNat) 0
 
-def clampScalarBytes (scalarBytes : ByteArray) : ByteArray :=
-  let clamped1 := scalarBytes.set! 0 (scalarBytes.get! 0 &&& 0xf8)
-  let clamped2 := clamped1.set! 31 ((clamped1.get! 31 &&& 0x7f) ||| 0x40)
-  clamped2
+/-- Little-endian byte encoding, exactly 32 bytes by construction. -/
+def fromField (x : ZMod p) : Vector UInt8 keySize :=
+  Vector.ofFn (fun i : Fin keySize => (x.val >>> (8 * i.val)).toUInt8)
 
-def toField (ba : ByteArray) : ZMod p :=
-  let masked := ba.set! 31 ((ba.get! 31) &&& 0x7f)
-  let n := (ByteArray.mk $ Array.mk masked.toList.reverse).foldl (fun acc b => acc * 256 + b.toNat) 0
-  n
+/-- RFC 7748 clamping: clear the low three bits, clear bit 255, set bit 254. -/
+def clampScalar (v : Vector UInt8 keySize) : Vector UInt8 keySize :=
+  let v1 := v.set 0  (v[0]  &&& 0xf8)
+  v1.set 31 ((v1[31] &&& 0x7f) ||| 0x40)
 
-def fromFieldBytes (x : ZMod p) : ByteArray :=
-  ByteArray.mk $ Array.mk $ (natToBytes x.val).data.toList.reverse
-
-def fromField (x : ZMod p) : { s : ByteArray // s.size = 32 } :=
-  ⟨fromFieldBytes x
-     ++ ByteArray.mk (Array.mk (List.replicate (keySize - (fromFieldBytes x).size) 0)), by
-    simp only [fromFieldBytes, ByteArray.size, Array.size, List.length_reverse]
-    simp only [List.toArray_replicate, ByteArray.data_append, Array.toList_append,
-      Array.toList_replicate, List.length_append, List.length_reverse, List.length_replicate,
-      keySize]
-    exact Nat.add_sub_cancel' (natToBytes_length_le_32 _ (by
-      have hlt := ZMod.val_lt x
-      have hp : p < 256 ^ 32 := by norm_num [p]
-      omega))⟩
-
-def clampScalar (scalar : ZMod p) : ZMod p :=
-  let b := fromField scalar
-  let newB := clampScalarBytes b
-  toField newB
+def basepointBytes : Vector UInt8 keySize := fromField basepoint
 
 structure LadderState where
   x1 : ZMod p
@@ -86,7 +71,7 @@ def cswap (swap : Bool) (x y : ZMod p) : (ZMod p × ZMod p) :=
 
 def montgomery_ladder (scalar : ZMod p) (point : ZMod p) : Id LadderState :=
   do
-    let e : ByteArray := fromField scalar
+    let e := fromField scalar
     let mut state : LadderState := {
       x1 := point,
       x2 := 1,
@@ -96,9 +81,7 @@ def montgomery_ladder (scalar : ZMod p) (point : ZMod p) : Id LadderState :=
     }
     let mut swap := false
     for pos in (List.range 255).reverse do
-      let byteIndex := pos / 8
-      let bitIndex := pos % 8
-      let b : Bool := (Nat.toUInt8 ((e.get! byteIndex).toNat >>> bitIndex) &&& 1) == 1
+      let b : Bool := ((e[pos / 8]!).toNat >>> (pos % 8)) &&& 1 == 1
       let newSwap := swap != b
       let (stateX2, stateX3) := cswap newSwap state.x2 state.x3
       let (stateZ2, stateZ3) := cswap newSwap state.z2 state.z3
@@ -110,76 +93,93 @@ def montgomery_ladder (scalar : ZMod p) (point : ZMod p) : Id LadderState :=
     state := { state with x2 := finalX2, x3 := finalX3, z2 := finalZ2, z3 := finalZ3 }
     state
 
-def scalarmult (scalarBytes : ByteArray) (point : ZMod p) : ZMod p :=
-  let clampedScalar := toField $ clampScalarBytes scalarBytes
+def scalarmult (scalarBytes : Vector UInt8 keySize) (point : ZMod p) : ZMod p :=
+  let clampedScalar := toField (clampScalar scalarBytes)
   let finalState := montgomery_ladder clampedScalar point
   finalState.x2 * finalState.z2⁻¹
 
-def curve25519 (scalarBytes : ByteArray) (point : ByteArray) : ByteArray :=
-  fromField $ scalarmult scalarBytes $ toField point
+def curve25519 (scalar point : Vector UInt8 keySize) : Vector UInt8 keySize :=
+  fromField (scalarmult scalar (toField point))
 
 /-
-  NIKE type classes instances for x25519
+  NIKE types for x25519
 -/
 
-def PublicKeySize := keySize
-def PrivateKeySize := keySize
+structure PrivateKey   where data : Vector UInt8 keySize
+structure PublicKey    where data : Vector UInt8 keySize
+structure SharedSecret where data : Vector UInt8 keySize
 
-structure PrivateKey where
-  data : ByteArray
+def derivePub (sk : PrivateKey) : PublicKey := ⟨curve25519 sk.data basepointBytes⟩
 
-structure PublicKey where
-  data : ByteArray
+private def bytes32 (l : List UInt8) (h : l.length = keySize := by decide) :
+    Vector UInt8 keySize := ⟨l.toArray, by simpa using h⟩
 
-def generatePrivateKeyFromSeed (seed : { s : ByteArray // s.size = 32 }) : PrivateKey :=
-  { data := seed.val }
+/-- Curve25519 small-order points, little-endian, per libsodium's `has_small_order`.
+    Seven values; the high bit of byte 31 is masked before comparison, so each
+    also covers its +2^255 variant. See eprint.iacr.org/2017/806. -/
+def smallOrderPoints : List (Vector UInt8 keySize) := [
+  -- 0 (order 4)
+  bytes32 (List.replicate 32 0x00),
+  -- 1 (order 1)
+  bytes32 (0x01 :: List.replicate 31 0x00),
+  -- order 8
+  bytes32 [0xe0,0xeb,0x7a,0x7c,0x3b,0x41,0xb8,0xae,0x16,0x56,0xe3,0xfa,0xf1,0x9f,0xc4,0x6a,
+           0xda,0x09,0x8d,0xeb,0x9c,0x32,0xb1,0xfd,0x86,0x62,0x05,0x16,0x5f,0x49,0xb8,0x00],
+  -- order 8
+  bytes32 [0x5f,0x9c,0x95,0xbc,0xa3,0x50,0x8c,0x24,0xb1,0xd0,0xb1,0x55,0x9c,0x83,0xef,0x5b,
+           0x04,0x44,0x5c,0xc4,0x58,0x1c,0x8e,0x86,0xd8,0x22,0x4e,0xdd,0xd0,0x9f,0x11,0x57],
+  -- p-1 (order 2)
+  bytes32 (0xec :: List.replicate 30 0xff ++ [0x7f]),
+  -- p (=0, order 4)
+  bytes32 (0xed :: List.replicate 30 0xff ++ [0x7f]),
+  -- p+1 (=1, order 1)
+  bytes32 (0xee :: List.replicate 30 0xff ++ [0x7f])
+]
 
-def generatePrivateKey : IO PrivateKey := do
-  let mut arr := ByteArray.emptyWithCapacity keySize
-  for _ in [0:keySize] do
-    let randomByte ← IO.rand 0 255
-    arr := arr.push (UInt8.ofNat randomByte)
-  pure { data := arr }
+/-- Clear the high bit of byte 31, as libsodium does before comparison. -/
+def maskHighBit (v : Vector UInt8 keySize) : Vector UInt8 keySize :=
+  v.set 31 (v[31] &&& 0x7f)
 
-def derivePublicKey (sk : PrivateKey) : PublicKey :=
-    PublicKey.mk $ fromField $ (scalarmult sk.data basepoint)
+def SafePub (pk : PublicKey) : Prop := maskHighBit pk.data ∉ smallOrderPoints
+
+
+instance : DecidablePred SafePub := fun pk => by
+  unfold SafePub; infer_instance
+
+axiom derivePub_safe : ∀ sk : PrivateKey, SafePub (derivePub sk)
+
+axiom curve25519_commutes : ∀ sk₁ sk₂ : PrivateKey,
+  curve25519 sk₁.data (derivePub sk₂).data = curve25519 sk₂.data (derivePub sk₁).data
 
 def SchemeName := "X25519"
 
-def Scheme : NIKE :=
-{
-  PublicKeyType := PublicKey,
-  PrivateKeyType := PrivateKey,
-  privateKeySize := keySize,
-  publicKeySize := keySize,
-  name := SchemeName,
+def Scheme : NIKE where
+  PrivateKey   := PrivateKey
+  PublicKey    := PublicKey
+  SharedSecret := SharedSecret
 
-  generatePrivateKey := generatePrivateKey,
-  privateKeyFromSeed := generatePrivateKeyFromSeed,
+  name := SchemeName
+  privateKeySize   := keySize
+  publicKeySize    := keySize
+  sharedSecretSize := keySize
 
-  derivePublicKey := fun (sk : PrivateKey) => derivePublicKey sk,
+  Safe    := SafePub
+  decSafe := inferInstance
 
-  groupAction := fun (sk : PrivateKey) (pk : PublicKey) => PublicKey.mk $ curve25519 sk.data pk.data,
+  privateKeyFromSeed := fun seed => ⟨clampScalar seed⟩
+  derivePublicKey    := derivePub
+  groupAction        := fun sk pk _ => ⟨curve25519 sk.data pk.data⟩
 
-  encodePrivateKey := fun (sk : PrivateKey) => sk.data,
-  decodePrivateKey := fun (bytes : ByteArray) => some { data := bytes },
-  encodePublicKey := fun (pk : PublicKey) => pk.data,
-  decodePublicKey := fun (bytes : ByteArray) => some { data := bytes }
+  encodePrivateKey   := fun sk => sk.data
+  decodePrivateKey   := fun v => some ⟨v⟩
+  encodePublicKey    := fun pk => pk.data
+  decodePublicKey    := fun v => some ⟨v⟩
+  encodeSharedSecret := fun ss => ss.data
 
-  validPublicKey := fun pk => pk.data.size == keySize /- XXX FIXME: do actual validation -/
-}
-
-axiom x25519_commutes : ∀ (sk₁ sk₂ : Scheme.PrivateKeyType),
-  Scheme.groupAction sk₁ (Scheme.derivePublicKey sk₂)
-    = Scheme.groupAction sk₂ (Scheme.derivePublicKey sk₁)
-
-theorem X25519_is_lawful_NIKE : LawfulNIKE Scheme where
-  decode_encode_pub := by intro pk; rfl
-  decode_encode_priv := by intro pk; rfl
-  derive_valid := by
-    intro sk
-    simp only [Scheme, derivePublicKey, keySize, beq_iff_eq]
-    exact (fromField (scalarmult sk.data basepoint)).property
-  commutes := x25519_commutes
+  derive_safe        := derivePub_safe
+  decode_encode_priv := fun _ => rfl
+  decode_encode_pub  := fun _ => rfl
+  encode_decode_pub  := fun _ _ h => congrArg PublicKey.data (Option.some.inj h) ▸ rfl
+  commutes           := fun sk₁ sk₂ => congrArg SharedSecret.mk (curve25519_commutes sk₁ sk₂)
 
 end CryptWalker.NIKE.X25519

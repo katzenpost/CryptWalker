@@ -30,3 +30,5 @@ name = "CryptWalker.KEM.test"
 
 [[lean_exe]]
 name = "CryptWalker.NIKE.benchmark"
+[[lean_exe]]
+name = "CryptWalker.KEM.vectors"

@@ -11,27 +11,28 @@ open CryptWalker.Util.newhex
 open CryptWalker.NIKE.NIKE
 open CryptWalker.NIKE.X25519
 
-def genkey : IO ByteArray := do
-  let mut arr := ByteArray.emptyWithCapacity keySize
+def genkey : IO (Vector UInt8 keySize) := do
+  let mut arr : Array UInt8 := Array.emptyWithCapacity keySize
   for _ in [0:keySize] do
     let randomByte ← IO.rand 0 255
     arr := arr.push (UInt8.ofNat randomByte)
-  pure arr
-
+  if h : arr.size = keySize then
+    pure ⟨arr, h⟩
+  else
+    throw (IO.userError "genkey produced wrong length")
 
 def benchmarkCurve25519ECDH : IO Unit := do
   let mut b := Bench.new
 
-  let privkey : ByteArray ← genkey
-  let pubkey := fromField $ (scalarmult privkey basepoint)
-  let mut privkeys : List ByteArray := []
+  let privkey ← genkey
+  let pubkey := fromField (scalarmult privkey basepoint)
+  let mut privkeys : List (Vector UInt8 keySize) := []
 
-  -- create b.N number of test cases
   for _ in (List.range b.N) do
     let key ← genkey
     privkeys := privkeys ++ [key]
 
-  let mut results :=  Array.replicate 1000 ByteArray.empty
+  let mut results := Array.replicate 1000 (Vector.replicate keySize (0 : UInt8))
   let mut i := 0
   for sk in privkeys do
     b ← b.start
@@ -41,8 +42,6 @@ def benchmarkCurve25519ECDH : IO Unit := do
     i := i + 1
 
   b.report "benchmarkCurve25519ECDH"
-  pure ()
-
 
 def main : IO Unit := do
   benchmarkCurve25519ECDH
