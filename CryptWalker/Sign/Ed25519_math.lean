@@ -103,7 +103,7 @@ def decodePoint (v : Vector UInt8 32) : Option Point :=
   let x := if x0 ^ 2 = xx then x0 else x0 * sqrtMinusOne
   let x' := if x.val % 2 = sign then x else -x
   let q : Point := ⟨x', y⟩
-  if h : onCurve q then some q else none
+  if _h : onCurve q then some q else none
 
 def scalarFromSeed (seed : Vector UInt8 32) : Nat :=
   let digest := (sha512 (vectorToByteArray seed)).toList
