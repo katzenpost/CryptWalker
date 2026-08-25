@@ -157,9 +157,9 @@ axiom derivePub_safe : ∀ sk : PrivateKey, SafePub (derivePub sk)
 axiom curve25519_commutes : ∀ sk₁ sk₂ : PrivateKey,
   curve25519 sk₁.data (derivePub sk₂).data = curve25519 sk₂.data (derivePub sk₁).data
 
-def SchemeName := "X25519"
+def SchemeName := "X25519-ladder"
 
-def Scheme : NIKE where
+def LadderScheme : NIKE where
   PrivateKey   := PrivateKey
   PublicKey    := PublicKey
   SharedSecret := SharedSecret
