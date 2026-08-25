@@ -38,3 +38,6 @@ name = "CryptWalker.Hash.test"
 
 [[lean_exe]]
 name = "CryptWalker.Sign.test"
+
+[[lean_exe]]
+name = "CryptWalker.Sign.blinded_test"

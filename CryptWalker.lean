@@ -19,6 +19,7 @@ import CryptWalker.KEM.Schemes
 import CryptWalker.KEM.Combiner
 import CryptWalker.Sign.Sign
 import CryptWalker.Sign.Ed25519_math
+import CryptWalker.Sign.Ed25519_blinded
 import CryptWalker.Sign.Blindable
 import CryptWalker.Sign.Combiner
 import CryptWalker.Sign.Convert

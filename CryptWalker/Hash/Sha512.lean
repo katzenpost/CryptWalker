@@ -142,6 +142,23 @@ def sha512 (msg : ByteArray) : Vector UInt8 64 := Id.run do
     st := compress (words.extract (16*i) (16*i + 16)) st
   return st.toVec
 
+private def initHash512_256 : Digest where
+  h0 := 0x22312194fc2bf72c
+  h1 := 0x9f555fa3c84c64c2
+  h2 := 0x2393b86b6f53b151
+  h3 := 0x963877195940eabd
+  h4 := 0x96283ee2a88effe3
+  h5 := 0xbe5e1e2553863992
+  h6 := 0x2b0199fc2c85b8aa
+  h7 := 0x0eb72ddc81c52ca2
+
+def sha512_256 (msg : ByteArray) : Vector UInt8 32 := Id.run do
+  let words := toWords (pad msg)
+  let mut st := initHash512_256
+  for i in [0:words.size / 16] do
+    st := compress (words.extract (16*i) (16*i + 16)) st
+  return Vector.ofFn fun i : Fin 32 => st.toVec[i.val]!
+
 /-! ### The `Hash` instance
 
 `State` is the accumulated message. That makes `update_append` and `hash_spec` immediate from
