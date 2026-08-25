@@ -17,3 +17,4 @@ import CryptWalker.KEM.Schemes
 import CryptWalker.KEM.Combiner
 import CryptWalker.Sign.Sign
 import CryptWalker.Sign.Blindable
+import CryptWalker.Sign.Combiner
