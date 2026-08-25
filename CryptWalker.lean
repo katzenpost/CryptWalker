@@ -27,3 +27,4 @@ import CryptWalker.Sign.Combiner
 import CryptWalker.Sign.Convert
 import CryptWalker.Sign.Schemes
 import CryptWalker.Sign.Check
+import CryptWalker.Cipher.AEAD
