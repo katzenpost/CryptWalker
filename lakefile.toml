@@ -40,6 +40,9 @@ name = "CryptWalker.Hash.test"
 name = "CryptWalker.Hash.hkdf_test"
 
 [[lean_exe]]
+name = "CryptWalker.Cipher.test"
+
+[[lean_exe]]
 name = "CryptWalker.Sign.test"
 
 [[lean_exe]]

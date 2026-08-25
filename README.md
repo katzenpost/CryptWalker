@@ -25,6 +25,11 @@ Classical NIKEs adapted to KEM via hashed ElGamal construction:
 | SIGN: Cryptographic Signature Scheme |
 |:---:|
 
+| AEAD: Authenticated Encryption with Associated Data |
+|:---:|
+* AES-256-GCM-SIV (RFC 8452), the misuse-resistant mode BACAP encrypts pigeonhole boxes with,
+  built on AES-256 and POLYVAL
+
 | PRF: Pseuodo Random Function |
 |:---:|
 * SHA256
@@ -48,6 +53,8 @@ lake build
 lake exe CryptWalker.Data.test
 lake exe CryptWalker.NIKE.test
 lake exe CryptWalker.KEM.test
+lake exe CryptWalker.Hash.test
+lake exe CryptWalker.Cipher.test
 ```
 
 *benchmarks*
