@@ -69,9 +69,16 @@ def montgomery_step (s : LadderState) : LadderState :=
 def cswap (swap : Bool) (x y : ZMod p) : (ZMod p × ZMod p) :=
   if swap then (y, x) else (x, y)
 
-def montgomery_ladder (scalar : ZMod p) (point : ZMod p) : Id LadderState :=
+/-- The ladder consumes the scalar as *bytes*, not as a `ZMod p`.
+
+Taking a `ZMod p` here and calling `fromField` to get the bits back was a correctness bug: a
+clamped scalar lies in `[2^254, 2^255)` and can exceed `p = 2^255 - 19`, so the round trip
+through the field reduced it modulo the field prime. A scalar reduces modulo the *group order*,
+never modulo `p`. It affected the two clamped values above `p` -- `2^255 - 16` and `2^255 - 8`
+-- and was found by cross-checking against `X25519_math.Scheme`, which computes in the group
+and does not reduce. -/
+def montgomery_ladder (e : Vector UInt8 keySize) (point : ZMod p) : Id LadderState :=
   do
-    let e := fromField scalar
     let mut state : LadderState := {
       x1 := point,
       x2 := 1,
@@ -94,8 +101,7 @@ def montgomery_ladder (scalar : ZMod p) (point : ZMod p) : Id LadderState :=
     state
 
 def scalarmult (scalarBytes : Vector UInt8 keySize) (point : ZMod p) : ZMod p :=
-  let clampedScalar := toField (clampScalar scalarBytes)
-  let finalState := montgomery_ladder clampedScalar point
+  let finalState := montgomery_ladder (clampScalar scalarBytes) point
   finalState.x2 * finalState.z2⁻¹
 
 def curve25519 (scalar point : Vector UInt8 keySize) : Vector UInt8 keySize :=
