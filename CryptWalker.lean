@@ -28,3 +28,5 @@ import CryptWalker.Sign.Convert
 import CryptWalker.Sign.Schemes
 import CryptWalker.Sign.Check
 import CryptWalker.Cipher.AEAD
+import CryptWalker.Cipher.AES
+import CryptWalker.Cipher.Polyval
