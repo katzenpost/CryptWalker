@@ -18,3 +18,4 @@ import CryptWalker.KEM.Combiner
 import CryptWalker.Sign.Sign
 import CryptWalker.Sign.Blindable
 import CryptWalker.Sign.Combiner
+import CryptWalker.Sign.Convert
