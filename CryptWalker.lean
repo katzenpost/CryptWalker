@@ -4,6 +4,7 @@ import CryptWalker.NIKE.Schemes
 import CryptWalker.Hash.Sha2
 import CryptWalker.Hash.Hash
 import CryptWalker.Hash.Sha512
+import CryptWalker.Hash.Blake2b
 import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Hex

@@ -37,6 +37,9 @@ name = "CryptWalker.KEM.vectors"
 name = "CryptWalker.Hash.test"
 
 [[lean_exe]]
+name = "CryptWalker.Hash.hkdf_test"
+
+[[lean_exe]]
 name = "CryptWalker.Sign.test"
 
 [[lean_exe]]
