@@ -36,4 +36,5 @@ import CryptWalker.BACAP.Types
 import CryptWalker.BACAP.Ratchet
 import CryptWalker.BACAP.Protocol
 import CryptWalker.BACAP.Impl
+import CryptWalker.BACAP.API
 import CryptWalker.BACAP.test
