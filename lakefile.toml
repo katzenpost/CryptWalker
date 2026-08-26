@@ -47,3 +47,6 @@ name = "CryptWalker.Sign.test"
 
 [[lean_exe]]
 name = "CryptWalker.Sign.blinded_test"
+
+[[lean_exe]]
+name = "CryptWalker.Hash.hkdf_structured_test"

@@ -5,6 +5,7 @@ import CryptWalker.Hash.Sha2
 import CryptWalker.Hash.Hash
 import CryptWalker.Hash.Sha512
 import CryptWalker.Hash.Blake2b
+import CryptWalker.Hash.HKDF
 import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Hex
@@ -31,3 +32,8 @@ import CryptWalker.Cipher.AEAD
 import CryptWalker.Cipher.AES
 import CryptWalker.Cipher.Polyval
 import CryptWalker.Cipher.AESGCMSIV
+import CryptWalker.BACAP.Types
+import CryptWalker.BACAP.Ratchet
+import CryptWalker.BACAP.Protocol
+import CryptWalker.BACAP.Impl
+import CryptWalker.BACAP.test
