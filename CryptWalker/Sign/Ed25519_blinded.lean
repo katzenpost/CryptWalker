@@ -80,7 +80,7 @@ axiom blind_assoc : ∀ pk f g,
 axiom blind_inv : ∀ pk f,
   blindPub (blindPub pk f) (inv f) = pk
 
-noncomputable def signature : Signature where
+def signature : Signature where
   State := Unit
   PublicKey := PubBytes
   PrivateKey := Scalar
@@ -104,7 +104,7 @@ noncomputable def signature : Signature where
   decode_encode_sig := fun _ => rfl
   verify_sign := fun sk m _ => verify_signNative sk m
 
-noncomputable def blindable : Blindable where
+def blindable : Blindable where
   base := signature
   Scalar := Scalar
   mul := (· * ·)
