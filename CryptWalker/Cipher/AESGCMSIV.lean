@@ -210,7 +210,7 @@ private theorem decrypt_encrypt (key : Key) (n : Nonce) (ad pt : ByteArray) :
     decrypt key n ad (encrypt key n ad pt) = some pt := by
   rw [encrypt, decrypt_append _ _ _ _ _ (size_ofVector _), ctrXor_ctrXor, if_pos rfl]
 
-private theorem decrypt_sound (key : Key) (n : Nonce) (ad ct pt : ByteArray)
+theorem decrypt_sound (key : Key) (n : Nonce) (ad ct pt : ByteArray)
     (h : decrypt key n ad ct = some pt) : encrypt key n ad pt = ct := by
   by_cases hlen : ct.size < 16
   · rw [decrypt, if_pos hlen] at h
