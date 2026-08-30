@@ -2,6 +2,7 @@ import Lean
 
 import CryptWalker.NIKE.NIKE
 import CryptWalker.NIKE.X25519
+import CryptWalker.NIKE.X25519_math
 import CryptWalker.NIKE.Schemes
 
 open CryptWalker.Util.newhex
@@ -30,6 +31,56 @@ def testX25519Vector : IO Unit := do
       throw (IO.userError s!"KAT mismatch: expected {expectedHex}, got {got}")
   IO.println "All vector tests passed for X25519!"
 
+/-- The same RFC 7748 vector as above, but through the group implementation: lift the
+u-coordinate to a curve point, multiply, and project back. This is what distinguishes a correct
+group implementation from a merely self-consistent one -- `testNIKE` below would pass even if
+every operation returned zero. -/
+def testX25519GroupVector : IO Unit := do
+  let vectors := #[
+    ( "a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4",
+      "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c",
+      "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552" )
+  ]
+  for (scalarHex, baseHex, expectedHex) in vectors do
+    let some scalar := hexToVec32 scalarHex | throw (IO.userError "bad scalar hex")
+    let some base   := hexToVec32 baseHex   | throw (IO.userError "bad base hex")
+    match CryptWalker.NIKE.X25519_math.x25519 scalar base with
+    | none => throw (IO.userError "group x25519: u-coordinate not on the curve")
+    | some got =>
+      if showVec got ≠ expectedHex then
+        throw (IO.userError s!"group KAT mismatch: expected {expectedHex}, got {showVec got}")
+  IO.println "All vector tests passed for X25519-group!"
+
+/-- Cross-check the two implementations against each other: for the same private key, the group
+scheme's point and the ladder's byte string must have the same u-coordinate, and the two must
+agree on a full Diffie-Hellman exchange. -/
+def testX25519GroupAgreesWithLadder : IO Unit := do
+  let seeds := #[Vector.replicate 32 1, Vector.replicate 32 2,
+                 Vector.replicate 32 7, Vector.replicate 32 255]
+  for seed in seeds do
+    let sk : CryptWalker.NIKE.X25519.PrivateKey :=
+      ⟨CryptWalker.NIKE.X25519.clampScalar seed⟩
+    let ladderPub := (CryptWalker.NIKE.X25519.derivePub sk).data
+    let groupPub := CryptWalker.NIKE.X25519_math.uBytes
+      (CryptWalker.NIKE.X25519_math.scalarOf sk • CryptWalker.NIKE.X25519_math.G)
+    if showVec ladderPub ≠ showVec groupPub then
+      throw (IO.userError
+        s!"public key mismatch for seed: ladder {showVec ladderPub} vs group {showVec groupPub}")
+  -- A full exchange, computed each way.
+  let aSk : CryptWalker.NIKE.X25519.PrivateKey :=
+    ⟨CryptWalker.NIKE.X25519.clampScalar (Vector.replicate 32 3)⟩
+  let bSk : CryptWalker.NIKE.X25519.PrivateKey :=
+    ⟨CryptWalker.NIKE.X25519.clampScalar (Vector.replicate 32 5)⟩
+  let ladderSS := CryptWalker.NIKE.X25519.curve25519 aSk.data
+    (CryptWalker.NIKE.X25519.derivePub bSk).data
+  let groupSS := CryptWalker.NIKE.X25519_math.uBytes
+    (CryptWalker.NIKE.X25519_math.scalarOf aSk •
+      (CryptWalker.NIKE.X25519_math.scalarOf bSk • CryptWalker.NIKE.X25519_math.G))
+  if showVec ladderSS ≠ showVec groupSS then
+    throw (IO.userError
+      s!"shared secret mismatch: ladder {showVec ladderSS} vs group {showVec groupSS}")
+  IO.println "X25519 group and ladder agree on public keys and shared secrets!"
+
 def testNIKE (scheme : NIKE) (aliceSeed bobSeed : Vector UInt8 32) : IO Unit := do
   let aliceSk := scheme.privateKeyFromSeed aliceSeed
   let bobSk   := scheme.privateKeyFromSeed bobSeed
@@ -50,4 +101,6 @@ def testAllNIKEs : List NIKE → IO Unit
 
 def main : IO Unit := do
   testX25519Vector
+  testX25519GroupVector
+  testX25519GroupAgreesWithLadder
   testAllNIKEs CryptWalker.NIKE.Schemes

@@ -85,7 +85,7 @@ def hex (v : Vector UInt8 32) : String := byteArrayToHex ⟨v.toArray⟩
 
 /-- Run `decapM` under the named PRF. -/
 def decapVec (F : Adapter.PRF) (sk ct : Vector UInt8 32) : Option (Vector UInt8 32) :=
-  match decapM F X25519.Scheme ⟨sk⟩ ⟨ct⟩ (initWith (fun _ => Vector.replicate 32 0)) with
+  match decapM F X25519.LadderScheme ⟨sk⟩ ⟨ct⟩ (initWith (fun _ => Vector.replicate 32 0)) with
   | .ok r _    => some r
   | .error _ _ => none
 
@@ -93,7 +93,7 @@ def decapVec (F : Adapter.PRF) (sk ct : Vector UInt8 32) : Option (Vector UInt8 
 key it draws is the one the vector fixes. -/
 def encapVec (F : Adapter.PRF) (ephSeed : Vector UInt8 32) (staticPub : Vector UInt8 32) :
     Option (Vector UInt8 32 × Vector UInt8 32) :=
-  match encapM F X25519.Scheme ⟨staticPub⟩ (initWith (fun _ => ephSeed)) with
+  match encapM F X25519.LadderScheme ⟨staticPub⟩ (initWith (fun _ => ephSeed)) with
   | .ok (ct, k) _ => some (ct.data, k)
   | .error _ _    => none
 

@@ -57,7 +57,7 @@ def sha256v1PRF : Adapter.PRF where
   name   := "sha256-v1"
   derive := sha256v1Derive
 
-def kemX25519 : KEM := kemOfNike sha256v1PRF X25519.Scheme
+def kemX25519 : KEM := kemOfNike sha256v1PRF X25519.LadderScheme
 
 def Schemes : List String := ["X25519"]
 
