@@ -124,7 +124,8 @@ theorem EStateM_triple {ε σ α} {p : α → Prop} {x : EStateM ε σ α}
     ⦃⌜True⌝⦄ x ⦃post⟨fun a => ⌜p a⌝, fun _ => ⌜False⌝⟩⦄ := by
   intro t _
   obtain ⟨a, t', ht, hp⟩ := h t
-  sorry
+  simp only [WP.wp, PredTrans.apply, EStateM.run, ht]
+  exact hp
 
 @[spec] theorem generate_ok :
     ⦃⌜True⌝⦄ generate kemSpec
