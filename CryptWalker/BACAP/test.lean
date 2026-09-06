@@ -27,6 +27,10 @@ Vector files used:
 The WriteCap serialization is checked against the same vectors: every `writecap_hex` is
 deserialized and re-serialized, which exercises the 64-byte `seed ++ pubkey` private-key
 encoding Go uses.
+
+Two tests take no vectors and draw their keys from the system CSPRNG instead: `testGenerate`,
+that a freshly generated cap can encrypt and decrypt at all, and `testAliceBob`, that a writer
+and the holder of the paired read cap agree on a run of three boxes.
 -/
 
 open Lean
@@ -327,6 +331,75 @@ def testGenerate : IO UInt32 := do
     IO.println s!"  ok    fresh cap encrypts, verifies and decrypts (start index {idx.idx64})"
   pure (if ok then 0 else 1)
 
+/-- The next `n` indices of a ratchet, starting at `start` itself. -/
+def indexRun : MessageBoxIndex → Nat → Option (Array MessageBoxIndex)
+  | _,     0     => some #[]
+  | start, n + 1 => do pure (#[start] ++ (← indexRun (← start.nextIndex) n))
+
+/-- Alice writes three boxes, Bob reads them.
+
+Alice holds the write cap and never parts with it. Bob gets the paired read cap and nothing
+else: no seed, no private key, and not even the box IDs. He walks his own copy of the ratchet
+to derive the same three box IDs, which is how a reader locates boxes in the first place, and
+the same three AEAD keys, which is how he opens them. -/
+def testAliceBob : IO UInt32 := do
+  IO.println "Alice and Bob (system CSPRNG)"
+  let mut ok := true
+
+  let alice ← WriteCap.generate
+  let bob := alice.readCap
+  let ctx := "alice and bob, chapter one".toUTF8
+  let messages := #["meet me at the old bridge",
+                    "bring the umbrella",
+                    "the crow flies at midnight"]
+
+  let some aliceIdx := indexRun alice.messageBoxIndex messages.size
+    | do IO.println "  FAIL  Alice could not advance her ratchet"; return 1
+  let mut boxes := #[]
+  for (idx, msg) in aliceIdx.zip messages do
+    boxes := boxes.push (idx.encryptForContext alice ctx msg.toUTF8)
+
+  let ids := (boxes.map fun b => hexOfPubBytes b.1).toList
+  if ids.eraseDups.length != ids.length then
+    ok := false
+    IO.println "  FAIL  Alice reused a box ID across the three writes"
+  else
+    IO.println s!"  ok    Alice wrote {boxes.size} boxes to distinct IDs"
+
+  let some bobIdx := indexRun bob.messageBoxIndex boxes.size
+    | do IO.println "  FAIL  Bob could not advance his ratchet"; return 1
+
+  for i in [0:boxes.size] do
+    let (boxID, ct, sig) := boxes[i]!
+    let idx := bobIdx[i]!
+    let label := s!"box {i + 1}"
+    if hexOfPubBytes (idx.boxIDForContext bob ctx) != hexOfPubBytes boxID then
+      ok := false
+      IO.println s!"  FAIL  {label}: Bob derived a different box ID than Alice wrote to"
+    else if !verifyBox boxID ct sig then
+      ok := false
+      IO.println s!"  FAIL  {label}: signature does not verify under the box ID"
+    else
+      match idx.decryptForContext boxID ctx ct sig with
+      | some recovered =>
+        if recovered != messages[i]!.toUTF8 then
+          ok := false
+          IO.println s!"  FAIL  {label}: decrypted to the wrong plaintext"
+        else
+          IO.println s!"  ok    {label}  \"{messages[i]!}\""
+      | none =>
+        ok := false
+        IO.println s!"  FAIL  {label}: decrypt returned none"
+
+  let (boxID₂, ct₂, sig₂) := boxes[1]!
+  match bobIdx[0]!.decryptForContext boxID₂ ctx ct₂ sig₂ with
+  | none   => IO.println "  ok    the key for one box does not open the next"
+  | some _ =>
+    ok := false
+    IO.println "  FAIL  the first box's key opened the second box"
+
+  pure (if ok then 0 else 1)
+
 def main : IO UInt32 := do
   let r1 ← testMessageBoxIndex
   IO.println ""
@@ -340,7 +413,9 @@ def main : IO UInt32 := do
   IO.println ""
   let r6 ← testGenerate
   IO.println ""
-  if r1 == 0 && r2 == 0 && r3 == 0 && r4 == 0 && r5 == 0 && r6 == 0 then
+  let r7 ← testAliceBob
+  IO.println ""
+  if r1 == 0 && r2 == 0 && r3 == 0 && r4 == 0 && r5 == 0 && r6 == 0 && r7 == 0 then
     IO.println "all BACAP vectors passed"
     pure 0
   else

@@ -119,22 +119,49 @@ def IsEncapsulation (sk : PrivateKey kemSpec) (c : Ciphertext kemSpec) (k : Plai
 def KeyPair (pk : PublicKey kemSpec) (sk : PrivateKey kemSpec) :=
   ∀ s c k s', encap kemSpec pk s = .ok (c, k) s' → IsEncapsulation kemSpec sk c k
 
+/-- A triple for a computation that need not succeed: whenever it returns, the result
+satisfies `p`. Failure is left unconstrained, because neither `generate` nor `encap` is total.
+`CryptWalker.KEM.Adapter` throws `.unsafePublicKey` when a NIKE public key fails its safety
+check, so no `KEM` can be assumed to always return. -/
+theorem EStateM_triple_ok {ε σ α} {p : α → Prop} {x : EStateM ε σ α}
+    (h : ∀ t a t', x t = .ok a t' → p a) :
+    ⦃⌜True⌝⦄ x ⦃post⟨fun a => ⌜p a⌝, fun _ => ⌜True⌝⟩⦄ := by
+  intro t _
+  simp only [WP.wp, PredTrans.apply, EStateM.run]
+  cases hx : x t with
+  | ok a t'    => exact h t a t' hx
+  | error e t' => trivial
+
+/-- The stronger triple, for a computation that cannot fail. Only `decap` gets to use it, and
+only under a hypothesis that already names a successful encapsulation. -/
 theorem EStateM_triple {ε σ α} {p : α → Prop} {x : EStateM ε σ α}
     (h : ∀ t, ∃ a t', x t = .ok a t' ∧ p a) :
     ⦃⌜True⌝⦄ x ⦃post⟨fun a => ⌜p a⌝, fun _ => ⌜False⌝⟩⦄ := by
   intro t _
   obtain ⟨a, t', ht, hp⟩ := h t
-  sorry
+  simp only [WP.wp, PredTrans.apply, EStateM.run, ht]
+  exact hp
+
+/-- Whatever `generate` returns is a valid key pair: the witness travels in its return type. -/
+theorem generate_keyPair {t r t'} (hr : generate kemSpec t = .ok r t') :
+    KeyPair kemSpec r.1 r.2 := by
+  simp only [generate, bind, EStateM.bind] at hr
+  split at hr
+  · rename_i a _ _
+    simp only [pure, EStateM.pure, EStateM.Result.ok.injEq] at hr
+    obtain ⟨rfl, -⟩ := hr
+    exact a.2.property
+  · exact absurd hr (by simp)
 
 @[spec] theorem generate_ok :
     ⦃⌜True⌝⦄ generate kemSpec
-    ⦃post⟨fun (pk, sk) => ⌜KeyPair kemSpec pk sk⌝, fun _ => ⌜False⌝⟩⦄ := by
-  sorry
+    ⦃post⟨fun (pk, sk) => ⌜KeyPair kemSpec pk sk⌝, fun _ => ⌜True⌝⟩⦄ :=
+  EStateM_triple_ok fun _ _ _ hr => generate_keyPair kemSpec hr
 
 @[spec] theorem encap_ok {pk sk} (h : KeyPair kemSpec pk sk) :
     ⦃⌜True⌝⦄ encap kemSpec pk
-    ⦃post⟨fun (c, k) => ⌜IsEncapsulation kemSpec sk c k⌝, fun _ => ⌜False⌝⟩⦄ := by
-  sorry
+    ⦃post⟨fun (c, k) => ⌜IsEncapsulation kemSpec sk c k⌝, fun _ => ⌜True⌝⟩⦄ :=
+  EStateM_triple_ok fun t r t' hr => h t r.1 r.2 t' hr
 
 @[spec] theorem decap_ok {sk ct k} (h : IsEncapsulation kemSpec sk ct k) :
     ⦃⌜True⌝⦄ decap kemSpec sk ct ⦃post⟨fun k' => ⌜k' = k⌝, fun _ => ⌜False⌝⟩⦄ :=
@@ -146,9 +173,27 @@ def roundTrip : KEMM kemSpec Bool := do
   let k'       ← decap kemSpec sk c
   return k' == k
 
+/-- Generate, encapsulate, decapsulate: the plaintext that comes back is the one that went in.
+Any of the three steps may fail, so this constrains the successful runs only. -/
 theorem roundTrip_ok :
-    ⦃⌜True⌝⦄ roundTrip kemSpec ⦃post⟨fun b => ⌜b = true⌝, fun _ => ⌜False⌝⟩⦄ := by
-  mvcgen [roundTrip] with grind
+    ⦃⌜True⌝⦄ roundTrip kemSpec ⦃post⟨fun b => ⌜b = true⌝, fun _ => ⌜True⌝⟩⦄ := by
+  refine EStateM_triple_ok fun t b t' hr => ?_
+  simp only [roundTrip, bind, EStateM.bind] at hr
+  split at hr
+  case _ r1 s1 hgen =>
+    split at hr
+    case _ r2 s2 henc =>
+      split at hr
+      case _ k' s3 hdec =>
+        simp only [pure, EStateM.pure, EStateM.Result.ok.injEq] at hr
+        obtain ⟨rfl, -⟩ := hr
+        obtain ⟨s4, hd⟩ :=
+          generate_keyPair kemSpec hgen s1 r2.1 r2.2 s2 (by simpa using henc) s2
+        rw [hdec, EStateM.Result.ok.injEq] at hd
+        simp [hd.1]
+      case _ => exact absurd hr (by simp)
+    case _ => exact absurd hr (by simp)
+  case _ => exact absurd hr (by simp)
 
 end Spec
 

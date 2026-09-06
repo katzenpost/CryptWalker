@@ -25,6 +25,11 @@ TESTS := \
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 
+# Bare `lake build` builds only defaultTargets, which is the library. The
+# executables have to be named or the test targets run whatever binary was left
+# in .lake/build/bin by an earlier build.
+EXES := $(TESTS) CryptWalker.NIKE.benchmark
+
 .DEFAULT_GOAL := help
 
 .PHONY: all build test bench sorries clean help
@@ -34,7 +39,7 @@ TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 all: build ## build everything, library and executables
 
 build: ## build everything, library and executables
-	$(LAKE) build
+	$(LAKE) build CryptWalker $(EXES)
 
 # A suite counts as failed if it exits non-zero or prints anything matching
 # "fail". Most suites signal a mismatch by throwing, which exits 1, but

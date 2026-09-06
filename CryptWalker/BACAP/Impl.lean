@@ -91,8 +91,32 @@ theorem implDecrypt_implEncrypt (sk : Scalar) (pk : PubBytes) (idx : MessageBoxI
   rw [hpk, ← blind_hom]
   simp only [verify_signNative]
   rw [if_neg (by decide)]
-  simp [Scheme_nonceSize, Scheme_tagSize, implEncrypt_size, ByteArray.size_empty]
+  simp [implEncrypt_size]
   exact Scheme.decrypt_encrypt _ _ _ _
+
+/-- Only one ciphertext decrypts to a given plaintext under a given box.
+
+Follows from the AEAD's own soundness: the box ID fixes the nonce and the associated data, so
+`implEncryptBox` and `implDecryptBox` are running the same AEAD instance in both directions.
+`ct.size > 0` excludes tombstones, whose empty ciphertext bypasses the AEAD. Stated standalone
+for the same reason as `implDecrypt_implEncrypt`. -/
+theorem implDecrypt_sound (sk : Scalar) (pk boxId : PubBytes) (idx : MessageBoxIndex)
+    (ctx ct : ByteArray) (sig : SigBytes) (pt : ByteArray)
+    (hid : implDeriveBoxID pk idx ctx = boxId)
+    (hdec : implDecryptBox boxId idx ctx ct sig = some pt)
+    (hct : ct.size > 0) :
+    (implEncryptBox sk pk idx ctx pt).2.1 = ct := by
+  subst hid
+  unfold implEncryptBox
+  unfold implDecryptBox at hdec
+  dsimp only at hdec ⊢
+  split at hdec
+  · exact absurd hdec (by simp)
+  · split at hdec
+    · rename_i hz
+      rw [beq_iff_eq] at hz
+      exact absurd hct (by omega)
+    · exact Scheme.decrypt_sound _ _ _ _ _ hdec
 
 def bacapSpec : BACAPSpec where
   blindable := blindable
@@ -119,6 +143,7 @@ def bacapSpec : BACAPSpec where
           (implEncryptBox sk pk idx ctx pt).2.2 = some pt
     exact implDecrypt_implEncrypt sk pk idx ctx pt hpk
 
-  decrypt_sound := sorry
+  decrypt_sound := fun sk pk boxId idx ctx ct sig pt _hpk hid hdec hct =>
+    implDecrypt_sound sk pk boxId idx ctx ct sig pt hid hdec hct
 
 end CryptWalker.BACAP.Impl
