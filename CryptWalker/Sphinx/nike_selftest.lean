@@ -79,19 +79,19 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
         IO.eprintln s!"  hop {i}: unwrap failed: {e}"
         ok := false
         stop := true
-      | .ok r =>
+      | .ok (payload, _replayTag, cmds, forwardPkt) =>
         if i < n - 1 then
-          match r.forwardPkt with
+          match forwardPkt with
           | none =>
             IO.eprintln s!"  hop {i}: expected forwarding, got terminal"
             ok := false; stop := true
           | some fwd =>
-            if r.cmds.length ≠ 2 then
-              IO.eprintln s!"  hop {i}: expected 2 commands, got {r.cmds.length}"
+            if cmds.length ≠ 2 then
+              IO.eprintln s!"  hop {i}: expected 2 commands, got {cmds.length}"
               ok := false
             pkt := ofVector fwd
         else
-          match r.payload with
+          match payload with
           | none =>
             IO.eprintln s!"  hop {i}: expected terminal payload, got forwarding"
             ok := false
@@ -101,8 +101,8 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
               IO.eprintln s!"    want {byteArrayToHex wantPayload}"
               IO.eprintln s!"    got  {byteArrayToHex p}"
               ok := false
-            if r.cmds.length ≠ 1 then
-              IO.eprintln s!"  hop {i}: expected 1 command, got {r.cmds.length}"
+            if cmds.length ≠ 1 then
+              IO.eprintln s!"  hop {i}: expected 1 command, got {cmds.length}"
               ok := false
   pure ok
 

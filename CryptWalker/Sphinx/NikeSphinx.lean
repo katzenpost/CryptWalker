@@ -23,7 +23,6 @@ open CryptWalker.Sphinx.Constants
 open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Types
-open CryptWalker.Sphinx.Sphinx (UnwrapResult)
 open CryptWalker.Sphinx.Crypto.KDF (PacketKeys sphinxKDF)
 open CryptWalker.Sphinx.Crypto.ChaCha20 (keystream32)
 open CryptWalker.Sphinx.Crypto.HMAC (hmacSha256)
@@ -187,13 +186,14 @@ def newNikePacket (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler
 replay tag (`Except` has no side channel for it) — this pass has no caller that needs a tag
 alongside a rejection.
 
-The return type `Sphinx.UnwrapResult pkt.size RoutingCommand` — depending on `pkt`,
-`unwrapNike`'s own argument — is the abstract `Sphinx.Sphinx.unwrap`'s packet-length-invariance
-rule stated as a type rather than as a separate theorem: see `Sphinx.Sphinx`'s doc comment. This
-function is what witnesses that the rule is satisfiable — `nikeSphinxScheme` below packages it
-as a `Sphinx.Sphinx` instance. -/
+The result is `(payload, replayTag, cmds, forwardPkt)`. Its type — depending on `pkt`,
+`unwrapNike`'s own argument, via `forwardPkt : Option (Vector UInt8 pkt.size)` — is the abstract
+`Sphinx.Sphinx.unwrap`'s packet-length-invariance rule stated as a type rather than as a
+separate theorem: see `Sphinx.Sphinx`'s doc comment. This function is what witnesses that the
+rule is satisfiable — `nikeSphinxScheme` below packages it as a `Sphinx.Sphinx` instance. -/
 def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
-    Except String (UnwrapResult pkt.size RoutingCommand) := do
+    Except String
+      (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
   let geOff := 2
   let riOff := geOff + 32
   let macOff := riOff + geom.routingInfoLength
@@ -280,17 +280,15 @@ def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
       have hv0 : v0AD.size = 2 := rfl
       have hmac : macLength = 32 := rfl
       omega
-    pure { payload := none, replayTag, cmds,
-           forwardPkt := some ⟨newPkt.data, hnewPkt⟩ }
+    pure (none, replayTag, cmds, some ⟨newPkt.data, hnewPkt⟩)
   | none =>
     if decPayload.size < geom.payloadTagLength then throw "sphinx: truncated payload"
     if hasSurbReply then
-      pure { payload := some decPayload, replayTag, cmds, forwardPkt := none }
+      pure (some decPayload, replayTag, cmds, none)
     else
       let tag := decPayload.extract 0 geom.payloadTagLength
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
-      pure { payload := some (decPayload.extract geom.payloadTagLength decPayload.size),
-             replayTag, cmds, forwardPkt := none }
+      pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
 /-- NIKE-Sphinx (X25519) as a `Sphinx.Sphinx` instance: `unwrapNike geom` already has exactly
 the signature `Sphinx.Sphinx.unwrap` asks for. -/

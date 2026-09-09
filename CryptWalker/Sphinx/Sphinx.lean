@@ -17,27 +17,23 @@ variants yet.
 ## The packet-length invariance rule, as a type
 
 One of Sphinx's structural rules: unwrapping a packet at a forwarding hop produces a new packet
-*exactly as long as the one that came in*. `NIKE.NIKE` and `KEM.KEM` state their rules
-(`derivePublicKey`'s codomain, `groupAction`'s `Safe`-gated signature, `KEM.generate`'s
-correctness witness riding in its own return type) as *types*, not as separate theorems proved
-about otherwise-unconstrained functions — a scheme that tried to violate one wouldn't typecheck.
-`unwrap` follows the same discipline: its return type is `UnwrapResult pkt.size Command`,
-*depending on `pkt`, `unwrap`'s own argument* — so `forwardPkt : Option (Vector UInt8 pkt.size)`
-is forced to carry exactly `pkt`'s length, for every instance, not just the ones an author
-remembered to prove something about. `NikeSphinx.unwrapNike` is the witness that a real
-implementation can meet this signature; the one fact it leans on that isn't proved from first
-principles is `Crypto.AEZ`'s `sprpEncrypt_size`/`sprpDecrypt_size` — axioms there, for the same
-reason `NIKE.X25519` leaves `curve25519_commutes` an axiom (see that file's doc comment). -/
+*exactly as long as the one that came in*. `NIKE.NIKE` and `KEM.KEM` state their rules this way
+— as types, not as separate theorems proved about otherwise-unconstrained functions:
+`derivePublicKey`'s codomain, `groupAction`'s `Safe`-gated signature, `KEM.encap`'s plain
+`Ciphertext × Plaintext` product, `KEM.generate`'s correctness witness riding in a `Σ'`. Neither
+interface reaches for a bespoke named result structure to do this — a plain product (or, for
+`generate`, a dependent pair) is enough. `unwrap` follows the same shape: its return type is
 
-/-- The result of unwrapping one hop of a Sphinx packet: either a terminal `payload` (`none`
-when forwarding), a replay tag, the parsed per-hop routing commands, and — only when there is a
-next hop — the packet to forward on, of exactly the same length `n` as the packet `unwrap` was
-given. -/
-structure UnwrapResult (n : Nat) (Command : Type) where
-  payload : Option ByteArray
-  replayTag : Vector UInt8 32
-  cmds : List Command
-  forwardPkt : Option (Vector UInt8 n)
+  `Except String (Option ByteArray × Vector UInt8 32 × List Command × Option (Vector UInt8 pkt.size))`
+                    payload            replayTag         cmds              forwardPkt
+
+*depending on `pkt`, `unwrap`'s own argument* — so the last component is forced to carry exactly
+`pkt`'s length, for every instance, not just the ones an author remembered to prove something
+about. No named `UnwrapResult` type is needed for that; the dependency is carried by the product
+type itself. `NikeSphinx.unwrapNike` is the witness that a real implementation can meet this
+signature; the one fact it leans on that isn't proved from first principles is `Crypto.AEZ`'s
+`sprpEncrypt_size`/`sprpDecrypt_size` — axioms there, for the same reason `NIKE.X25519` leaves
+`curve25519_commutes` an axiom (see that file's doc comment). -/
 
 /-- A Sphinx packet-processing scheme: a private key type, a routing-command type, and
 `unwrap`. -/
@@ -50,8 +46,13 @@ structure Sphinx where
   randomness, so this is a plain function returning `Except`, not `EStateM`. `String` (matching
   `NikeSphinx.unwrapNike`'s own choice) rather than a dedicated error type: the rejections
   (truncated packet, bad version, MAC mismatch, truncated/invalid payload) don't yet need to be
-  matched on by any caller in this pass. -/
-  unwrap : PrivateKey → (pkt : ByteArray) → Except String (UnwrapResult pkt.size Command)
+  matched on by any caller in this pass.
+
+  The result, in order: the terminal payload (`none` when forwarding), the replay tag, the
+  parsed per-hop routing commands, and — only when there is a next hop — the packet to forward
+  on, of exactly the same length as `pkt`. -/
+  unwrap : PrivateKey → (pkt : ByteArray) →
+    Except String (Option ByteArray × Vector UInt8 32 × List Command × Option (Vector UInt8 pkt.size))
 
 /-- Trivial instance, witnessing satisfiability — matches `NIKE`/`KEM`'s own `Inhabited`
 instances, which exist for the same reason: an interface no scheme could ever inhabit would be
@@ -59,7 +60,7 @@ worth noticing. -/
 instance : Inhabited Sphinx := ⟨{
   PrivateKey := Unit
   Command := Unit
-  unwrap := fun _ _ => .ok { payload := none, replayTag := default, cmds := [], forwardPkt := none }
+  unwrap := fun _ _ => .ok (none, default, [], none)
 }⟩
 
 end CryptWalker.Sphinx.Sphinx
