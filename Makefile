@@ -23,7 +23,8 @@ TESTS := \
 	CryptWalker.Sign.blinded_test \
 	CryptWalker.BACAP.test \
 	CryptWalker.Sphinx.Crypto.test \
-	CryptWalker.Sphinx.Crypto.aez_test
+	CryptWalker.Sphinx.Crypto.aez_test \
+	CryptWalker.Sphinx.commands_test
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 
