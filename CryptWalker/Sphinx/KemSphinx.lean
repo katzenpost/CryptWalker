@@ -68,7 +68,7 @@ private def decap (sk ct : Vector UInt8 32) : Option (Vector UInt8 32) :=
 /-- **`createKEMHeader`**. `ephemeralSeeds` (one per hop) plays the role Go's `io.Reader` does
 inside each `Encapsulate` call; `filler` is as in `NikeSphinx.createHeader`. -/
 def createKEMHeader (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray)
-    (path : Array KemPathHop) : Except String (ByteArray × Array SPRPKey) := do
+    (path : Array PathHop) : Except String (ByteArray × Array SPRPKey) := do
   let nrHops := path.size
   if nrHops == 0 || nrHops > geom.nrHops then throw "sphinx: invalid path"
   if ephemeralSeeds.size ≠ nrHops then throw "sphinx: wrong number of ephemeral seeds"
@@ -79,7 +79,7 @@ def createKEMHeader (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
   let mut kemElements : Array (Vector UInt8 32) := #[]
   let mut keys : Array HopKeys := #[]
   for i in [0:nrHops] do
-    match encap (path[i]!).kemPublicKey (ephemeralSeeds[i]!) with
+    match encap (path[i]!).publicKey (ephemeralSeeds[i]!) with
     | none => throw "sphinx: KEM encapsulation failed"
     | some (ct, ss) =>
       kemElements := kemElements.push ct
@@ -129,7 +129,7 @@ def createKEMHeader (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
 
 /-- **`newKEMPacket`**. -/
 def newKEMPacket (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray)
-    (path : Array KemPathHop) (payload : ByteArray) : Except String ByteArray := do
+    (path : Array PathHop) (payload : ByteArray) : Except String ByteArray := do
   if payload.size ≠ geom.forwardPayloadLength then
     throw s!"sphinx: invalid payload length: {payload.size}, expected {geom.forwardPayloadLength}"
   let (hdr, sprpKeys) ← createKEMHeader geom ephemeralSeeds filler path

@@ -91,10 +91,10 @@ def createHeader (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler 
 
   -- Per-hop shared secrets/keys, and the (progressively blinded) group elements.
   let mut groupElements : Array (Vector UInt8 32) := Array.replicate nrHops clientPublicKey0
-  let mut keys : Array HopKeys := #[deriveHopKeys (dh clientPrivateKey (path[0]!).nikePublicKey)]
+  let mut keys : Array HopKeys := #[deriveHopKeys (dh clientPrivateKey (path[0]!).publicKey)]
   let mut clientPublicKey := clientPublicKey0
   for i in [1:nrHops] do
-    let mut sharedSecret := dh clientPrivateKey (path[i]!).nikePublicKey
+    let mut sharedSecret := dh clientPrivateKey (path[i]!).publicKey
     for j in [0:i] do
       sharedSecret := dh (keys[j]!).blindingFactor sharedSecret
     keys := keys.push (deriveHopKeys sharedSecret)

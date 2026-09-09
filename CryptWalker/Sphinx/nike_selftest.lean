@@ -60,7 +60,7 @@ private def buildPath (nodes : Array Node) : IO (Array PathHop) := do
       else do
         let rid ← randomVector 32
         pure [.recipient rid]
-    path := path.push { id := node.id, nikePublicKey := node.pub, commands := cmds }
+    path := path.push { id := node.id, publicKey := node.pub, commands := cmds }
   pure path
 
 /-- Unwrap `pkt` at every node in order, checking forwarding commands and the final payload

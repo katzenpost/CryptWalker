@@ -9,13 +9,14 @@ namespace CryptWalker.Sphinx.Types
 
 open CryptWalker.Sphinx.Commands
 
-/-- A hop in a NIKE-Sphinx path: node ID, its X25519 public key, and its non-`NextNodeHop`
-routing commands. Concrete to X25519 (`Vector UInt8 32`) rather than an abstract NIKE, matching
-this pass's X25519-only scope — the Go original's `PathHop` carries a `nike.PublicKey`
-interface value plus a separate, unused-here `KEMPublicKey` field. -/
+/-- A hop in a Sphinx path: node ID, its public key (an X25519 public key for `NikeSphinx`, a
+`kemX25519` ciphertext-target public key for `KemSphinx` — both `Vector UInt8 32`), and its
+non-`NextNodeHop` routing commands. Shared between the two variants, as Go's `PathHop` is (one
+struct with both a `NIKEPublicKey` and a `KEMPublicKey` field, only one populated per use) —
+concretely one field here since a given path is never both at once. -/
 structure PathHop where
   id : Vector UInt8 32
-  nikePublicKey : Vector UInt8 32
+  publicKey : Vector UInt8 32
   commands : List RoutingCommand
   deriving Inhabited
 
@@ -24,14 +25,6 @@ payload encryption. -/
 structure SPRPKey where
   key : Vector UInt8 48
   iv : Vector UInt8 16
-  deriving Inhabited
-
-/-- A hop in a KEM-Sphinx path: node ID, its KEM public key (`kemX25519`'s, 32 bytes), and its
-non-`NextNodeHop` routing commands. -/
-structure KemPathHop where
-  id : Vector UInt8 32
-  kemPublicKey : Vector UInt8 32
-  commands : List RoutingCommand
   deriving Inhabited
 
 end CryptWalker.Sphinx.Types

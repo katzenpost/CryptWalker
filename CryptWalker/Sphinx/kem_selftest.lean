@@ -46,9 +46,9 @@ private def newNode : IO Node := do
   let id ← randomVector 32
   pure { id, priv, pub := curve25519 priv basepointBytes }
 
-private def buildPath (nodes : Array Node) : IO (Array KemPathHop) := do
+private def buildPath (nodes : Array Node) : IO (Array PathHop) := do
   let n := nodes.size
-  let mut path : Array KemPathHop := #[]
+  let mut path : Array PathHop := #[]
   for i in [0:n] do
     let node := nodes[i]!
     let cmds : List RoutingCommand ←
@@ -57,7 +57,7 @@ private def buildPath (nodes : Array Node) : IO (Array KemPathHop) := do
       else do
         let rid ← randomVector 32
         pure [.recipient rid]
-    path := path.push { id := node.id, kemPublicKey := node.pub, commands := cmds }
+    path := path.push { id := node.id, publicKey := node.pub, commands := cmds }
   pure path
 
 def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPayload : ByteArray) :
