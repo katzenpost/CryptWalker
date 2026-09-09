@@ -35,35 +35,29 @@ open CryptWalker.Util.Bytes (ofVector)
 /-! # NIKE-Sphinx (X25519)
 
 Port of `sphinx.go`'s NIKE path (`createHeader`, `newNikePacket`, `unwrapNike`), concrete to
-X25519 rather than an abstract NIKE — this pass's scope. Randomness `createHeader` needs (the
-client's ephemeral private key, and the hop-count-hiding filler when the path is shorter than
-`geom.nrHops`) is threaded in explicitly rather than drawn from an `IO`/IO.Reader, so the
-function is pure and testable; see `Sphinx.API` for an `IO`-based convenience wrapper.
+X25519 rather than an abstract NIKE. `createHeader` takes its randomness (client ephemeral key,
+hop-count-hiding filler) as plain arguments rather than `IO`, so it stays pure.
 
-`unwrapNike`, unlike `createHeader`, needs no randomness — it is what `Sphinx.Crypto`'s
-cross-implementation vectors ultimately validate: katzenpost's own `sphinx_vectors.json` records
-Sphinx packets built with a client ephemeral key that isn't itself recorded (so `createHeader`'s
-*exact* output bytes can't be independently reproduced), but `Unwrap` is deterministic and *is*
-checked, hop by hop, against the recorded `Packets[i+1]`. -/
+`unwrapNike` needs no randomness, which is what makes it the half `Crypto.aez_test` and friends
+can eventually check against Go's own `sphinx_vectors.json` byte-for-byte: that file's packets
+were built with a client ephemeral key it doesn't record, so `createHeader`'s output can't be
+reproduced from it, but `Unwrap` is deterministic. -/
 
 private def v0AD : ByteArray := ⟨#[0, 0]⟩
 
 private def toVec32 (a : ByteArray) : Vector UInt8 32 := Vector.ofFn fun i : Fin 32 => a.get! i.val
 
-/-- Diffie-Hellman: `curve25519(sk, pk)`. Also used, with a "shared secret treated as a public
-key" or "blinding factor as the scalar" reading, for the blinding-chain and per-hop
-`groupElement`/`clientPublicKey` re-blinding steps below — `hpqc/nike/x25519`'s `Blind` *is*
-literally `Exp`/`curve25519`, just argument-relabeled. -/
+/-- Diffie-Hellman: `curve25519(sk, pk)`. Also stands in for `nike.Blind` below —
+`hpqc/nike/x25519`'s `Blind` *is* `Exp`/`curve25519`, just with the arguments named
+differently. -/
 private def dh (sk pk : Vector UInt8 32) : Vector UInt8 32 := curve25519 sk pk
 
-/-- `nike.Blind(pk, factor)` = `Exp(pk, factor)` = `curve25519(factor, pk)` — the scalar and
-point arguments swapped relative to `dh`'s usual "my private key, their public key" reading. -/
+/-- `nike.Blind(pk, factor) = Exp(pk, factor) = curve25519(factor, pk)`. -/
 private def blind (pk factor : Vector UInt8 32) : Vector UInt8 32 := curve25519 factor pk
 
-/-- The NIKE private key `internal/crypto.KDF`'s `BlindingFactor` derives from a `PacketKeys`'s
-seed: `rand.NewDeterministicRandReader(seed)`'s first 32 bytes, read raw (unclamped — RFC 7748
-clamping happens inside `curve25519`, not at key-generation time, matching
-`nike/x25519.NewKeypair`). -/
+/-- `BlindingFactor`'s raw seed, as the NIKE private key it represents: the first 32 bytes of
+`rand.NewDeterministicRandReader(seed)`, unclamped (clamping happens inside `curve25519`,
+matching `nike/x25519.NewKeypair`). -/
 private def blindingFactorPrivKey (seed : Vector UInt8 32) : Vector UInt8 32 :=
   toVec32 ⟨keystream32 seed.toArray⟩
 
@@ -182,15 +176,9 @@ def newNikePacket (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler
     b := sprpEncrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
-/-- **`unwrapNike`**. Unlike Go, a MAC mismatch reports only an error string, not also the
-replay tag (`Except` has no side channel for it) — this pass has no caller that needs a tag
-alongside a rejection.
-
-The result is `(payload, replayTag, cmds, forwardPkt)`. Its type — depending on `pkt`,
-`unwrapNike`'s own argument, via `forwardPkt : Option (Vector UInt8 pkt.size)` — is the abstract
-`Sphinx.Sphinx.unwrap`'s packet-length-invariance rule stated as a type rather than as a
-separate theorem: see `Sphinx.Sphinx`'s doc comment. This function is what witnesses that the
-rule is satisfiable — `nikeSphinxScheme` below packages it as a `Sphinx.Sphinx` instance. -/
+/-- **`unwrapNike`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`
+(see that file). Unlike Go, a MAC mismatch reports only an error string, not also the replay
+tag. -/
 def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
@@ -199,12 +187,8 @@ def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
   let macOff := riOff + geom.routingInfoLength
   let payloadOff := macOff + macLength
 
-  -- Dependent `if`, not the bare guard `sphinx.go` writes this as: unlike Go, the packet-length
-  -- proof below needs `¬ (pkt.size < payloadOff)` as a hypothesis, not just as a control-flow
-  -- fact. (`payloadOff` here is definitionally `geom.headerLength`, for any `Geometry` actually
-  -- built by `Geometry.ofNIKE`/`ofKEM` — recomputing it from the same local `let`s as the rest
-  -- of this function, rather than reading `geom.headerLength` directly, is what lets this proof
-  -- go through without also assuming that consistency as a hypothesis on `geom`.)
+  -- Dependent `if`: the size proof below needs `¬(pkt.size < payloadOff)` as a hypothesis, not
+  -- just as control flow.
   if h1 : pkt.size < payloadOff then throw "sphinx: invalid packet, truncated"
   else do
   if (pkt.extract 0 2).data ≠ v0AD.data then throw "sphinx: invalid packet, unknown version"
