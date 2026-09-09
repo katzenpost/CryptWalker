@@ -53,3 +53,6 @@ name = "CryptWalker.Hash.hkdf_structured_test"
 
 [[lean_exe]]
 name = "CryptWalker.BACAP.test"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.Crypto.test"

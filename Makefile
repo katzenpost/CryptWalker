@@ -21,7 +21,8 @@ TESTS := \
 	CryptWalker.Cipher.test \
 	CryptWalker.Sign.test \
 	CryptWalker.Sign.blinded_test \
-	CryptWalker.BACAP.test
+	CryptWalker.BACAP.test \
+	CryptWalker.Sphinx.Crypto.test
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 
@@ -34,7 +35,7 @@ EXES := $(TESTS) CryptWalker.NIKE.benchmark
 
 .PHONY: all build test bench sorries clean help
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
-.PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap
+.PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 
 all: build ## build everything, library and executables
 
@@ -93,6 +94,9 @@ test-blinded: build ## blinded Ed25519 vectors from hpqc
 
 test-bacap: build ## BACAP vectors from hpqc
 	@$(BIN)/CryptWalker-BACAP-test
+
+test-sphinx-crypto: build ## Sphinx primitive-layer vectors (hash/MAC/stream/KDF) from katzenpost
+	@$(BIN)/CryptWalker-Sphinx-Crypto-test
 
 bench: build ## run the NIKE benchmarks
 	@$(BIN)/CryptWalker-NIKE-benchmark
