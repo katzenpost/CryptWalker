@@ -139,6 +139,21 @@ def runFillerRound : IO Bool := do
     pure false
   | .ok pkt0 => unwrapAll geom nodes pkt0 payload
 
+/-- The same round as `runRound`, but driven through `Sphinx.Sphinx.wrap`/`nikeSphinxScheme`
+instead of calling `newNikePacket` directly — confirms the abstract-interface unification
+actually produces a packet `unwrapNike` accepts, not just that it typechecks. -/
+def runAbstractWrapRound (geom : Geometry) : IO Bool := do
+  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
+  let path ← buildPath nodes
+  let seed ← randomVector 32
+  let payload ← randomVector geom.forwardPayloadLength
+  let scheme := nikeSphinxScheme geom
+  match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Sphinx.initWith (fun _ => seed)) with
+  | .error e _ =>
+    IO.eprintln s!"abstract wrap failed: {e}"
+    pure false
+  | .ok pkt _ => unwrapAll geom nodes (ofVector pkt) (ofVector payload)
+
 def main : IO UInt32 := do
   let mut ok := true
   for nrHops in [1, 2, 3, 5] do
@@ -150,6 +165,10 @@ def main : IO UInt32 := do
   let fillerOk ← runFillerRound
   IO.println s!"3 hop(s) of 5 (filler path): {if fillerOk then "ok" else "FAIL"}"
   ok := ok && fillerOk
+
+  let abstractOk ← runAbstractWrapRound (ofNIKE 32 103 false 3)
+  IO.println s!"abstract Sphinx.Sphinx.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
+  ok := ok && abstractOk
 
   IO.println ""
   if ok then

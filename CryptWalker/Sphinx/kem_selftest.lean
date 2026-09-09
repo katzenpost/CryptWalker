@@ -130,6 +130,23 @@ def runFillerRound : IO Bool := do
     pure false
   | .ok pkt0 => unwrapAll geom nodes pkt0 payload
 
+/-- The same round as `runRound`, but driven through `Sphinx.Sphinx.wrap`/`kemSphinxScheme`
+instead of calling `newKEMPacket` directly. `wrapKem` draws one seed *per hop*, so the stream
+must actually vary with the counter — unlike `NikeSphinx`'s version of this check, which draws
+only one seed total and can get away with a constant stream. -/
+def runAbstractWrapRound (geom : Geometry) : IO Bool := do
+  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
+  let path ← buildPath nodes
+  let seeds ← nodes.mapM (fun _ => randomVector 32)
+  let payload ← randomVector geom.forwardPayloadLength
+  let scheme := kemSphinxScheme geom
+  let stream := fun i => seeds[i]!
+  match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Sphinx.initWith stream) with
+  | .error e _ =>
+    IO.eprintln s!"abstract wrap failed: {e}"
+    pure false
+  | .ok pkt _ => unwrapAll geom nodes (ofVector pkt) (ofVector payload)
+
 def main : IO UInt32 := do
   let mut ok := true
   for nrHops in [1, 2, 3, 5] do
@@ -141,6 +158,10 @@ def main : IO UInt32 := do
   let fillerOk ← runFillerRound
   IO.println s!"3 hop(s) of 5 (filler path): {if fillerOk then "ok" else "FAIL"}"
   ok := ok && fillerOk
+
+  let abstractOk ← runAbstractWrapRound (ofKEM 32 103 false 3)
+  IO.println s!"abstract Sphinx.Sphinx.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
+  ok := ok && abstractOk
 
   IO.println ""
   if ok then

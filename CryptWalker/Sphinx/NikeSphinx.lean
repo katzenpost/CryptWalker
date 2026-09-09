@@ -150,6 +150,35 @@ def newNikePacket (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler
     b := sprpEncrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
+/-- A successful `newNikePacket` on a `geom.forwardPayloadLength`-sized payload produces exactly
+`geom.packetLength` bytes: `headerLength` (itself `createHeader`'s routing-info-block
+construction, accumulated over a `for` loop) plus `payloadTagLength + payload.size`
+(`sprpEncrypt`'s length preservation, applied in another loop). True by construction and
+confirmed by all 20 `sphinx_{nike,kem}_vectors.json` packets — see `Sphinx.Sphinx`'s doc comment
+for why this is an axiom rather than a proof through those loops. `wrapNike` uses it to give
+`Sphinx.Sphinx.wrap` a packet-length-preserving *type*, the same way `sprpDecrypt_size` lets
+`unwrapNike` do that for `forwardPkt`. -/
+axiom newNikePacket_size (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler : ByteArray)
+    (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
+    (h : newNikePacket geom clientPrivateKey filler path payload = .ok pkt)
+    (hpay : payload.size = geom.forwardPayloadLength) :
+    pkt.size = geom.packetLength
+
+open CryptWalker.Sphinx.Sphinx (SeedStream nextSeed)
+
+/-- **`wrapNike`**: `Sphinx.Sphinx.wrap` for `nikeSphinxScheme` — `newNikePacket`, drawing the
+client's ephemeral private key from the seed stream instead of taking it as a bare argument. -/
+def wrapNike (geom : Geometry) (path : List PathHop) (filler : ByteArray)
+    (payload : Vector UInt8 geom.forwardPayloadLength) :
+    EStateM String SeedStream (Vector UInt8 geom.packetLength) := do
+  let seed ← nextSeed
+  match h : newNikePacket geom seed filler path.toArray (ofVector payload) with
+  | .error e => throw e
+  | .ok pkt =>
+    have hsize : pkt.size = geom.packetLength :=
+      newNikePacket_size geom seed filler path.toArray (ofVector payload) pkt h (by simp)
+    pure ⟨pkt.data, hsize⟩
+
 /-- **`unwrapNike`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`
 (see that file). Unlike Go, a MAC mismatch reports only an error string, not also the replay
 tag. -/
@@ -248,11 +277,17 @@ def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
-/-- NIKE-Sphinx (X25519) as a `Sphinx.Sphinx` instance: `unwrapNike geom` already has exactly
-the signature `Sphinx.Sphinx.unwrap` asks for. -/
+/-- NIKE-Sphinx (X25519) as a `Sphinx.Sphinx` instance. -/
 def nikeSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
+  State := SeedStream
   PrivateKey := Vector UInt8 32
   Command := RoutingCommand
+  packetLength := geom.packetLength
+  payloadLength := geom.forwardPayloadLength
+  -- Inhabitance only, matching `KEM.Adapter.kemOfNike`'s `stateI`: a constant (hence degenerate)
+  -- stream. Honest runs start from `Sphinx.Sphinx.initWith`.
+  stateI := ⟨CryptWalker.Sphinx.Sphinx.initWith (fun _ => Vector.replicate 32 0)⟩
+  wrap := wrapNike geom
   unwrap := unwrapNike geom
 
 end CryptWalker.Sphinx.NikeSphinx

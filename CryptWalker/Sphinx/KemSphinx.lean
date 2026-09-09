@@ -139,6 +139,28 @@ def newKEMPacket (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (f
     b := sprpEncrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
+/-- As `NikeSphinx.newNikePacket_size`. -/
+axiom newKEMPacket_size (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
+    (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
+    (h : newKEMPacket geom ephemeralSeeds filler path payload = .ok pkt)
+    (hpay : payload.size = geom.forwardPayloadLength) :
+    pkt.size = geom.packetLength
+
+open CryptWalker.Sphinx.Sphinx (SeedStream nextSeed)
+
+/-- **`wrapKem`**: `Sphinx.Sphinx.wrap` for `kemSphinxScheme` — `newKEMPacket`, drawing one
+ephemeral seed per hop from the seed stream instead of taking them as a bare array. -/
+def wrapKem (geom : Geometry) (path : List PathHop) (filler : ByteArray)
+    (payload : Vector UInt8 geom.forwardPayloadLength) :
+    EStateM String SeedStream (Vector UInt8 geom.packetLength) := do
+  let seeds ← path.toArray.mapM (fun _ => nextSeed)
+  match h : newKEMPacket geom seeds filler path.toArray (ofVector payload) with
+  | .error e => throw e
+  | .ok pkt =>
+    have hsize : pkt.size = geom.packetLength :=
+      newKEMPacket_size geom seeds filler path.toArray (ofVector payload) pkt h (by simp)
+    pure ⟨pkt.data, hsize⟩
+
 /-- **`unwrapKem`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`.
 Forwarding copies the next-hop ciphertext straight out of the decrypted routing-info block —
 unlike `unwrapNike`, no `Blind` step, since there is no group element to re-blind. -/
@@ -240,8 +262,13 @@ def unwrapKem (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
 
 /-- KEM-Sphinx (X25519 via the NIKE→KEM adapter) as a `Sphinx.Sphinx` instance. -/
 def kemSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
+  State := SeedStream
   PrivateKey := Vector UInt8 32
   Command := RoutingCommand
+  packetLength := geom.packetLength
+  payloadLength := geom.forwardPayloadLength
+  stateI := ⟨CryptWalker.Sphinx.Sphinx.initWith (fun _ => Vector.replicate 32 0)⟩
+  wrap := wrapKem geom
   unwrap := unwrapKem geom
 
 end CryptWalker.Sphinx.KemSphinx
