@@ -42,6 +42,7 @@ EXES := $(TESTS) CryptWalker.NIKE.benchmark
 .PHONY: all build test bench sorries clean help
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
+.PHONY: gen-sphinx-vectors
 
 all: build ## build everything, library and executables
 
@@ -103,6 +104,10 @@ test-bacap: build ## BACAP vectors from hpqc
 
 test-sphinx-crypto: build ## Sphinx primitive-layer vectors (hash/MAC/stream/KDF) from katzenpost
 	@$(BIN)/CryptWalker-Sphinx-Crypto-test
+
+gen-sphinx-vectors: build ## build Sphinx packets with the Lean port, for cross-checking against katzenpost's Unwrap
+	@$(BIN)/CryptWalker-Sphinx-gen_nike_vectors
+	@$(BIN)/CryptWalker-Sphinx-gen_kem_vectors
 
 bench: build ## run the NIKE benchmarks
 	@$(BIN)/CryptWalker-NIKE-benchmark
