@@ -179,6 +179,33 @@ def wrapNike (geom : Geometry) (path : List PathHop) (filler : ByteArray)
       newNikePacket_size geom seed filler path.toArray (ofVector payload) pkt h (by simp)
     pure ⟨pkt.data, hsize⟩
 
+/-- **`newNikeSURB`**. `keyPayload` is the recipient's own random SPRP key ‖ iv for the reply's
+final payload-encryption layer (`sprpKeyMaterialLength = 64` bytes — `surb.go`'s
+`io.ReadFull(r, keyPayload[:])`). Returns `(surb, decryptionKeys)`; `decryptionKeys` is exactly
+what `SURB.decryptSURBPayload` wants. -/
+def newNikeSURB (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (keyPayload : Vector UInt8 64)
+    (filler : ByteArray) (path : Array PathHop) : Except String (ByteArray × ByteArray) := do
+  let (hdr, sprpKeys) ← createHeader geom clientPrivateKey filler path
+  -- Reverse hop order, "to ease decryption" (surb.go's comment).
+  let mut k : ByteArray := ByteArray.empty
+  for iRev in [0:sprpKeys.size] do
+    let kk := sprpKeys[sprpKeys.size - 1 - iRev]!
+    k := k ++ ofVector kk.key ++ ofVector kk.iv
+  k := k ++ ofVector keyPayload
+  let surb := hdr ++ ofVector (path[0]!).id ++ ofVector keyPayload
+  pure (surb, k)
+
+/-- `Sphinx.Sphinx.wrap`-style convenience: draws the client's ephemeral key and `keyPayload`
+(two seeds' worth) from the seed stream instead of taking them as bare arguments. -/
+def wrapNikeSURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
+    EStateM String SeedStream (ByteArray × ByteArray) := do
+  let clientKey ← nextSeed
+  let kp1 ← nextSeed
+  let kp2 ← nextSeed
+  match newNikeSURB geom clientKey (kp1 ++ kp2) filler path.toArray with
+  | .error e => throw e
+  | .ok r => pure r
+
 /-- **`unwrapNike`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`
 (see that file). Unlike Go, a MAC mismatch reports only an error string, not also the replay
 tag. -/

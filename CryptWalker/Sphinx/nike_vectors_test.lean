@@ -28,7 +28,7 @@ open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.NikeSphinx
-open CryptWalker.Sphinx.SURB (decryptSURBPayload)
+open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.Util.Bytes (ofVector)
 
 def field (j : Json) (k : String) : Except String ByteArray := do
@@ -82,13 +82,29 @@ def parseVec (j : Json) : Except String TestVec := do
   let surbKeys ← field j "SurbKeys"
   pure { nodes, path, packets, payload, surb, surbKeys }
 
-/-- Replay `unwrapNike` at every node, checking against the recorded `Packets`/`Payload`. -/
+/-- Replay `unwrapNike` at every node, checking against the recorded `Packets`/`Payload`. Also,
+for the `withSurb` half: `Packets[0]` there *is* Go's `NewPacketFromSURB(Surb, Payload)` output
+(`buildVectorSphinx` builds it that way, and `Payload` is what `DecryptSURBPayload` recovers —
+exactly the plaintext `NewPacketFromSURB` was given), so `newPacketFromSURB` gets checked
+byte-for-byte against Go here too, not just self-consistency-tested. -/
 def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   let withSurb := decide (v.surb.size > 0)
   let geom := if withSurb then geomSurb else geomNoSurb
+  let mut ok := true
+  if withSurb then
+    match newPacketFromSURB geom v.surb v.payload with
+    | .error e =>
+      IO.eprintln s!"    newPacketFromSURB failed: {e}"
+      ok := false
+    | .ok (pkt, firstHopID) =>
+      if byteArrayToHex pkt ≠ byteArrayToHex v.packets[0]! then
+        IO.eprintln "    newPacketFromSURB: packet mismatch"
+        ok := false
+      if byteArrayToHex (ofVector firstHopID) ≠ byteArrayToHex v.path[0]!.id then
+        IO.eprintln "    newPacketFromSURB: first-hop ID mismatch"
+        ok := false
   let n := v.nodes.size
   let mut pkt := v.packets[0]!
-  let mut ok := true
   let mut stop := false
   for i in [0:n] do
     if !stop then

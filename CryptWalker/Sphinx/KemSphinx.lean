@@ -161,6 +161,29 @@ def wrapKem (geom : Geometry) (path : List PathHop) (filler : ByteArray)
       newKEMPacket_size geom seeds filler path.toArray (ofVector payload) pkt h (by simp)
     pure ⟨pkt.data, hsize⟩
 
+/-- **`newKemSURB`**. As `NikeSphinx.newNikeSURB`, over `createKEMHeader`. -/
+def newKemSURB (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (keyPayload : Vector UInt8 64)
+    (filler : ByteArray) (path : Array PathHop) : Except String (ByteArray × ByteArray) := do
+  let (hdr, sprpKeys) ← createKEMHeader geom ephemeralSeeds filler path
+  let mut k : ByteArray := ByteArray.empty
+  for iRev in [0:sprpKeys.size] do
+    let kk := sprpKeys[sprpKeys.size - 1 - iRev]!
+    k := k ++ ofVector kk.key ++ ofVector kk.iv
+  k := k ++ ofVector keyPayload
+  let surb := hdr ++ ofVector (path[0]!).id ++ ofVector keyPayload
+  pure (surb, k)
+
+/-- `Sphinx.Sphinx.wrap`-style convenience: draws one ephemeral seed per hop plus `keyPayload`
+(two seeds' worth) from the seed stream. -/
+def wrapKemSURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
+    EStateM String SeedStream (ByteArray × ByteArray) := do
+  let seeds ← path.toArray.mapM (fun _ => nextSeed)
+  let kp1 ← nextSeed
+  let kp2 ← nextSeed
+  match newKemSURB geom seeds (kp1 ++ kp2) filler path.toArray with
+  | .error e => throw e
+  | .ok r => pure r
+
 /-- **`unwrapKem`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`.
 Forwarding copies the next-hop ciphertext straight out of the decrypted routing-info block —
 unlike `unwrapNike`, no `Blind` step, since there is no group element to re-blind. -/
