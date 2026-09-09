@@ -68,3 +68,6 @@ name = "CryptWalker.Sphinx.nike_selftest"
 
 [[lean_exe]]
 name = "CryptWalker.Sphinx.kem_selftest"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.nike_vectors_test"
