@@ -25,7 +25,8 @@ TESTS := \
 	CryptWalker.Sphinx.Crypto.test \
 	CryptWalker.Sphinx.Crypto.aez_test \
 	CryptWalker.Sphinx.commands_test \
-	CryptWalker.Sphinx.nike_selftest
+	CryptWalker.Sphinx.nike_selftest \
+	CryptWalker.Sphinx.kem_selftest
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 

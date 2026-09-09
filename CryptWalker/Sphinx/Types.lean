@@ -26,4 +26,12 @@ structure SPRPKey where
   iv : Vector UInt8 16
   deriving Inhabited
 
+/-- A hop in a KEM-Sphinx path: node ID, its KEM public key (`kemX25519`'s, 32 bytes), and its
+non-`NextNodeHop` routing commands. -/
+structure KemPathHop where
+  id : Vector UInt8 32
+  kemPublicKey : Vector UInt8 32
+  commands : List RoutingCommand
+  deriving Inhabited
+
 end CryptWalker.Sphinx.Types

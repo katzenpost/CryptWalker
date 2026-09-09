@@ -9,99 +9,83 @@ import CryptWalker.Sphinx.Commands
 import CryptWalker.Sphinx.Types
 import CryptWalker.Sphinx.Sphinx
 import CryptWalker.Sphinx.Common
-import CryptWalker.Sphinx.Crypto.KDF
-import CryptWalker.Sphinx.Crypto.ChaCha20
+import CryptWalker.Sphinx.NikeSphinx
 import CryptWalker.Sphinx.Crypto.Stream
 import CryptWalker.Sphinx.Crypto.AEZ
 import CryptWalker.NIKE.X25519
+import CryptWalker.KEM.Adapter
+import CryptWalker.KEM.Schemes
 import CryptWalker.Hash.Sha512
 import CryptWalker.Util.Bytes
 
-namespace CryptWalker.Sphinx.NikeSphinx
+namespace CryptWalker.Sphinx.KemSphinx
 
 open CryptWalker.Sphinx.Constants
 open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Common
-open CryptWalker.Sphinx.Crypto.KDF (PacketKeys sphinxKDF)
-open CryptWalker.Sphinx.Crypto.ChaCha20 (keystream32)
+open CryptWalker.Sphinx.NikeSphinx (HopKeys deriveHopKeys)
 open CryptWalker.Sphinx.Crypto.Stream (keystream)
 open CryptWalker.Sphinx.Crypto.AEZ (sprpEncrypt sprpDecrypt)
-open CryptWalker.NIKE.X25519 (curve25519 basepointBytes)
+open CryptWalker.NIKE.X25519 (PublicKey PrivateKey)
+open CryptWalker.KEM.Adapter (encapM decapM initWith)
+open CryptWalker.KEM (sha256v1PRF)
 open CryptWalker.Hash.Sha512 (sha512_256)
 open CryptWalker.Util.Bytes (ofVector)
 
-/-! # NIKE-Sphinx (X25519)
+/-! # KEM-Sphinx (X25519, via the NIKE→KEM adapter)
 
-Port of `sphinx.go`'s NIKE path (`createHeader`, `newNikePacket`, `unwrapNike`), concrete to
-X25519 rather than an abstract NIKE. `createHeader` takes its randomness (client ephemeral key,
-hop-count-hiding filler) as plain arguments rather than `IO`, so it stays pure.
+Port of `kemsphinx.go`, concrete to `KEM.kemX25519` (`sha256-v1` PRF over X25519). Differences
+from `NikeSphinx`, per `kemsphinx.go`/`docs/specs/kemsphinx.md`:
 
-`unwrapNike` needs no randomness, which is what makes it the half `Crypto.aez_test` and friends
-can eventually check against Go's own `sphinx_vectors.json` byte-for-byte: that file's packets
-were built with a client ephemeral key it doesn't record, so `createHeader`'s output can't be
-reproduced from it, but `Unwrap` is deterministic. -/
+* One KEM encapsulation per hop, independent of the others — no blinding chain, so no
+  `HopKeys.blindingFactor` (reused from `NikeSphinx` regardless, unused, matching how Go reuses
+  `crypto.PacketKeys` with `BlindingFactor = nil` rather than a separate type).
+* The header's group-element field becomes a KEM ciphertext (32 bytes here); every non-terminal
+  hop's per-hop routing-info block embeds the *next* hop's ciphertext in its last 32 bytes,
+  rather than carrying it via a `NextNodeHop` command field.
+* Forwarding just copies the embedded next-hop ciphertext into the group-element slot — no
+  `Blind` step, since there is no group element to re-blind.
 
-/-- Diffie-Hellman: `curve25519(sk, pk)`. Also stands in for `nike.Blind` below —
-`hpqc/nike/x25519`'s `Blind` *is* `Exp`/`curve25519`, just with the arguments named
-differently. -/
-private def dh (sk pk : Vector UInt8 32) : Vector UInt8 32 := curve25519 sk pk
+`ctSize` (32) is `kemX25519`'s `ciphertextSize` — hardcoded here the same way `NikeSphinx`
+hardcodes X25519's 32-byte public key size, rather than threaded from `KEM.KEM`. -/
 
-/-- `nike.Blind(pk, factor) = Exp(pk, factor) = curve25519(factor, pk)`. -/
-private def blind (pk factor : Vector UInt8 32) : Vector UInt8 32 := curve25519 factor pk
+private def ctSize : Nat := 32
 
-/-- `BlindingFactor`'s raw seed, as the NIKE private key it represents: the first 32 bytes of
-`rand.NewDeterministicRandReader(seed)`, unclamped (clamping happens inside `curve25519`,
-matching `nike/x25519.NewKeypair`). -/
-private def blindingFactorPrivKey (seed : Vector UInt8 32) : Vector UInt8 32 :=
-  toVec32 ⟨keystream32 seed.toArray⟩
+private def encap (pk : Vector UInt8 32) (seed : Vector UInt8 32) :
+    Option (Vector UInt8 32 × Vector UInt8 32) :=
+  match encapM sha256v1PRF CryptWalker.NIKE.X25519.LadderScheme (⟨pk⟩ : PublicKey) (initWith (fun _ => seed)) with
+  | .ok (ct, ss) _ => some (ct.data, ss)
+  | .error _ _ => none
 
-/-- Everything `crypto.KDF` derives for one hop, with the raw `BlindingFactor` seed already
-turned into the NIKE private key it represents (`internal/crypto.PacketKeys.BlindingFactor` is
-itself a `nike.PrivateKey`, not a raw seed — `deriveHopKeys` is the point where that conversion
-happens, once, rather than at every later use site). -/
-structure HopKeys where
-  headerMAC : Vector UInt8 32
-  headerEncryption : Vector UInt8 32
-  headerEncryptionIV : Vector UInt8 16
-  payloadEncryption : Vector UInt8 48
-  blindingFactor : Vector UInt8 32
-  deriving Inhabited
+private def decap (sk ct : Vector UInt8 32) : Option (Vector UInt8 32) :=
+  match decapM sha256v1PRF CryptWalker.NIKE.X25519.LadderScheme (⟨sk⟩ : PrivateKey) (⟨ct⟩ : PublicKey)
+      (initWith (fun _ => Vector.replicate 32 0)) with
+  | .ok ss _ => some ss
+  | .error _ _ => none
 
-def deriveHopKeys (sharedSecret : Vector UInt8 32) : HopKeys :=
-  let pk : PacketKeys := sphinxKDF (ofVector sharedSecret)
-  { headerMAC := pk.headerMAC
-    headerEncryption := pk.headerEncryption
-    headerEncryptionIV := pk.headerEncryptionIV
-    payloadEncryption := pk.payloadEncryption
-    blindingFactor := blindingFactorPrivKey pk.blindingFactorSeed }
-
-/-- **`createHeader`**. `filler` must be exactly `(geom.nrHops - path.size) *
-geom.perHopRoutingInfoLength` bytes (ignored, and may be empty, when `path.size = geom.nrHops`)
-— the random padding that hides a shorter-than-maximum path's true hop count. -/
-def createHeader (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler : ByteArray)
-    (path : Array PathHop) : Except String (ByteArray × Array SPRPKey) := do
+/-- **`createKEMHeader`**. `ephemeralSeeds` (one per hop) plays the role Go's `io.Reader` does
+inside each `Encapsulate` call; `filler` is as in `NikeSphinx.createHeader`. -/
+def createKEMHeader (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray)
+    (path : Array KemPathHop) : Except String (ByteArray × Array SPRPKey) := do
   let nrHops := path.size
   if nrHops == 0 || nrHops > geom.nrHops then throw "sphinx: invalid path"
+  if ephemeralSeeds.size ≠ nrHops then throw "sphinx: wrong number of ephemeral seeds"
   if geom.nrHops > nrHops && filler.size ≠ (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
   then throw "sphinx: invalid filler length"
 
-  let clientPublicKey0 := dh clientPrivateKey basepointBytes
+  -- One independent encapsulation per hop.
+  let mut kemElements : Array (Vector UInt8 32) := #[]
+  let mut keys : Array HopKeys := #[]
+  for i in [0:nrHops] do
+    match encap (path[i]!).kemPublicKey (ephemeralSeeds[i]!) with
+    | none => throw "sphinx: KEM encapsulation failed"
+    | some (ct, ss) =>
+      kemElements := kemElements.push ct
+      keys := keys.push (deriveHopKeys ss)
 
-  -- Per-hop shared secrets/keys, and the (progressively blinded) group elements.
-  let mut groupElements : Array (Vector UInt8 32) := Array.replicate nrHops clientPublicKey0
-  let mut keys : Array HopKeys := #[deriveHopKeys (dh clientPrivateKey (path[0]!).nikePublicKey)]
-  let mut clientPublicKey := clientPublicKey0
-  for i in [1:nrHops] do
-    let mut sharedSecret := dh clientPrivateKey (path[i]!).nikePublicKey
-    for j in [0:i] do
-      sharedSecret := dh (keys[j]!).blindingFactor sharedSecret
-    keys := keys.push (deriveHopKeys sharedSecret)
-    clientPublicKey := blind clientPublicKey (keys[i-1]!).blindingFactor
-    groupElements := groupElements.set! i clientPublicKey
-
-  -- Per-hop routing-info keystream and encrypted padding.
+  -- Per-hop routing-info keystream and encrypted padding, as in NikeSphinx.
   let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
   let mut riKeyStream : Array ByteArray := #[]
   let mut riPadding : Array ByteArray := #[]
@@ -116,7 +100,8 @@ def createHeader (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler 
     riKeyStream := riKeyStream.push (ks.extract 0 ksLen)
     riPadding := riPadding.push thisPad
 
-  -- Assemble the routing_information block, back to front.
+  -- Assemble the routing_information block, back to front, embedding each non-terminal hop's
+  -- next-hop ciphertext into the last ctSize bytes of its own fragment.
   let mut routingInfo : ByteArray := if geom.nrHops > nrHops then filler else ByteArray.empty
   let mut macBytes : ByteArray := ByteArray.empty
   for iRev in [0:nrHops] do
@@ -127,56 +112,59 @@ def createHeader (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler 
     if !isTerminal then
       let next := path[i + 1]!
       riFragment := riFragment ++ (RoutingCommand.nextNodeHop next.id (toVec32 macBytes)).toBytes
-    routingInfo := zeroPadTo geom.perHopRoutingInfoLength riFragment ++ routingInfo
+    riFragment := zeroPadTo geom.perHopRoutingInfoLength riFragment
+    if !isTerminal then
+      riFragment := riFragment.extract 0 (geom.perHopRoutingInfoLength - ctSize)
+        ++ ofVector (kemElements[i + 1]!)
+    routingInfo := riFragment ++ routingInfo
     routingInfo := xorBytes routingInfo (riKeyStream[i]!)
-    let mPreimage := v0AD ++ ofVector (groupElements[i]!) ++ routingInfo
+    let mPreimage := v0AD ++ ofVector (kemElements[i]!) ++ routingInfo
       ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
     macBytes := ofVector (mac (keys[i]!).headerMAC mPreimage)
 
-  let hdr := v0AD ++ ofVector (groupElements[0]!) ++ routingInfo ++ macBytes
+  let hdr := v0AD ++ ofVector (kemElements[0]!) ++ routingInfo ++ macBytes
   let sprpKeys : Array SPRPKey := Array.ofFn fun i : Fin nrHops =>
     { key := (keys[i.val]!).payloadEncryption, iv := (keys[i.val]!).headerEncryptionIV }
   pure (hdr, sprpKeys)
 
-/-- **`newNikePacket`**. -/
-def newNikePacket (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler : ByteArray)
-    (path : Array PathHop) (payload : ByteArray) : Except String ByteArray := do
+/-- **`newKEMPacket`**. -/
+def newKEMPacket (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray)
+    (path : Array KemPathHop) (payload : ByteArray) : Except String ByteArray := do
   if payload.size ≠ geom.forwardPayloadLength then
     throw s!"sphinx: invalid payload length: {payload.size}, expected {geom.forwardPayloadLength}"
-  let (hdr, sprpKeys) ← createHeader geom clientPrivateKey filler path
+  let (hdr, sprpKeys) ← createKEMHeader geom ephemeralSeeds filler path
   let mut b := (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload
   for iRev in [0:sprpKeys.size] do
     let k := sprpKeys[sprpKeys.size - 1 - iRev]!
     b := sprpEncrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
-/-- **`unwrapNike`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`
-(see that file). Unlike Go, a MAC mismatch reports only an error string, not also the replay
-tag. -/
-def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
+/-- **`unwrapKem`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`.
+Forwarding copies the next-hop ciphertext straight out of the decrypted routing-info block —
+unlike `unwrapNike`, no `Blind` step, since there is no group element to re-blind. -/
+def unwrapKem (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
   let geOff := 2
-  let riOff := geOff + 32
+  let riOff := geOff + ctSize
   let macOff := riOff + geom.routingInfoLength
   let payloadOff := macOff + macLength
 
-  -- Dependent `if`: the size proof below needs `¬(pkt.size < payloadOff)` as a hypothesis, not
-  -- just as control flow.
   if h1 : pkt.size < payloadOff then throw "sphinx: invalid packet, truncated"
   else do
   if (pkt.extract 0 2).data ≠ v0AD.data then throw "sphinx: invalid packet, unknown version"
 
-  let groupElement := toVec32 (pkt.extract geOff riOff)
-  let sharedSecret := dh privKey groupElement
-  let replayTag := sha512_256 (ofVector groupElement)
-  let keys := deriveHopKeys sharedSecret
+  let kemCiphertext := toVec32 (pkt.extract geOff riOff)
+  let replayTag := sha512_256 (ofVector kemCiphertext)
+  match decap privKey kemCiphertext with
+  | none => throw "sphinx: KEM decapsulation failed"
+  | some sharedSecret =>
 
+  let keys := deriveHopKeys sharedSecret
   let gotMac := mac keys.headerMAC (pkt.extract 0 macOff)
   if (ofVector gotMac).data ≠ (pkt.extract macOff (macOff + macLength)).data then
     throw "sphinx: invalid packet, MAC mismatch"
 
-  -- Decrypt the (padding-extended) routing_info block and split off this hop's fragment.
   let mut b : ByteArray := pkt.extract riOff macOff ++ ⟨Array.replicate geom.perHopRoutingInfoLength 0⟩
   have hb : b.size = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
     have hpad : (⟨Array.replicate geom.perHopRoutingInfoLength (0 : UInt8)⟩ : ByteArray).size
@@ -189,7 +177,9 @@ def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
   have hb' : b.size = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
     show (xorBytes _ _).size = _
     rw [size_xorBytes]; exact hb
-  let cmdBuf := b.extract 0 geom.perHopRoutingInfoLength
+
+  let cmdBuf := b.extract 0 (geom.perHopRoutingInfoLength - ctSize)
+  let nextCiphertext := toVec32 (b.extract (geom.perHopRoutingInfoLength - ctSize) geom.perHopRoutingInfoLength)
   let newRoutingInfo := b.extract geom.perHopRoutingInfoLength b.size
   have hnri : newRoutingInfo.size = geom.routingInfoLength := by
     show (b.extract geom.perHopRoutingInfoLength b.size).size = geom.routingInfoLength
@@ -222,21 +212,21 @@ def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
 
   match nextNode with
   | some (_nextID, nextMAC) =>
-    let newGroupElement := blind groupElement keys.blindingFactor
     let newPayload := if decPayload.size > 0 then decPayload else rawPayload
     have hnewPayload : newPayload.size = pkt.size - payloadOff := by
       show (if decPayload.size > 0 then decPayload else rawPayload).size = pkt.size - payloadOff
       split
       · rw [hdec, hraw]
       · rw [hraw]
-    let newPkt := v0AD ++ ofVector newGroupElement ++ newRoutingInfo ++ ofVector nextMAC ++ newPayload
+    let newPkt := v0AD ++ ofVector nextCiphertext ++ newRoutingInfo ++ ofVector nextMAC ++ newPayload
     have hnewPkt : newPkt.size = pkt.size := by
-      show (v0AD ++ ofVector newGroupElement ++ newRoutingInfo ++ ofVector nextMAC ++ newPayload).size
+      show (v0AD ++ ofVector nextCiphertext ++ newRoutingInfo ++ ofVector nextMAC ++ newPayload).size
         = pkt.size
       rw [ByteArray.size_append, ByteArray.size_append, ByteArray.size_append, ByteArray.size_append,
           Util.Bytes.size_ofVector, Util.Bytes.size_ofVector, hnri, hnewPayload]
       have hv0 : v0AD.size = 2 := rfl
       have hmac : macLength = 32 := rfl
+      have hctSize : ctSize = 32 := rfl
       omega
     pure (none, replayTag, cmds, some ⟨newPkt.data, hnewPkt⟩)
   | none =>
@@ -248,11 +238,10 @@ def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
-/-- NIKE-Sphinx (X25519) as a `Sphinx.Sphinx` instance: `unwrapNike geom` already has exactly
-the signature `Sphinx.Sphinx.unwrap` asks for. -/
-def nikeSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
+/-- KEM-Sphinx (X25519 via the NIKE→KEM adapter) as a `Sphinx.Sphinx` instance. -/
+def kemSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   PrivateKey := Vector UInt8 32
   Command := RoutingCommand
-  unwrap := unwrapNike geom
+  unwrap := unwrapKem geom
 
-end CryptWalker.Sphinx.NikeSphinx
+end CryptWalker.Sphinx.KemSphinx
