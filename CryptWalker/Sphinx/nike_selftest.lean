@@ -159,6 +159,63 @@ def runAbstractWrapRound (geom : Geometry) : IO Bool := do
     pure false
   | .ok pkt _ => unwrapAll geom nodes (ofVector pkt) (ofVector payload)
 
+/-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
+round-trip through `unwrapNike`/`SURB.decryptSURBPayload`, not just that they typecheck. -/
+def runAbstractSURBRound (geom : Geometry) : IO Bool := do
+  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
+  let path ← buildPath nodes true
+  let seeds ← (List.range 3).toArray.mapM (fun _ => randomVector 32)
+  let scheme := nikeSphinxScheme geom
+  let stream := fun i => seeds[i]!
+  match scheme.newSURB path.toList ByteArray.empty (CryptWalker.Sphinx.Sphinx.initWith stream) with
+  | .error e _ =>
+    IO.eprintln s!"abstract newSURB failed: {e}"
+    pure false
+  | .ok (surb, surbKeys) _ =>
+    let payload ← randomBytes geom.forwardPayloadLength
+    match scheme.newPacketFromSURB surb payload with
+    | .error e =>
+      IO.eprintln s!"abstract newPacketFromSURB failed: {e}"
+      pure false
+    | .ok (pkt0, firstHopID) =>
+      if byteArrayToHex (ofVector firstHopID) ≠ byteArrayToHex (ofVector nodes[0]!.id) then
+        IO.eprintln "first-hop ID mismatch"
+        pure false
+      else do
+      let mut pkt := pkt0
+      let mut ok := true
+      let mut stop := false
+      let n := nodes.size
+      for i in [0:n] do
+        if !stop then
+          let node := nodes[i]!
+          match unwrapNike geom node.priv pkt with
+          | .error e =>
+            IO.eprintln s!"hop {i}: unwrap failed: {e}"
+            ok := false; stop := true
+          | .ok (respPayload, _replayTag, _cmds, forwardPkt) =>
+            if i < n - 1 then
+              match forwardPkt with
+              | none =>
+                IO.eprintln s!"hop {i}: expected forwarding"
+                ok := false; stop := true
+              | some fwd => pkt := ofVector fwd
+            else
+              match respPayload with
+              | none =>
+                IO.eprintln s!"hop {i}: expected terminal payload"
+                ok := false
+              | some p =>
+                match CryptWalker.Sphinx.SURB.decryptSURBPayload geom surbKeys p with
+                | .error e =>
+                  IO.eprintln s!"decryptSURBPayload failed: {e}"
+                  ok := false
+                | .ok final =>
+                  if byteArrayToHex final ≠ byteArrayToHex payload then
+                    IO.eprintln "SURB payload mismatch"
+                    ok := false
+      pure ok
+
 /-- Full SURB round trip: build a SURB (`newNikeSURB`), use it to build a reply packet
 (`SURB.newPacketFromSURB`), unwrap that reply through every hop, and confirm
 `SURB.decryptSURBPayload` recovers the original payload — the creation-side counterpart to the
@@ -241,6 +298,10 @@ def main : IO UInt32 := do
   let abstractOk ← runAbstractWrapRound (ofNIKE 32 103 false 3)
   IO.println s!"abstract Sphinx.Sphinx.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
   ok := ok && abstractOk
+
+  let abstractSurbOk ← runAbstractSURBRound (ofNIKE 32 103 true 3)
+  IO.println s!"abstract Sphinx.Sphinx.newSURB/newPacketFromSURB (3 hops): {if abstractSurbOk then "ok" else "FAIL"}"
+  ok := ok && abstractSurbOk
 
   for nrHops in [1, 2, 3, 5] do
     let geom := ofNIKE 32 103 true nrHops

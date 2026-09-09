@@ -10,6 +10,7 @@ import CryptWalker.Sphinx.Types
 import CryptWalker.Sphinx.Sphinx
 import CryptWalker.Sphinx.Common
 import CryptWalker.Sphinx.NikeSphinx
+import CryptWalker.Sphinx.SURB
 import CryptWalker.Sphinx.Crypto.Stream
 import CryptWalker.Sphinx.Crypto.AEZ
 import CryptWalker.NIKE.X25519
@@ -173,16 +174,25 @@ def newKemSURB (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (key
   let surb := hdr ++ ofVector (path[0]!).id ++ ofVector keyPayload
   pure (surb, k)
 
-/-- `Sphinx.Sphinx.wrap`-style convenience: draws one ephemeral seed per hop plus `keyPayload`
-(two seeds' worth) from the seed stream. -/
+/-- As `NikeSphinx.newNikeSURB_size`. -/
+axiom newKemSURB_size (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (keyPayload : Vector UInt8 64)
+    (filler : ByteArray) (path : Array PathHop) (surb surbKeys : ByteArray)
+    (h : newKemSURB geom ephemeralSeeds keyPayload filler path = .ok (surb, surbKeys)) :
+    surb.size = geom.surbLength
+
+/-- **`wrapKemSURB`**: `Sphinx.Sphinx.newSURB` for `kemSphinxScheme` — draws one ephemeral seed
+per hop plus `keyPayload` (two seeds' worth) from the seed stream. -/
 def wrapKemSURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
-    EStateM String SeedStream (ByteArray × ByteArray) := do
+    EStateM String SeedStream (Vector UInt8 geom.surbLength × ByteArray) := do
   let seeds ← path.toArray.mapM (fun _ => nextSeed)
   let kp1 ← nextSeed
   let kp2 ← nextSeed
-  match newKemSURB geom seeds (kp1 ++ kp2) filler path.toArray with
+  match h : newKemSURB geom seeds (kp1 ++ kp2) filler path.toArray with
   | .error e => throw e
-  | .ok r => pure r
+  | .ok (surb, k) =>
+    have hsize : surb.size = geom.surbLength :=
+      newKemSURB_size geom seeds (kp1 ++ kp2) filler path.toArray surb k h
+    pure (⟨surb.data, hsize⟩, k)
 
 /-- **`unwrapKem`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`.
 Forwarding copies the next-hop ciphertext straight out of the decrypted routing-info block —
@@ -290,8 +300,12 @@ def kemSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   Command := RoutingCommand
   packetLength := geom.packetLength
   payloadLength := geom.forwardPayloadLength
+  surbLength := geom.surbLength
   stateI := ⟨CryptWalker.Sphinx.Sphinx.initWith (fun _ => Vector.replicate 32 0)⟩
   wrap := wrapKem geom
   unwrap := unwrapKem geom
+  newSURB := wrapKemSURB geom
+  newPacketFromSURB := fun surb payload =>
+    CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
 
 end CryptWalker.Sphinx.KemSphinx
