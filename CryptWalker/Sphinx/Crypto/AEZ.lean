@@ -358,4 +358,25 @@ def sprpDecrypt (key : Array UInt8) (iv : ByteArray) (msg : ByteArray) : ByteArr
   let delta := aezHashNoAD e iv
   decipher e delta msg
 
+/-! ## Length preservation
+
+AEZ in `τ = 0` mode is, by definition, a length-preserving strong pseudorandom permutation:
+`encipher`/`decipher` never expand or truncate. Every branch of `aezTiny` and `aezCore` only
+ever assembles its output from pieces whose sizes are determined by `inArr.size` itself
+(`Array.replicate`/`.set!` preserve length; `aezCore`'s three regions total exactly
+`initialBytes + fragBytes + 32 = inArr.size`) — so this is true by construction, and the 12
+`sprp_aez.json` vectors confirm it empirically (`ciphertext_hex` is always exactly as long as
+`plaintext_hex`, both directions). It is stated as an axiom rather than proved from
+`aezCore`/`aezTiny`'s definitions, in the same spirit as `NIKE.X25519`'s
+`curve25519_commutes`/`derivePub_safe`: pushing an imperative `for`-loop's size invariant
+through Lean's `Id.run do` elaboration is mechanical but long, and out of scope for this pass
+(see `Sphinx.Sphinx`, which is what actually needs this fact — it uses it to give `unwrap` a
+packet-size-preserving *type*, not just a runtime-true property). -/
+
+axiom sprpEncrypt_size (key : Array UInt8) (iv msg : ByteArray) :
+    (sprpEncrypt key iv msg).size = msg.size
+
+axiom sprpDecrypt_size (key : Array UInt8) (iv msg : ByteArray) :
+    (sprpDecrypt key iv msg).size = msg.size
+
 end CryptWalker.Sphinx.Crypto.AEZ

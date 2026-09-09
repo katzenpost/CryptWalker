@@ -8,6 +8,7 @@ import CryptWalker.Sphinx.Types
 import CryptWalker.Sphinx.NikeSphinx
 import CryptWalker.NIKE.X25519
 import CryptWalker.Util.newhex
+import CryptWalker.Util.Bytes
 
 /-!
 # NIKE-Sphinx create/unwrap round-trip self-test
@@ -29,6 +30,7 @@ open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.NikeSphinx
 open CryptWalker.NIKE.X25519 (curve25519 basepointBytes)
+open CryptWalker.Util.Bytes (ofVector)
 
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)
@@ -87,7 +89,7 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
             if r.cmds.length ≠ 2 then
               IO.eprintln s!"  hop {i}: expected 2 commands, got {r.cmds.length}"
               ok := false
-            pkt := fwd
+            pkt := ofVector fwd
         else
           match r.payload with
           | none =>

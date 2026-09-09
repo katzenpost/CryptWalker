@@ -7,6 +7,7 @@ import CryptWalker.Sphinx.Constants
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Commands
 import CryptWalker.Sphinx.Types
+import CryptWalker.Sphinx.Sphinx
 import CryptWalker.Sphinx.Crypto.KDF
 import CryptWalker.Sphinx.Crypto.ChaCha20
 import CryptWalker.Sphinx.Crypto.HMAC
@@ -22,6 +23,7 @@ open CryptWalker.Sphinx.Constants
 open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Types
+open CryptWalker.Sphinx.Sphinx (UnwrapResult)
 open CryptWalker.Sphinx.Crypto.KDF (PacketKeys sphinxKDF)
 open CryptWalker.Sphinx.Crypto.ChaCha20 (keystream32)
 open CryptWalker.Sphinx.Crypto.HMAC (hmacSha256)
@@ -67,6 +69,10 @@ private def blindingFactorPrivKey (seed : Vector UInt8 32) : Vector UInt8 32 :=
   toVec32 ⟨keystream32 seed.toArray⟩
 
 private def xor (a b : ByteArray) : ByteArray := ⟨a.data.mapIdx fun i x => x ^^^ b.data.getD i 0⟩
+
+@[simp] private theorem size_xor (a b : ByteArray) : (xor a b).size = a.size := by
+  show (a.data.mapIdx _).size = a.size
+  simp
 
 private def mac (key : Vector UInt8 32) (msg : ByteArray) : Vector UInt8 32 :=
   hmacSha256 (ofVector key) msg
@@ -177,25 +183,30 @@ def newNikePacket (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler
     b := sprpEncrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
-/-- The result of one hop's `Unwrap`: either a terminal `payload` (`none` when forwarding), the
-replay tag, the parsed commands, and — when there is a next hop — the packet to forward. -/
-structure UnwrapResult where
-  payload : Option ByteArray
-  replayTag : Vector UInt8 32
-  cmds : List RoutingCommand
-  forwardPkt : Option ByteArray
-
 /-- **`unwrapNike`**. Unlike Go, a MAC mismatch reports only an error string, not also the
 replay tag (`Except` has no side channel for it) — this pass has no caller that needs a tag
-alongside a rejection. -/
+alongside a rejection.
+
+The return type `Sphinx.UnwrapResult pkt.size RoutingCommand` — depending on `pkt`,
+`unwrapNike`'s own argument — is the abstract `Sphinx.Sphinx.unwrap`'s packet-length-invariance
+rule stated as a type rather than as a separate theorem: see `Sphinx.Sphinx`'s doc comment. This
+function is what witnesses that the rule is satisfiable — `nikeSphinxScheme` below packages it
+as a `Sphinx.Sphinx` instance. -/
 def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
-    Except String UnwrapResult := do
+    Except String (UnwrapResult pkt.size RoutingCommand) := do
   let geOff := 2
   let riOff := geOff + 32
   let macOff := riOff + geom.routingInfoLength
   let payloadOff := macOff + macLength
 
-  if pkt.size < geom.headerLength then throw "sphinx: invalid packet, truncated"
+  -- Dependent `if`, not the bare guard `sphinx.go` writes this as: unlike Go, the packet-length
+  -- proof below needs `¬ (pkt.size < payloadOff)` as a hypothesis, not just as a control-flow
+  -- fact. (`payloadOff` here is definitionally `geom.headerLength`, for any `Geometry` actually
+  -- built by `Geometry.ofNIKE`/`ofKEM` — recomputing it from the same local `let`s as the rest
+  -- of this function, rather than reading `geom.headerLength` directly, is what lets this proof
+  -- go through without also assuming that consistency as a hypothesis on `geom`.)
+  if h1 : pkt.size < payloadOff then throw "sphinx: invalid packet, truncated"
+  else do
   if (pkt.extract 0 2).data ≠ v0AD.data then throw "sphinx: invalid packet, unknown version"
 
   let groupElement := toVec32 (pkt.extract geOff riOff)
@@ -209,9 +220,23 @@ def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
 
   -- Decrypt the (padding-extended) routing_info block and split off this hop's fragment.
   let mut b : ByteArray := pkt.extract riOff macOff ++ ⟨Array.replicate geom.perHopRoutingInfoLength 0⟩
+  have hb : b.size = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
+    have hpad : (⟨Array.replicate geom.perHopRoutingInfoLength (0 : UInt8)⟩ : ByteArray).size
+        = geom.perHopRoutingInfoLength := Array.size_replicate
+    show (pkt.extract riOff macOff ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)).size
+      = geom.routingInfoLength + geom.perHopRoutingInfoLength
+    rw [ByteArray.size_append, ByteArray.size_extract, hpad]
+    omega
   b := xor b (keystream keys.headerEncryption keys.headerEncryptionIV b.size)
+  have hb' : b.size = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
+    show (xor _ _).size = _
+    rw [size_xor]; exact hb
   let cmdBuf := b.extract 0 geom.perHopRoutingInfoLength
   let newRoutingInfo := b.extract geom.perHopRoutingInfoLength b.size
+  have hnri : newRoutingInfo.size = geom.routingInfoLength := by
+    show (b.extract geom.perHopRoutingInfoLength b.size).size = geom.routingInfoLength
+    rw [ByteArray.size_extract]
+    omega
 
   let cmds ← parseAll cmdBuf
   let nextNode := cmds.findSome? fun
@@ -222,16 +247,41 @@ def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
     | _ => false
 
   let rawPayload := pkt.extract payloadOff pkt.size
+  have hraw : rawPayload.size = pkt.size - payloadOff := by
+    show (pkt.extract payloadOff pkt.size).size = pkt.size - payloadOff
+    rw [ByteArray.size_extract]
+    omega
   let decPayload :=
     if rawPayload.size > 0 then sprpDecrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
     else rawPayload
+  have hdec : decPayload.size = rawPayload.size := by
+    show (if rawPayload.size > 0
+          then sprpDecrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
+          else rawPayload).size = rawPayload.size
+    split
+    · exact CryptWalker.Sphinx.Crypto.AEZ.sprpDecrypt_size _ _ _
+    · rfl
 
   match nextNode with
   | some (_nextID, nextMAC) =>
     let newGroupElement := blind groupElement keys.blindingFactor
     let newPayload := if decPayload.size > 0 then decPayload else rawPayload
+    have hnewPayload : newPayload.size = pkt.size - payloadOff := by
+      show (if decPayload.size > 0 then decPayload else rawPayload).size = pkt.size - payloadOff
+      split
+      · rw [hdec, hraw]
+      · rw [hraw]
     let newPkt := v0AD ++ ofVector newGroupElement ++ newRoutingInfo ++ ofVector nextMAC ++ newPayload
-    pure { payload := none, replayTag, cmds, forwardPkt := some newPkt }
+    have hnewPkt : newPkt.size = pkt.size := by
+      show (v0AD ++ ofVector newGroupElement ++ newRoutingInfo ++ ofVector nextMAC ++ newPayload).size
+        = pkt.size
+      rw [ByteArray.size_append, ByteArray.size_append, ByteArray.size_append, ByteArray.size_append,
+          Util.Bytes.size_ofVector, Util.Bytes.size_ofVector, hnri, hnewPayload]
+      have hv0 : v0AD.size = 2 := rfl
+      have hmac : macLength = 32 := rfl
+      omega
+    pure { payload := none, replayTag, cmds,
+           forwardPkt := some ⟨newPkt.data, hnewPkt⟩ }
   | none =>
     if decPayload.size < geom.payloadTagLength then throw "sphinx: truncated payload"
     if hasSurbReply then
@@ -241,5 +291,12 @@ def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure { payload := some (decPayload.extract geom.payloadTagLength decPayload.size),
              replayTag, cmds, forwardPkt := none }
+
+/-- NIKE-Sphinx (X25519) as a `Sphinx.Sphinx` instance: `unwrapNike geom` already has exactly
+the signature `Sphinx.Sphinx.unwrap` asks for. -/
+def nikeSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
+  PrivateKey := Vector UInt8 32
+  Command := RoutingCommand
+  unwrap := unwrapNike geom
 
 end CryptWalker.Sphinx.NikeSphinx
