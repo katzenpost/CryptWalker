@@ -62,3 +62,6 @@ name = "CryptWalker.Sphinx.Crypto.aez_test"
 
 [[lean_exe]]
 name = "CryptWalker.Sphinx.commands_test"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.nike_selftest"
