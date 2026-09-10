@@ -4,18 +4,21 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Mathlib.AlgebraicGeometry.EllipticCurve.Affine.Point
+import Mathlib.Algebra.Field.Defs
+import Mathlib.Algebra.Field.Basic
 import Mathlib.Data.ZMod.Basic
 import Mathlib.Data.Nat.Digits.Lemmas
+import Mathlib.NumberTheory.LucasPrimality
 
 import CryptWalker.NIKE.NIKE
-import CryptWalker.NIKE.X25519_montgomery_ladder
+import CryptWalker.NIKE.X25519Common
 
 /-!
 # X25519 as a group operation
 
 The group action here *is* scalar multiplication on Curve25519, so `NIKE.commutes` is
-`Nat.mul_comm` and nothing else. Contrast `CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme`, which
-implements the same exchange as a Montgomery ladder over byte strings and has to take
+`Nat.mul_comm` and nothing else. Contrast `CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme`,
+which implements the same exchange as a Montgomery ladder over byte strings and has to take
 commutativity as an axiom.
 
 Curve25519, `y² = x³ + 486662x² + x`, is already a Weierstrass equation in long form
@@ -28,18 +31,19 @@ little-endian, or 65 zero bytes for the point at infinity. Carrying `y` is what 
 a left inverse of encoding. The 32-byte u-coordinate interface of RFC 7748 is provided
 separately by `x25519`, which recovers a `y` by square root.
 
+`X25519Common` is what this file and `X25519_montgomery_ladder` actually share: the field
+prime, RFC 7748 byte encoding and clamping, and the private-key shape. Nothing else about the
+two implementations is coupled.
+
 The single unproved statement in this file is the axiom `p_prime`.
 -/
 
 namespace CryptWalker.NIKE.X25519
 
 open CryptWalker.NIKE.NIKE
+open CryptWalker.NIKE.X25519Common
 
 /-! ### The base field -/
-
-/-- The Curve25519 prime `2^255 - 19`. This is the same `p` that `CryptWalker.NIKE.X25519_montgomery_ladder`
-computes over, so the two agree on the type `ZMod p`, not merely on its cardinality. -/
-abbrev p : ℕ := X25519_montgomery_ladder.p
 
 /-- `2^255 - 19` is prime.
 
@@ -52,7 +56,7 @@ axiom p_prime : Nat.Prime p
 
 instance : Fact (Nat.Prime p) := ⟨p_prime⟩
 
-lemma p_lt_pow : p < 256 ^ 32 := by norm_num [p, X25519_montgomery_ladder.p]
+lemma p_lt_pow : p < 256 ^ 32 := by norm_num [p]
 
 private lemma natCast_ne_zero_of_lt {n : ℕ} (h0 : n ≠ 0) (hlt : n < p) :
     ((n : ℕ) : ZMod p) ≠ 0 := by
@@ -96,7 +100,7 @@ lemma curve_Δ_ne_zero : curve.Δ ≠ 0 := by
     push_cast
     norm_num
   rw [h]
-  exact natCast_ne_zero_of_lt (by norm_num) (by norm_num [p, X25519_montgomery_ladder.p])
+  exact natCast_ne_zero_of_lt (by norm_num) (by norm_num [p])
 
 /-- Curve25519 is nonsingular, so lying on it is the whole condition for being a point. -/
 lemma nonsingular_iff_onCurve {x y : ZMod p} : curve.Nonsingular x y ↔ onCurve x y :=
@@ -121,15 +125,15 @@ def basepointYNat : ℕ :=
 /-- The `y`-coordinate of the standard basepoint `x = 9`. -/
 def basepointY : ZMod p := (basepointYNat : ℕ)
 
-lemma basepoint_onCurve : onCurve X25519_montgomery_ladder.basepoint basepointY := by
+lemma basepoint_onCurve : onCurve basepoint basepointY := by
   have hrhs : ((9 ^ 3 + 486662 * 9 ^ 2 + 9 : ℕ) : ZMod p)
-      = X25519_montgomery_ladder.basepoint ^ 3 + 486662 * X25519_montgomery_ladder.basepoint ^ 2 + X25519_montgomery_ladder.basepoint := by
-    simp only [X25519_montgomery_ladder.basepoint]
+      = basepoint ^ 3 + 486662 * basepoint ^ 2 + basepoint := by
+    simp only [basepoint]
     push_cast
     ring
   show basepointY ^ 2 = _
   rw [basepointY, ← Nat.cast_pow, ← hrhs, ZMod.natCast_eq_natCast_iff']
-  norm_num [basepointYNat, p, X25519_montgomery_ladder.p]
+  norm_num [basepointYNat, p]
 
 /-- The standard basepoint of X25519, as a group element. -/
 def G : Point := mkPoint basepoint_onCurve
@@ -249,8 +253,8 @@ Deliberately *not* routed through `ZMod p`: clamping leaves the value in `[2^254
 can exceed `p = 2^255 - 19`, and reducing a scalar modulo the *field* prime is wrong — the group
 order is what a scalar reduces modulo. `X25519_montgomery_ladder.scalarmult` does route it through `ZMod p`, so the
 two implementations disagree for the handful of clamped scalars above `p`. -/
-def scalarOf (sk : X25519_montgomery_ladder.PrivateKey) : ℕ :=
-  Nat.ofDigits 256 ((X25519_montgomery_ladder.clampScalar sk.data).toList.map UInt8.toNat)
+def scalarOf (sk : PrivateKey) : ℕ :=
+  Nat.ofDigits 256 ((clampScalar sk.data).toList.map UInt8.toNat)
 
 def publicKeySize : ℕ := 65
 
@@ -270,19 +274,19 @@ points. Rejecting them is about *contributory behaviour* — ensuring a peer can
 predictable shared secret — which is a security property this model does not express, rather
 than a definedness requirement. -/
 def Scheme : NIKE where
-  PrivateKey   := X25519_montgomery_ladder.PrivateKey
+  PrivateKey   := PrivateKey
   PublicKey    := Point
   SharedSecret := ZMod p
 
   name := "X25519-group"
-  privateKeySize   := X25519_montgomery_ladder.keySize
+  privateKeySize   := keySize
   publicKeySize    := publicKeySize
   sharedSecretSize := 32
 
   Safe    := fun _ => True
   decSafe := fun _ => isTrue trivial
 
-  privateKeyFromSeed := fun seed => ⟨X25519_montgomery_ladder.clampScalar seed⟩
+  privateKeyFromSeed := fun seed => ⟨clampScalar seed⟩
   derivePublicKey    := fun sk => scalarOf sk • G
   groupAction        := fun sk pk _ => xCoord (scalarOf sk • pk)
 
@@ -341,7 +345,7 @@ def uBytes (P : Point) : Vector UInt8 32 := encodeSharedSecret (xCoord P)
 u-coordinate, computed as scalar multiplication in the group. `none` exactly when the input
 u-coordinate is not on the curve. -/
 def x25519 (scalarBytes uCoordBytes : Vector UInt8 32) : Option (Vector UInt8 32) :=
-  (liftX (X25519_montgomery_ladder.toField uCoordBytes)).map fun P =>
-    uBytes (Nat.ofDigits 256 ((X25519_montgomery_ladder.clampScalar scalarBytes).toList.map UInt8.toNat) • P)
+  (liftX (toField uCoordBytes)).map fun P =>
+    uBytes (Nat.ofDigits 256 ((clampScalar scalarBytes).toList.map UInt8.toNat) • P)
 
 end CryptWalker.NIKE.X25519

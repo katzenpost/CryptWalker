@@ -14,6 +14,7 @@ import CryptWalker.Sphinx.SURB
 import CryptWalker.Sphinx.Crypto.Stream
 import CryptWalker.Sphinx.Crypto.AEZ
 import CryptWalker.NIKE.X25519_montgomery_ladder
+import CryptWalker.NIKE.X25519Common
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Schemes
 import CryptWalker.Hash.Sha512
@@ -29,7 +30,8 @@ open CryptWalker.Sphinx.Common
 open CryptWalker.Sphinx.NIKESphinx (HopKeys deriveHopKeys)
 open CryptWalker.Sphinx.Crypto.Stream (keystream)
 open CryptWalker.Sphinx.Crypto.AEZ (sprpEncrypt sprpDecrypt)
-open CryptWalker.NIKE.X25519_montgomery_ladder (PublicKey PrivateKey curve25519 basepointBytes)
+open CryptWalker.NIKE.X25519_montgomery_ladder (PublicKey curve25519 basepointBytes)
+open CryptWalker.NIKE.X25519Common (PrivateKey)
 open CryptWalker.KEM.Adapter (encapM decapM initWith)
 open CryptWalker.KEM (sha256v1PRF)
 open CryptWalker.Hash.Sha512 (sha512_256)

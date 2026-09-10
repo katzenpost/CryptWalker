@@ -10,31 +10,18 @@ import Mathlib.NumberTheory.LucasPrimality
 import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 import CryptWalker.NIKE.NIKE
+import CryptWalker.NIKE.X25519Common
 
 open CryptWalker.Util.newnat
 open CryptWalker.NIKE.NIKE
+open CryptWalker.NIKE.X25519Common
 
 namespace CryptWalker.NIKE.X25519_montgomery_ladder
 
-def p : ℕ := 2^255 - 19
-instance : NeZero p := ⟨by norm_num [p]⟩
-
-def basepoint : ZMod p := 9
-abbrev keySize : ℕ := 32
-
-/-- Little-endian byte decoding, with bit 255 masked per RFC 7748. -/
-def toField (v : Vector UInt8 keySize) : ZMod p :=
-  let masked := v.set 31 (v[31] &&& 0x7f)
-  (List.range keySize).foldr (fun i acc => acc * 256 + (masked[i]!).toNat) 0
-
-/-- Little-endian byte encoding, exactly 32 bytes by construction. -/
+/-- Little-endian byte encoding, exactly 32 bytes by construction. Ladder-only: nothing on the
+group side needs to turn a field element back into raw RFC 7748 bytes. -/
 def fromField (x : ZMod p) : Vector UInt8 keySize :=
   Vector.ofFn (fun i : Fin keySize => (x.val >>> (8 * i.val)).toUInt8)
-
-/-- RFC 7748 clamping: clear the low three bits, clear bit 255, set bit 254. -/
-def clampScalar (v : Vector UInt8 keySize) : Vector UInt8 keySize :=
-  let v1 := v.set 0  (v[0]  &&& 0xf8)
-  v1.set 31 ((v1[31] &&& 0x7f) ||| 0x40)
 
 def basepointBytes : Vector UInt8 keySize := fromField basepoint
 
@@ -75,7 +62,7 @@ Taking a `ZMod p` here and calling `fromField` to get the bits back was a correc
 clamped scalar lies in `[2^254, 2^255)` and can exceed `p = 2^255 - 19`, so the round trip
 through the field reduced it modulo the field prime. A scalar reduces modulo the *group order*,
 never modulo `p`. It affected the two clamped values above `p` -- `2^255 - 16` and `2^255 - 8`
--- and was found by cross-checking against `X25519_math.Scheme`, which computes in the group
+-- and was found by cross-checking against `X25519.Scheme`, which computes in the group
 and does not reduce. -/
 def montgomery_ladder (e : Vector UInt8 keySize) (point : ZMod p) : Id LadderState :=
   do
@@ -108,10 +95,10 @@ def curve25519 (scalar point : Vector UInt8 keySize) : Vector UInt8 keySize :=
   fromField (scalarmult scalar (toField point))
 
 /-
-  NIKE types for x25519
+  NIKE types for x25519. `PrivateKey` is `X25519Common.PrivateKey`, opened unqualified;
+  `PublicKey` and `SharedSecret` are ladder-only, unlike the group scheme's `Point`/`ZMod p`.
 -/
 
-structure PrivateKey   where data : Vector UInt8 keySize
 structure PublicKey    where data : Vector UInt8 keySize
 structure SharedSecret where data : Vector UInt8 keySize
 

@@ -1,5 +1,6 @@
 import CryptWalker.NIKE.NIKE
 import CryptWalker.NIKE.X25519_montgomery_ladder
+import CryptWalker.NIKE.X25519Common
 import CryptWalker.NIKE.Schemes
 import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
@@ -10,6 +11,7 @@ open Bench
 open CryptWalker.Util.newhex
 open CryptWalker.NIKE.NIKE
 open CryptWalker.NIKE.X25519_montgomery_ladder
+open CryptWalker.NIKE.X25519Common
 
 def genkey : IO (Vector UInt8 keySize) := do
   let mut arr : Array UInt8 := Array.emptyWithCapacity keySize

@@ -58,8 +58,8 @@ def testX25519GroupAgreesWithLadder : IO Unit := do
   let seeds := #[Vector.replicate 32 1, Vector.replicate 32 2,
                  Vector.replicate 32 7, Vector.replicate 32 255]
   for seed in seeds do
-    let sk : CryptWalker.NIKE.X25519_montgomery_ladder.PrivateKey :=
-      ⟨CryptWalker.NIKE.X25519_montgomery_ladder.clampScalar seed⟩
+    let sk : CryptWalker.NIKE.X25519Common.PrivateKey :=
+      ⟨CryptWalker.NIKE.X25519Common.clampScalar seed⟩
     let ladderPub := (CryptWalker.NIKE.X25519_montgomery_ladder.derivePub sk).data
     let groupPub := CryptWalker.NIKE.X25519.uBytes
       (CryptWalker.NIKE.X25519.scalarOf sk • CryptWalker.NIKE.X25519.G)
@@ -67,10 +67,10 @@ def testX25519GroupAgreesWithLadder : IO Unit := do
       throw (IO.userError
         s!"public key mismatch for seed: ladder {showVec ladderPub} vs group {showVec groupPub}")
   -- A full exchange, computed each way.
-  let aSk : CryptWalker.NIKE.X25519_montgomery_ladder.PrivateKey :=
-    ⟨CryptWalker.NIKE.X25519_montgomery_ladder.clampScalar (Vector.replicate 32 3)⟩
-  let bSk : CryptWalker.NIKE.X25519_montgomery_ladder.PrivateKey :=
-    ⟨CryptWalker.NIKE.X25519_montgomery_ladder.clampScalar (Vector.replicate 32 5)⟩
+  let aSk : CryptWalker.NIKE.X25519Common.PrivateKey :=
+    ⟨CryptWalker.NIKE.X25519Common.clampScalar (Vector.replicate 32 3)⟩
+  let bSk : CryptWalker.NIKE.X25519Common.PrivateKey :=
+    ⟨CryptWalker.NIKE.X25519Common.clampScalar (Vector.replicate 32 5)⟩
   let ladderSS := CryptWalker.NIKE.X25519_montgomery_ladder.curve25519 aSk.data
     (CryptWalker.NIKE.X25519_montgomery_ladder.derivePub bSk).data
   let groupSS := CryptWalker.NIKE.X25519.uBytes
