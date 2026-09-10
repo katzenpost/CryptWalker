@@ -1,8 +1,8 @@
 import Lean
 
 import CryptWalker.NIKE.NIKE
+import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.NIKE.X25519
-import CryptWalker.NIKE.X25519_math
 import CryptWalker.NIKE.Schemes
 
 open CryptWalker.Util.newhex

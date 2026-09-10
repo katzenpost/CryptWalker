@@ -1,5 +1,5 @@
 import CryptWalker.NIKE.NIKE
-import CryptWalker.NIKE.X25519
+import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.NIKE.Schemes
 import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex

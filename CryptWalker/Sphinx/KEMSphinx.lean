@@ -13,7 +13,7 @@ import CryptWalker.Sphinx.NIKESphinx
 import CryptWalker.Sphinx.SURB
 import CryptWalker.Sphinx.Crypto.Stream
 import CryptWalker.Sphinx.Crypto.AEZ
-import CryptWalker.NIKE.X25519
+import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Schemes
 import CryptWalker.Hash.Sha512

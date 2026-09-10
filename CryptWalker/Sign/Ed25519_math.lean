@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Mathlib.Data.ZMod.Basic
 import CryptWalker.Hash.Sha512
 import CryptWalker.Sign.Sign
-import CryptWalker.NIKE.X25519_math
+import CryptWalker.NIKE.X25519
 
 namespace CryptWalker.Sign.Ed25519Math
 

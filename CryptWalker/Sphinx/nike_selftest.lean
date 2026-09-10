@@ -7,7 +7,7 @@ import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Types
 import CryptWalker.Sphinx.NIKESphinx
 import CryptWalker.Sphinx.SURB
-import CryptWalker.NIKE.X25519
+import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
 

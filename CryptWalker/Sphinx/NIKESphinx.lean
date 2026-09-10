@@ -14,7 +14,7 @@ import CryptWalker.Sphinx.Crypto.KDF
 import CryptWalker.Sphinx.Crypto.ChaCha20
 import CryptWalker.Sphinx.Crypto.Stream
 import CryptWalker.Sphinx.Crypto.AEZ
-import CryptWalker.NIKE.X25519
+import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.Hash.Sha512
 import CryptWalker.Util.Bytes
 
