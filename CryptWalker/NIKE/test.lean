@@ -26,7 +26,7 @@ def testX25519Vector : IO Unit := do
   for (scalarHex, baseHex, expectedHex) in vectors do
     let some scalar := hexToVec32 scalarHex | throw (IO.userError "bad scalar hex")
     let some base   := hexToVec32 baseHex   | throw (IO.userError "bad base hex")
-    let got := showVec (CryptWalker.NIKE.X25519_montgomery_ladder.curve25519 scalar base)
+    let got := showVec (CryptWalker.NIKE.X25519_montgomery_ladder.x25519 scalar base)
     if got ≠ expectedHex then
       throw (IO.userError s!"KAT mismatch: expected {expectedHex}, got {got}")
   IO.println "All vector tests passed for X25519!"

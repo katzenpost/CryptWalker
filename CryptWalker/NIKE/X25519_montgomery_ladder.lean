@@ -94,6 +94,13 @@ def scalarmult (scalarBytes : Vector UInt8 keySize) (point : ZMod p) : ZMod p :=
 def curve25519 (scalar point : Vector UInt8 keySize) : Vector UInt8 keySize :=
   fromField (scalarmult scalar (toField point))
 
+/-- **X25519**, RFC 7748 signature: same name as `X25519.x25519`, distinguished by namespace.
+Unlike the group version, this never fails: the ladder computes directly on u-coordinates and
+is total over the whole 32-byte input space, quadratic-twist points included, so there's no
+`Option` here. -/
+def x25519 (scalarBytes uCoordBytes : Vector UInt8 keySize) : Vector UInt8 keySize :=
+  curve25519 scalarBytes uCoordBytes
+
 /-
   NIKE types for x25519. `PrivateKey` is `X25519Common.PrivateKey`, opened unqualified;
   `PublicKey` and `SharedSecret` are ladder-only, unlike the group scheme's `Point`/`ZMod p`.
