@@ -324,4 +324,26 @@ def KEMSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
     CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
   unwrap_complete := wrapKEM_unwrapKEM_complete geom
 
+/-! ## Wrap-resistance fails
+
+Contrast `NIKESphinx.NIKESphinxBlinded`, whose `wrap_resistant` bounds a forger to `1/N`
+(`Sphinx.WrapResistance.blind_wrapResistance`). NIKE-Sphinx's forwarded envelope is *computed*
+by the mix — `blind`, a scalar multiplication entangled with a hash of the shared secret, which
+nothing inverts. KEM-Sphinx's forwarded envelope, routing info, and next-hop MAC
+(`nextCiphertext`/`newRoutingInfo`/`nextMAC` above) are just slices of `b`, the *decryption* of
+bytes the packet's constructor chose freely — no hash/group step stands between that choice and
+the mix's output. `decap` (line 65 above) is total bar the seven small-order ciphertexts, so
+anyone holding `privKey` can compute the keystream for *any* `kemCiphertext` they pick, exactly
+what wrap-resistance's own threat model already grants ("even one whose private key x the
+adversary can select") — and once the keystream is known, `xorBytes_achieves_any_target` says
+every target routing-info block is reachable, with certainty. -/
+
+/-- **KEM-Sphinx does not achieve wrap-resistance.** For any routing-info-block `target` a
+key-holder wants the mix to forward, there are raw (pre-decryption) bytes achieving it exactly —
+the opposite of a `1/N`-style bound. -/
+theorem unwrapKEM_routingInfoBlock_not_wrap_resistant (key : Vector UInt8 32) (iv : Vector UInt8 16)
+    (target : ByteArray) :
+    ∃ raw : ByteArray, xorBytes raw (keystream key iv target.size) = target :=
+  xorBytes_achieves_any_target (keystream key iv target.size) target
+
 end CryptWalker.Sphinx.KEMSphinx

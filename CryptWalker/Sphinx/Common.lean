@@ -31,6 +31,23 @@ def xorBytes (a b : ByteArray) : ByteArray := ⟨a.data.mapIdx fun i x => x ^^^ 
   show (a.data.mapIdx _).size = a.size
   simp
 
+/-- XOR against a fixed `b` is its own inverse. This is the whole reason a known keystream lets
+you hit *any* target plaintext exactly: encrypt the target with the same `b` you'll decrypt
+with, and decryption returns it unchanged. -/
+theorem xorBytes_xorBytes (a b : ByteArray) : xorBytes (xorBytes a b) b = a := by
+  ext i h
+  · simp [xorBytes]
+  · simp only [xorBytes, Array.getElem_mapIdx, Array.getD]
+    split <;> simp [UInt8.xor_assoc, UInt8.xor_self]
+
+/-- Whoever knows a keystream `ks` can make `xorBytes · ks` decrypt to *any* chosen `target`:
+encrypt `target` with `ks` first, by `xorBytes_xorBytes`. This is the general fact behind
+`KEMSphinx`'s failure of wrap-resistance — a known-key adversary hits an arbitrary target with
+certainty, not merely with some bounded probability. -/
+theorem xorBytes_achieves_any_target (ks target : ByteArray) :
+    ∃ raw : ByteArray, xorBytes raw ks = target :=
+  ⟨xorBytes target ks, xorBytes_xorBytes target ks⟩
+
 def mac (key : Vector UInt8 32) (msg : ByteArray) : Vector UInt8 32 := hmacSha256 (ofVector key) msg
 
 def zeroPadTo (n : Nat) (b : ByteArray) : ByteArray :=
