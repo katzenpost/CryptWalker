@@ -26,7 +26,7 @@ def testX25519Vector : IO Unit := do
   for (scalarHex, baseHex, expectedHex) in vectors do
     let some scalar := hexToVec32 scalarHex | throw (IO.userError "bad scalar hex")
     let some base   := hexToVec32 baseHex   | throw (IO.userError "bad base hex")
-    let got := showVec (CryptWalker.NIKE.X25519.curve25519 scalar base)
+    let got := showVec (CryptWalker.NIKE.X25519_montgomery_ladder.curve25519 scalar base)
     if got ≠ expectedHex then
       throw (IO.userError s!"KAT mismatch: expected {expectedHex}, got {got}")
   IO.println "All vector tests passed for X25519!"
@@ -44,7 +44,7 @@ def testX25519GroupVector : IO Unit := do
   for (scalarHex, baseHex, expectedHex) in vectors do
     let some scalar := hexToVec32 scalarHex | throw (IO.userError "bad scalar hex")
     let some base   := hexToVec32 baseHex   | throw (IO.userError "bad base hex")
-    match CryptWalker.NIKE.X25519_math.x25519 scalar base with
+    match CryptWalker.NIKE.X25519.x25519 scalar base with
     | none => throw (IO.userError "group x25519: u-coordinate not on the curve")
     | some got =>
       if showVec got ≠ expectedHex then
@@ -58,24 +58,24 @@ def testX25519GroupAgreesWithLadder : IO Unit := do
   let seeds := #[Vector.replicate 32 1, Vector.replicate 32 2,
                  Vector.replicate 32 7, Vector.replicate 32 255]
   for seed in seeds do
-    let sk : CryptWalker.NIKE.X25519.PrivateKey :=
-      ⟨CryptWalker.NIKE.X25519.clampScalar seed⟩
-    let ladderPub := (CryptWalker.NIKE.X25519.derivePub sk).data
-    let groupPub := CryptWalker.NIKE.X25519_math.uBytes
-      (CryptWalker.NIKE.X25519_math.scalarOf sk • CryptWalker.NIKE.X25519_math.G)
+    let sk : CryptWalker.NIKE.X25519_montgomery_ladder.PrivateKey :=
+      ⟨CryptWalker.NIKE.X25519_montgomery_ladder.clampScalar seed⟩
+    let ladderPub := (CryptWalker.NIKE.X25519_montgomery_ladder.derivePub sk).data
+    let groupPub := CryptWalker.NIKE.X25519.uBytes
+      (CryptWalker.NIKE.X25519.scalarOf sk • CryptWalker.NIKE.X25519.G)
     if showVec ladderPub ≠ showVec groupPub then
       throw (IO.userError
         s!"public key mismatch for seed: ladder {showVec ladderPub} vs group {showVec groupPub}")
   -- A full exchange, computed each way.
-  let aSk : CryptWalker.NIKE.X25519.PrivateKey :=
-    ⟨CryptWalker.NIKE.X25519.clampScalar (Vector.replicate 32 3)⟩
-  let bSk : CryptWalker.NIKE.X25519.PrivateKey :=
-    ⟨CryptWalker.NIKE.X25519.clampScalar (Vector.replicate 32 5)⟩
-  let ladderSS := CryptWalker.NIKE.X25519.curve25519 aSk.data
-    (CryptWalker.NIKE.X25519.derivePub bSk).data
-  let groupSS := CryptWalker.NIKE.X25519_math.uBytes
-    (CryptWalker.NIKE.X25519_math.scalarOf aSk •
-      (CryptWalker.NIKE.X25519_math.scalarOf bSk • CryptWalker.NIKE.X25519_math.G))
+  let aSk : CryptWalker.NIKE.X25519_montgomery_ladder.PrivateKey :=
+    ⟨CryptWalker.NIKE.X25519_montgomery_ladder.clampScalar (Vector.replicate 32 3)⟩
+  let bSk : CryptWalker.NIKE.X25519_montgomery_ladder.PrivateKey :=
+    ⟨CryptWalker.NIKE.X25519_montgomery_ladder.clampScalar (Vector.replicate 32 5)⟩
+  let ladderSS := CryptWalker.NIKE.X25519_montgomery_ladder.curve25519 aSk.data
+    (CryptWalker.NIKE.X25519_montgomery_ladder.derivePub bSk).data
+  let groupSS := CryptWalker.NIKE.X25519.uBytes
+    (CryptWalker.NIKE.X25519.scalarOf aSk •
+      (CryptWalker.NIKE.X25519.scalarOf bSk • CryptWalker.NIKE.X25519.G))
   if showVec ladderSS ≠ showVec groupSS then
     throw (IO.userError
       s!"shared secret mismatch: ladder {showVec ladderSS} vs group {showVec groupSS}")

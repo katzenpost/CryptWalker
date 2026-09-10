@@ -14,7 +14,7 @@ import CryptWalker.NIKE.X25519_montgomery_ladder
 # X25519 as a group operation
 
 The group action here *is* scalar multiplication on Curve25519, so `NIKE.commutes` is
-`Nat.mul_comm` and nothing else. Contrast `CryptWalker.NIKE.X25519.LadderScheme`, which
+`Nat.mul_comm` and nothing else. Contrast `CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme`, which
 implements the same exchange as a Montgomery ladder over byte strings and has to take
 commutativity as an axiom.
 
@@ -31,15 +31,15 @@ separately by `x25519`, which recovers a `y` by square root.
 The single unproved statement in this file is the axiom `p_prime`.
 -/
 
-namespace CryptWalker.NIKE.X25519_math
+namespace CryptWalker.NIKE.X25519
 
 open CryptWalker.NIKE.NIKE
 
 /-! ### The base field -/
 
-/-- The Curve25519 prime `2^255 - 19`. This is the same `p` that `CryptWalker.NIKE.X25519`
+/-- The Curve25519 prime `2^255 - 19`. This is the same `p` that `CryptWalker.NIKE.X25519_montgomery_ladder`
 computes over, so the two agree on the type `ZMod p`, not merely on its cardinality. -/
-abbrev p : ℕ := X25519.p
+abbrev p : ℕ := X25519_montgomery_ladder.p
 
 /-- `2^255 - 19` is prime.
 
@@ -52,7 +52,7 @@ axiom p_prime : Nat.Prime p
 
 instance : Fact (Nat.Prime p) := ⟨p_prime⟩
 
-lemma p_lt_pow : p < 256 ^ 32 := by norm_num [p, X25519.p]
+lemma p_lt_pow : p < 256 ^ 32 := by norm_num [p, X25519_montgomery_ladder.p]
 
 private lemma natCast_ne_zero_of_lt {n : ℕ} (h0 : n ≠ 0) (hlt : n < p) :
     ((n : ℕ) : ZMod p) ≠ 0 := by
@@ -96,7 +96,7 @@ lemma curve_Δ_ne_zero : curve.Δ ≠ 0 := by
     push_cast
     norm_num
   rw [h]
-  exact natCast_ne_zero_of_lt (by norm_num) (by norm_num [p, X25519.p])
+  exact natCast_ne_zero_of_lt (by norm_num) (by norm_num [p, X25519_montgomery_ladder.p])
 
 /-- Curve25519 is nonsingular, so lying on it is the whole condition for being a point. -/
 lemma nonsingular_iff_onCurve {x y : ZMod p} : curve.Nonsingular x y ↔ onCurve x y :=
@@ -121,15 +121,15 @@ def basepointYNat : ℕ :=
 /-- The `y`-coordinate of the standard basepoint `x = 9`. -/
 def basepointY : ZMod p := (basepointYNat : ℕ)
 
-lemma basepoint_onCurve : onCurve X25519.basepoint basepointY := by
+lemma basepoint_onCurve : onCurve X25519_montgomery_ladder.basepoint basepointY := by
   have hrhs : ((9 ^ 3 + 486662 * 9 ^ 2 + 9 : ℕ) : ZMod p)
-      = X25519.basepoint ^ 3 + 486662 * X25519.basepoint ^ 2 + X25519.basepoint := by
-    simp only [X25519.basepoint]
+      = X25519_montgomery_ladder.basepoint ^ 3 + 486662 * X25519_montgomery_ladder.basepoint ^ 2 + X25519_montgomery_ladder.basepoint := by
+    simp only [X25519_montgomery_ladder.basepoint]
     push_cast
     ring
   show basepointY ^ 2 = _
   rw [basepointY, ← Nat.cast_pow, ← hrhs, ZMod.natCast_eq_natCast_iff']
-  norm_num [basepointYNat, p, X25519.p]
+  norm_num [basepointYNat, p, X25519_montgomery_ladder.p]
 
 /-- The standard basepoint of X25519, as a group element. -/
 def G : Point := mkPoint basepoint_onCurve
@@ -247,10 +247,10 @@ lemma encodePoint_of_decodePoint {bs : List UInt8} {P : Point}
 
 Deliberately *not* routed through `ZMod p`: clamping leaves the value in `[2^254, 2^255)`, which
 can exceed `p = 2^255 - 19`, and reducing a scalar modulo the *field* prime is wrong — the group
-order is what a scalar reduces modulo. `X25519.scalarmult` does route it through `ZMod p`, so the
+order is what a scalar reduces modulo. `X25519_montgomery_ladder.scalarmult` does route it through `ZMod p`, so the
 two implementations disagree for the handful of clamped scalars above `p`. -/
-def scalarOf (sk : X25519.PrivateKey) : ℕ :=
-  Nat.ofDigits 256 ((X25519.clampScalar sk.data).toList.map UInt8.toNat)
+def scalarOf (sk : X25519_montgomery_ladder.PrivateKey) : ℕ :=
+  Nat.ofDigits 256 ((X25519_montgomery_ladder.clampScalar sk.data).toList.map UInt8.toNat)
 
 def publicKeySize : ℕ := 65
 
@@ -265,24 +265,24 @@ def encodeSharedSecret (z : ZMod p) : Vector UInt8 32 :=
 /-- Scalar multiplication in the group is total, so there is no public key on which the group
 action is undefined and `Safe` is `True`.
 
-That is a real difference from `X25519.LadderScheme`, whose `Safe` rejects the small-order
+That is a real difference from `X25519_montgomery_ladder.LadderScheme`, whose `Safe` rejects the small-order
 points. Rejecting them is about *contributory behaviour* — ensuring a peer cannot force a
 predictable shared secret — which is a security property this model does not express, rather
 than a definedness requirement. -/
 def Scheme : NIKE where
-  PrivateKey   := X25519.PrivateKey
+  PrivateKey   := X25519_montgomery_ladder.PrivateKey
   PublicKey    := Point
   SharedSecret := ZMod p
 
   name := "X25519-group"
-  privateKeySize   := X25519.keySize
+  privateKeySize   := X25519_montgomery_ladder.keySize
   publicKeySize    := publicKeySize
   sharedSecretSize := 32
 
   Safe    := fun _ => True
   decSafe := fun _ => isTrue trivial
 
-  privateKeyFromSeed := fun seed => ⟨X25519.clampScalar seed⟩
+  privateKeyFromSeed := fun seed => ⟨X25519_montgomery_ladder.clampScalar seed⟩
   derivePublicKey    := fun sk => scalarOf sk • G
   groupAction        := fun sk pk _ => xCoord (scalarOf sk • pk)
 
@@ -341,7 +341,7 @@ def uBytes (P : Point) : Vector UInt8 32 := encodeSharedSecret (xCoord P)
 u-coordinate, computed as scalar multiplication in the group. `none` exactly when the input
 u-coordinate is not on the curve. -/
 def x25519 (scalarBytes uCoordBytes : Vector UInt8 32) : Option (Vector UInt8 32) :=
-  (liftX (X25519.toField uCoordBytes)).map fun P =>
-    uBytes (Nat.ofDigits 256 ((X25519.clampScalar scalarBytes).toList.map UInt8.toNat) • P)
+  (liftX (X25519_montgomery_ladder.toField uCoordBytes)).map fun P =>
+    uBytes (Nat.ofDigits 256 ((X25519_montgomery_ladder.clampScalar scalarBytes).toList.map UInt8.toNat) • P)
 
-end CryptWalker.NIKE.X25519_math
+end CryptWalker.NIKE.X25519

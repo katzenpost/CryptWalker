@@ -14,7 +14,7 @@ import CryptWalker.NIKE.NIKE
 open CryptWalker.Util.newnat
 open CryptWalker.NIKE.NIKE
 
-namespace CryptWalker.NIKE.X25519
+namespace CryptWalker.NIKE.X25519_montgomery_ladder
 
 def p : ℕ := 2^255 - 19
 instance : NeZero p := ⟨by norm_num [p]⟩
@@ -188,4 +188,4 @@ def LadderScheme : NIKE where
   encode_decode_pub  := fun _ _ h => congrArg PublicKey.data (Option.some.inj h) ▸ rfl
   commutes           := fun sk₁ sk₂ => congrArg SharedSecret.mk (curve25519_commutes sk₁ sk₂)
 
-end CryptWalker.NIKE.X25519
+end CryptWalker.NIKE.X25519_montgomery_ladder

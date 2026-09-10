@@ -29,7 +29,7 @@ open CryptWalker.Sphinx.Crypto.KDF (PacketKeys sphinxKDF)
 open CryptWalker.Sphinx.Crypto.ChaCha20 (keystream32)
 open CryptWalker.Sphinx.Crypto.Stream (keystream)
 open CryptWalker.Sphinx.Crypto.AEZ (sprpEncrypt sprpDecrypt)
-open CryptWalker.NIKE.X25519 (curve25519 basepointBytes)
+open CryptWalker.NIKE.X25519_montgomery_ladder (curve25519 basepointBytes)
 open CryptWalker.Hash.Sha512 (sha512_256)
 open CryptWalker.Util.Bytes (ofVector)
 

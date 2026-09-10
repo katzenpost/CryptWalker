@@ -29,7 +29,7 @@ open CryptWalker.Sphinx.Common
 open CryptWalker.Sphinx.NIKESphinx (HopKeys deriveHopKeys)
 open CryptWalker.Sphinx.Crypto.Stream (keystream)
 open CryptWalker.Sphinx.Crypto.AEZ (sprpEncrypt sprpDecrypt)
-open CryptWalker.NIKE.X25519 (PublicKey PrivateKey curve25519 basepointBytes)
+open CryptWalker.NIKE.X25519_montgomery_ladder (PublicKey PrivateKey curve25519 basepointBytes)
 open CryptWalker.KEM.Adapter (encapM decapM initWith)
 open CryptWalker.KEM (sha256v1PRF)
 open CryptWalker.Hash.Sha512 (sha512_256)
@@ -56,12 +56,12 @@ private def ctSize : Nat := 32
 
 private def encap (pk : Vector UInt8 32) (seed : Vector UInt8 32) :
     Option (Vector UInt8 32 × Vector UInt8 32) :=
-  match encapM sha256v1PRF CryptWalker.NIKE.X25519.LadderScheme (⟨pk⟩ : PublicKey) (initWith (fun _ => seed)) with
+  match encapM sha256v1PRF CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme (⟨pk⟩ : PublicKey) (initWith (fun _ => seed)) with
   | .ok (ct, ss) _ => some (ct.data, ss)
   | .error _ _ => none
 
 private def decap (sk ct : Vector UInt8 32) : Option (Vector UInt8 32) :=
-  match decapM sha256v1PRF CryptWalker.NIKE.X25519.LadderScheme (⟨sk⟩ : PrivateKey) (⟨ct⟩ : PublicKey)
+  match decapM sha256v1PRF CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme (⟨sk⟩ : PrivateKey) (⟨ct⟩ : PublicKey)
       (initWith (fun _ => Vector.replicate 32 0)) with
   | .ok ss _ => some ss
   | .error _ _ => none

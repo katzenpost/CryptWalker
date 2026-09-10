@@ -10,9 +10,9 @@ namespace CryptWalker.Sphinx.Crypto.ChaCha20
 Needed for one thing only: `hpqc/rand.NewDeterministicRandReader` — which
 `internal/crypto.KDF` feeds `PacketKeys.blindingFactorSeed` into, whose first 32 bytes
 `nike/x25519.scheme.GeneratePrivateKey` then reads directly as the next hop's blinding-factor
-NIKE private key (`NewKeypair` performs no clamping at generation time; `X25519.curve25519`
-clamps at use). `NIKESphinx`'s multi-hop blinding chain needs this to match Go byte-for-byte,
-so it needs this cipher.
+NIKE private key (`NewKeypair` performs no clamping at generation time;
+`X25519_montgomery_ladder.curve25519` clamps at use). `NIKESphinx`'s multi-hop blinding chain
+needs this to match Go byte-for-byte, so it needs this cipher.
 
 `github.com/katzenpost/chacha20`'s `NewDeterministicRandReader` always calls `chacha20.New(key,
 nonce)` with an 8-byte **zero** nonce (`var nonce [8]byte`) — the original Bernstein variant

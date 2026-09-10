@@ -25,10 +25,10 @@ theorem would require a substantial formalization of the Edwards formulas and th
 subgroup. The operations themselves are executable and contain no assumed cryptographic primitive.
 -/
 
-abbrev p : Nat := CryptWalker.NIKE.X25519_math.p
+abbrev p : Nat := CryptWalker.NIKE.X25519.p
 abbrev ell : Nat := 2^252 + 27742317777372353535851937790883648493
 
-lemma p_prime : Nat.Prime p := CryptWalker.NIKE.X25519_math.p_prime
+lemma p_prime : Nat.Prime p := CryptWalker.NIKE.X25519.p_prime
 instance : Fact (Nat.Prime p) := ⟨p_prime⟩
 
 abbrev F := ZMod p

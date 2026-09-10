@@ -30,7 +30,7 @@ open CryptWalker.Sphinx.Geometry
 open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.NIKESphinx
-open CryptWalker.NIKE.X25519 (curve25519 basepointBytes)
+open CryptWalker.NIKE.X25519_montgomery_ladder (curve25519 basepointBytes)
 open CryptWalker.Util.Bytes (ofVector)
 
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
