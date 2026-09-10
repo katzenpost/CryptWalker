@@ -11,7 +11,7 @@ import CryptWalker.Util.Bytes
 /-! # Helpers shared by NIKE-Sphinx and KEM-Sphinx
 
 `sphinx.go`/`kemsphinx.go` share these via `package sphinx` (`v0AD`, `xorBytes`,
-`commandsToBytes` as a `*Sphinx` method, etc.); `NikeSphinx`/`KemSphinx` share them via this
+`commandsToBytes` as a `*Sphinx` method, etc.); `NIKESphinx`/`KEMSphinx` share them via this
 file instead, since Lean's `private` is file-scoped. -/
 
 namespace CryptWalker.Sphinx.Common

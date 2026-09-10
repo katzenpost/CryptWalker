@@ -13,8 +13,8 @@ import CryptWalker.Util.Bytes
 
 `surb.go`'s `NewPacketFromSURB` (below) and `DecryptSURBPayload`, both shared between NIKE- and
 KEM-Sphinx (Go has them as plain `*Sphinx` methods needing only `s.geometry`, not which header
-variant built the SURB) — so they live here alongside `newNikeSURB`/`newKemSURB` in
-`NikeSphinx.lean`/`KemSphinx.lean`, the halves that *do* differ (each calls its own
+variant built the SURB) — so they live here alongside `newNIKESURB`/`newKEMSURB` in
+`NIKESphinx.lean`/`KEMSphinx.lean`, the halves that *do* differ (each calls its own
 `createHeader`/`createKEMHeader`). -/
 
 namespace CryptWalker.Sphinx.SURB
@@ -46,7 +46,7 @@ def decryptSURBPayload (geom : Geometry) (keys payload : ByteArray) : Except Str
 
 /-- **`NewPacketFromSURB`**: build a reply packet from a SURB and a payload. `surb` is
 `header ‖ firstHopID(32) ‖ sprpKey(48) ‖ sprpIV(16)` (`SURBLength = HeaderLength + 32 + 64`
-bytes) — `newNikeSURB`/`newKemSURB`'s wire layout. Returns `(packet, firstHopID)`. -/
+bytes) — `newNIKESURB`/`newKEMSURB`'s wire layout. Returns `(packet, firstHopID)`. -/
 def newPacketFromSURB (geom : Geometry) (surb payload : ByteArray) :
     Except String (ByteArray × Vector UInt8 32) := do
   if surb.size ≠ geom.surbLength then throw "sphinx: invalid packet, truncated SURB"

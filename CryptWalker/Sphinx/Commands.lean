@@ -88,7 +88,7 @@ def fromBytesOne (b : ByteArray) : Except String (Option RoutingCommand × ByteA
     | _ => throw "sphinx: invalid per-hop command"
 
 /-- Parse every command in a per-hop routing-info block, stopping at the terminal `null` (or an
-exhausted buffer). This is what `NikeSphinx`/`KemSphinx`'s unwrap runs over a decrypted per-hop
+exhausted buffer). This is what `NIKESphinx`/`KEMSphinx`'s unwrap runs over a decrypted per-hop
 block. -/
 partial def parseAll (b : ByteArray) : Except String (List RoutingCommand) := do
   match ← fromBytesOne b with

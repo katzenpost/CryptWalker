@@ -15,8 +15,8 @@ A packet scheme, bundling its private-key/command types with `wrap` and `unwrap`
 one, is `Vector UInt8 pkt.size` — same length as the input, by the type, not by a theorem proved
 about it afterward. No named result type; a plain product carries it fine.
 
-`wrap`'s randomness (the client's ephemeral key for `NikeSphinx`, one seed per hop for
-`KemSphinx`) is drawn from `State` via `EStateM`, the same way `KEM.KEM`'s `encap`/`generate`
+`wrap`'s randomness (the client's ephemeral key for `NIKESphinx`, one seed per hop for
+`KEMSphinx`) is drawn from `State` via `EStateM`, the same way `KEM.KEM`'s `encap`/`generate`
 draw theirs — `SeedStream`/`nextSeed`/`initWith` below are the same "counter plus an
 inexhaustible seed stream" shape as `KEM.Adapter.St`/`nextSeed`/`initWith`, just yielding
 32-byte seeds instead of `KEM.Adapter.Bytes32` (the same type, not shared, to keep this file
@@ -31,11 +31,11 @@ type-level size guarantee `wrap`'s does; `newPacketFromSURB` is deterministic li
 packetLength`, since a reply payload's length is the caller's choice, independent of the
 forward geometry.
 
-`NikeSphinx.unwrapNike`/`wrapNike`/`wrapNikeSURB`/`SURB.newPacketFromSURB` and `KemSphinx`'s
+`NIKESphinx.unwrapNIKE`/`wrapNIKE`/`wrapNIKESURB`/`SURB.newPacketFromSURB` and `KEMSphinx`'s
 equivalents are the witnesses that a real implementation can meet this signature. The facts
 they lean on without proving from first principles: `Crypto.AEZ`'s
 `sprpEncrypt_size`/`sprpDecrypt_size`, and each variant's own
-`newNikePacket_size`/`newKEMPacket_size`/`newNikeSURB_size`/`newKemSURB_size` (that a successful
+`newNIKEPacket_size`/`newKEMPacket_size`/`newNIKESURB_size`/`newKEMSURB_size` (that a successful
 `wrap`/`newSURB` produces exactly `packetLength`/`surbLength` bytes) — all axioms, for the
 reason `NIKE.X25519` leaves `curve25519_commutes` one: pushing a `for`-loop's size invariant
 through `Id.run do` elaboration is mechanical but long, and out of scope for this pass. -/

@@ -18,7 +18,7 @@ import CryptWalker.NIKE.X25519
 import CryptWalker.Hash.Sha512
 import CryptWalker.Util.Bytes
 
-namespace CryptWalker.Sphinx.NikeSphinx
+namespace CryptWalker.Sphinx.NIKESphinx
 
 open CryptWalker.Sphinx.Constants
 open CryptWalker.Sphinx.Geometry (Geometry)
@@ -35,11 +35,11 @@ open CryptWalker.Util.Bytes (ofVector)
 
 /-! # NIKE-Sphinx (X25519)
 
-Port of `sphinx.go`'s NIKE path (`createHeader`, `newNikePacket`, `unwrapNike`), concrete to
+Port of `sphinx.go`'s NIKE path (`createHeader`, `newNIKEPacket`, `unwrapNIKE`), concrete to
 X25519 rather than an abstract NIKE. `createHeader` takes its randomness (client ephemeral key,
 hop-count-hiding filler) as plain arguments rather than `IO`, so it stays pure.
 
-`unwrapNike` needs no randomness, which is what makes it the half `Crypto.aez_test` and friends
+`unwrapNIKE` needs no randomness, which is what makes it the half `Crypto.aez_test` and friends
 can eventually check against Go's own `sphinx_vectors.json` byte-for-byte: that file's packets
 were built with a client ephemeral key it doesn't record, so `createHeader`'s output can't be
 reproduced from it, but `Unwrap` is deterministic. -/
@@ -139,8 +139,8 @@ def createHeader (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler 
     { key := (keys[i.val]!).payloadEncryption, iv := (keys[i.val]!).headerEncryptionIV }
   pure (hdr, sprpKeys)
 
-/-- **`newNikePacket`**. -/
-def newNikePacket (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler : ByteArray)
+/-- **`newNIKEPacket`**. -/
+def newNIKEPacket (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler : ByteArray)
     (path : Array PathHop) (payload : ByteArray) : Except String ByteArray := do
   if payload.size ≠ geom.forwardPayloadLength then
     throw s!"sphinx: invalid payload length: {payload.size}, expected {geom.forwardPayloadLength}"
@@ -151,40 +151,40 @@ def newNikePacket (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler
     b := sprpEncrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
-/-- A successful `newNikePacket` on a `geom.forwardPayloadLength`-sized payload produces exactly
+/-- A successful `newNIKEPacket` on a `geom.forwardPayloadLength`-sized payload produces exactly
 `geom.packetLength` bytes: `headerLength` (itself `createHeader`'s routing-info-block
 construction, accumulated over a `for` loop) plus `payloadTagLength + payload.size`
 (`sprpEncrypt`'s length preservation, applied in another loop). True by construction and
 confirmed by all 20 `sphinx_{nike,kem}_vectors.json` packets — see `Sphinx.Sphinx`'s doc comment
-for why this is an axiom rather than a proof through those loops. `wrapNike` uses it to give
+for why this is an axiom rather than a proof through those loops. `wrapNIKE` uses it to give
 `Sphinx.Sphinx.wrap` a packet-length-preserving *type*, the same way `sprpDecrypt_size` lets
-`unwrapNike` do that for `forwardPkt`. -/
-axiom newNikePacket_size (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler : ByteArray)
+`unwrapNIKE` do that for `forwardPkt`. -/
+axiom newNIKEPacket_size (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler : ByteArray)
     (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
-    (h : newNikePacket geom clientPrivateKey filler path payload = .ok pkt)
+    (h : newNIKEPacket geom clientPrivateKey filler path payload = .ok pkt)
     (hpay : payload.size = geom.forwardPayloadLength) :
     pkt.size = geom.packetLength
 
 open CryptWalker.Sphinx.Sphinx (SeedStream nextSeed)
 
-/-- **`wrapNike`**: `Sphinx.Sphinx.wrap` for `nikeSphinxScheme` — `newNikePacket`, drawing the
+/-- **`wrapNIKE`**: `Sphinx.Sphinx.wrap` for `NIKESphinxScheme` — `newNIKEPacket`, drawing the
 client's ephemeral private key from the seed stream instead of taking it as a bare argument. -/
-def wrapNike (geom : Geometry) (path : List PathHop) (filler : ByteArray)
+def wrapNIKE (geom : Geometry) (path : List PathHop) (filler : ByteArray)
     (payload : Vector UInt8 geom.forwardPayloadLength) :
     EStateM String SeedStream (Vector UInt8 geom.packetLength) := do
   let seed ← nextSeed
-  match h : newNikePacket geom seed filler path.toArray (ofVector payload) with
+  match h : newNIKEPacket geom seed filler path.toArray (ofVector payload) with
   | .error e => throw e
   | .ok pkt =>
     have hsize : pkt.size = geom.packetLength :=
-      newNikePacket_size geom seed filler path.toArray (ofVector payload) pkt h (by simp)
+      newNIKEPacket_size geom seed filler path.toArray (ofVector payload) pkt h (by simp)
     pure ⟨pkt.data, hsize⟩
 
-/-- **`newNikeSURB`**. `keyPayload` is the recipient's own random SPRP key ‖ iv for the reply's
+/-- **`newNIKESURB`**. `keyPayload` is the recipient's own random SPRP key ‖ iv for the reply's
 final payload-encryption layer (`sprpKeyMaterialLength = 64` bytes — `surb.go`'s
 `io.ReadFull(r, keyPayload[:])`). Returns `(surb, decryptionKeys)`; `decryptionKeys` is exactly
 what `SURB.decryptSURBPayload` wants. -/
-def newNikeSURB (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (keyPayload : Vector UInt8 64)
+def newNIKESURB (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (keyPayload : Vector UInt8 64)
     (filler : ByteArray) (path : Array PathHop) : Except String (ByteArray × ByteArray) := do
   let (hdr, sprpKeys) ← createHeader geom clientPrivateKey filler path
   -- Reverse hop order, "to ease decryption" (surb.go's comment).
@@ -196,34 +196,34 @@ def newNikeSURB (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (keyPaylo
   let surb := hdr ++ ofVector (path[0]!).id ++ ofVector keyPayload
   pure (surb, k)
 
-/-- As `newNikePacket_size`: `geom.surbLength = headerLength + nodeIDLength +
-sprpKeyMaterialLength`, and `newNikeSURB`'s `surb` is exactly `hdr ++ id(32) ++
+/-- As `newNIKEPacket_size`: `geom.surbLength = headerLength + nodeIDLength +
+sprpKeyMaterialLength`, and `newNIKESURB`'s `surb` is exactly `hdr ++ id(32) ++
 keyPayload(64)` with `hdr.size = geom.headerLength` (`createHeader`'s own loop-accumulated
-invariant, the same one `newNikePacket_size` relies on). -/
-axiom newNikeSURB_size (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (keyPayload : Vector UInt8 64)
+invariant, the same one `newNIKEPacket_size` relies on). -/
+axiom newNIKESURB_size (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (keyPayload : Vector UInt8 64)
     (filler : ByteArray) (path : Array PathHop) (surb surbKeys : ByteArray)
-    (h : newNikeSURB geom clientPrivateKey keyPayload filler path = .ok (surb, surbKeys)) :
+    (h : newNIKESURB geom clientPrivateKey keyPayload filler path = .ok (surb, surbKeys)) :
     surb.size = geom.surbLength
 
-/-- **`wrapNikeSURB`**: `Sphinx.Sphinx.newSURB` for `nikeSphinxScheme` — `newNikeSURB`, drawing
+/-- **`wrapNIKESURB`**: `Sphinx.Sphinx.newSURB` for `NIKESphinxScheme` — `newNIKESURB`, drawing
 the client's ephemeral key and `keyPayload` (two seeds' worth) from the seed stream instead of
 taking them as bare arguments. -/
-def wrapNikeSURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
+def wrapNIKESURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
     EStateM String SeedStream (Vector UInt8 geom.surbLength × ByteArray) := do
   let clientKey ← nextSeed
   let kp1 ← nextSeed
   let kp2 ← nextSeed
-  match h : newNikeSURB geom clientKey (kp1 ++ kp2) filler path.toArray with
+  match h : newNIKESURB geom clientKey (kp1 ++ kp2) filler path.toArray with
   | .error e => throw e
   | .ok (surb, k) =>
     have hsize : surb.size = geom.surbLength :=
-      newNikeSURB_size geom clientKey (kp1 ++ kp2) filler path.toArray surb k h
+      newNIKESURB_size geom clientKey (kp1 ++ kp2) filler path.toArray surb k h
     pure (⟨surb.data, hsize⟩, k)
 
-/-- **`unwrapNike`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`
+/-- **`unwrapNIKE`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`
 (see that file). Unlike Go, a MAC mismatch reports only an error string, not also the replay
 tag. -/
-def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
+def unwrapNIKE (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
   let geOff := 2
@@ -319,7 +319,7 @@ def unwrapNike (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
 /-- NIKE-Sphinx (X25519) as a `Sphinx.Sphinx` instance. -/
-def nikeSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
+def NIKESphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   State := SeedStream
   PrivateKey := Vector UInt8 32
   Command := RoutingCommand
@@ -329,10 +329,10 @@ def nikeSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   -- Inhabitance only, matching `KEM.Adapter.kemOfNike`'s `stateI`: a constant (hence degenerate)
   -- stream. Honest runs start from `Sphinx.Sphinx.initWith`.
   stateI := ⟨CryptWalker.Sphinx.Sphinx.initWith (fun _ => Vector.replicate 32 0)⟩
-  wrap := wrapNike geom
-  unwrap := unwrapNike geom
-  newSURB := wrapNikeSURB geom
+  wrap := wrapNIKE geom
+  unwrap := unwrapNIKE geom
+  newSURB := wrapNIKESURB geom
   newPacketFromSURB := fun surb payload =>
     CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
 
-end CryptWalker.Sphinx.NikeSphinx
+end CryptWalker.Sphinx.NIKESphinx

@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import CryptWalker.Sphinx.Geometry
-import CryptWalker.Sphinx.NikeSphinx
+import CryptWalker.Sphinx.NIKESphinx
 import CryptWalker.Sphinx.SURB
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
@@ -18,16 +18,16 @@ The payoff: `testdata/sphinx_nike_vectors.json` is
 copy) — 10 real Sphinx packets `sphinx_vectors_test.go`'s `buildVectorSphinx` built with the
 *Go* implementation (`withSURB ∈ {false, true} × nrHops 1..5`, geometry
 `GeometryFromUserForwardPayloadLength(x25519, 103, withSURB, 5)`), each with every intermediate
-`Unwrap` result recorded. This decodes `Packets[0]` and replays `unwrapNike` hop by hop,
+`Unwrap` result recorded. This decodes `Packets[0]` and replays `unwrapNIKE` hop by hop,
 checking that the forwarded packet at each step is *byte-identical* to Go's own `Packets[i+1]`,
 and that the final payload (through `SURB.decryptSURBPayload` for the `withSURB` half) matches.
-Nothing here was built by this Lean port — `unwrapNike` is the only thing on trial. -/
+Nothing here was built by this Lean port — `unwrapNIKE` is the only thing on trial. -/
 
 open Lean
 open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
 open CryptWalker.Sphinx.Commands
-open CryptWalker.Sphinx.NikeSphinx
+open CryptWalker.Sphinx.NIKESphinx
 open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.Util.Bytes (ofVector)
 
@@ -82,7 +82,7 @@ def parseVec (j : Json) : Except String TestVec := do
   let surbKeys ← field j "SurbKeys"
   pure { nodes, path, packets, payload, surb, surbKeys }
 
-/-- Replay `unwrapNike` at every node, checking against the recorded `Packets`/`Payload`. Also,
+/-- Replay `unwrapNIKE` at every node, checking against the recorded `Packets`/`Payload`. Also,
 for the `withSurb` half: `Packets[0]` there *is* Go's `NewPacketFromSURB(Surb, Payload)` output
 (`buildVectorSphinx` builds it that way, and `Payload` is what `DecryptSURBPayload` recovers —
 exactly the plaintext `NewPacketFromSURB` was given), so `newPacketFromSURB` gets checked
@@ -109,7 +109,7 @@ def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   for i in [0:n] do
     if !stop then
       let node := v.nodes[i]!
-      match unwrapNike geom node.privateKey pkt with
+      match unwrapNIKE geom node.privateKey pkt with
       | .error e =>
         IO.eprintln s!"    hop {i}: unwrap failed: {e}"
         ok := false; stop := true

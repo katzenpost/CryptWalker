@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.KemSphinx
+import CryptWalker.Sphinx.KEMSphinx
 import CryptWalker.Sphinx.SURB
 import CryptWalker.NIKE.X25519
 import CryptWalker.Util.newhex
@@ -14,7 +14,7 @@ import CryptWalker.Util.Bytes
 /-!
 # KEM-Sphinx create/unwrap round-trip self-test
 
-As `NikeSphinx.nike_selftest`: `createKEMHeader`'s output can't be cross-checked against Go
+As `NIKESphinx.nike_selftest`: `createKEMHeader`'s output can't be cross-checked against Go
 (the per-hop KEM encapsulations aren't recorded anywhere), so this builds a packet with fresh
 Lean-side keys and confirms `Unwrap` recovers exactly what was built.
 
@@ -26,7 +26,7 @@ open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
 open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Commands
-open CryptWalker.Sphinx.KemSphinx
+open CryptWalker.Sphinx.KEMSphinx
 open CryptWalker.NIKE.X25519 (curve25519 basepointBytes)
 open CryptWalker.Util.Bytes (ofVector)
 
@@ -74,7 +74,7 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
   for i in [0:n] do
     if !stop then
       let node := nodes[i]!
-      match unwrapKem geom node.priv pkt with
+      match unwrapKEM geom node.priv pkt with
       | .error e =>
         IO.eprintln s!"  hop {i}: unwrap failed: {e}"
         ok := false
@@ -135,16 +135,16 @@ def runFillerRound : IO Bool := do
     pure false
   | .ok pkt0 => unwrapAll geom nodes pkt0 payload
 
-/-- The same round as `runRound`, but driven through `Sphinx.Sphinx.wrap`/`kemSphinxScheme`
-instead of calling `newKEMPacket` directly. `wrapKem` draws one seed *per hop*, so the stream
-must actually vary with the counter — unlike `NikeSphinx`'s version of this check, which draws
+/-- The same round as `runRound`, but driven through `Sphinx.Sphinx.wrap`/`KEMSphinxScheme`
+instead of calling `newKEMPacket` directly. `wrapKEM` draws one seed *per hop*, so the stream
+must actually vary with the counter — unlike `NIKESphinx`'s version of this check, which draws
 only one seed total and can get away with a constant stream. -/
 def runAbstractWrapRound (geom : Geometry) : IO Bool := do
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomVector geom.forwardPayloadLength
-  let scheme := kemSphinxScheme geom
+  let scheme := KEMSphinxScheme geom
   let stream := fun i => seeds[i]!
   match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Sphinx.initWith stream) with
   | .error e _ =>
@@ -153,13 +153,13 @@ def runAbstractWrapRound (geom : Geometry) : IO Bool := do
   | .ok pkt _ => unwrapAll geom nodes (ofVector pkt) (ofVector payload)
 
 /-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
-round-trip through `unwrapKem`/`SURB.decryptSURBPayload`. `wrapKemSURB` draws one seed per hop
+round-trip through `unwrapKEM`/`SURB.decryptSURBPayload`. `wrapKEMSURB` draws one seed per hop
 plus two more (`keyPayload`), so the stream needs `nodes.size + 2` distinct entries. -/
 def runAbstractSURBRound (geom : Geometry) : IO Bool := do
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes true
   let seeds ← (List.range (nodes.size + 2)).toArray.mapM (fun _ => randomVector 32)
-  let scheme := kemSphinxScheme geom
+  let scheme := KEMSphinxScheme geom
   let stream := fun i => seeds[i]!
   match scheme.newSURB path.toList ByteArray.empty (CryptWalker.Sphinx.Sphinx.initWith stream) with
   | .error e _ =>
@@ -183,7 +183,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapKem geom node.priv pkt with
+          match unwrapKEM geom node.priv pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -210,7 +210,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
                     ok := false
       pure ok
 
-/-- Full SURB round trip, as `NikeSphinx.nike_selftest`'s: build a SURB (`newKemSURB`), use it
+/-- Full SURB round trip, as `NIKESphinx.nike_selftest`'s: build a SURB (`newKEMSURB`), use it
 to build a reply packet (`SURB.newPacketFromSURB`), unwrap that reply through every hop, and
 confirm `SURB.decryptSURBPayload` recovers the original payload. -/
 def runSURBRound (geom : Geometry) : IO Bool := do
@@ -219,9 +219,9 @@ def runSURBRound (geom : Geometry) : IO Bool := do
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let kp1 ← randomVector 32
   let kp2 ← randomVector 32
-  match newKemSURB geom seeds (kp1 ++ kp2) ByteArray.empty path with
+  match newKEMSURB geom seeds (kp1 ++ kp2) ByteArray.empty path with
   | .error e =>
-    IO.eprintln s!"newKemSURB failed: {e}"
+    IO.eprintln s!"newKEMSURB failed: {e}"
     pure false
   | .ok (surb, surbKeys) =>
     if surb.size ≠ geom.surbLength then
@@ -245,7 +245,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapKem geom node.priv pkt with
+          match unwrapKEM geom node.priv pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true

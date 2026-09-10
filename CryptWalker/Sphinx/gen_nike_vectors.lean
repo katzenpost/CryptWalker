@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Lean.Data.Json
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.NikeSphinx
+import CryptWalker.Sphinx.NIKESphinx
 import CryptWalker.Sphinx.SURB
 import CryptWalker.NIKE.X25519
 import CryptWalker.Util.newhex
@@ -16,8 +16,8 @@ import CryptWalker.Util.Bytes
 # NIKE-Sphinx packet-creation vectors, for cross-checking against Go
 
 The reverse direction of `nike_vectors_test`: that file replays *Go*-built packets through
-`unwrapNike`, checking the Lean port's unwrap side against real output. Nothing checks the
-creation side (`createHeader`/`newNikePacket`/`newNikeSURB`) against an independent
+`unwrapNIKE`, checking the Lean port's unwrap side against real output. Nothing checks the
+creation side (`createHeader`/`newNIKEPacket`/`newNIKESURB`) against an independent
 implementation — `nike_selftest` only confirms Lean agrees with itself. This builds packets with
 the Lean port's creation side and writes them out in the same `hexSphinxTest` JSON shape
 `sphinx_vectors_test.go` uses (`Nodes`/`Path`/`Packets`/`Payload`/`Surb`/`SurbKeys`, all hex), so
@@ -29,7 +29,7 @@ open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Types
-open CryptWalker.Sphinx.NikeSphinx
+open CryptWalker.Sphinx.NIKESphinx
 open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.NIKE.X25519 (curve25519 basepointBytes)
 open CryptWalker.Util.Bytes (ofVector)
@@ -94,8 +94,8 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
     let clientSeed ← randomVector 32
     let kp1 ← randomVector 32
     let kp2 ← randomVector 32
-    match newNikeSURB geom clientSeed (kp1 ++ kp2) filler path with
-    | .error e => throw (IO.userError s!"newNikeSURB failed: {e}")
+    match newNIKESURB geom clientSeed (kp1 ++ kp2) filler path with
+    | .error e => throw (IO.userError s!"newNIKESURB failed: {e}")
     | .ok (s, k) =>
       surb := s; surbKeys := k
       match newPacketFromSURB geom surb payload with
@@ -106,8 +106,8 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
         pkt0 := p
   else
     let clientPriv ← randomVector 32
-    match newNikePacket geom clientPriv filler path payload with
-    | .error e => throw (IO.userError s!"newNikePacket failed: {e}")
+    match newNIKEPacket geom clientPriv filler path payload with
+    | .error e => throw (IO.userError s!"newNIKEPacket failed: {e}")
     | .ok p => pkt0 := p
 
   let mut packets : Array ByteArray := #[pkt0]
@@ -115,7 +115,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   let mut finalPayload : ByteArray := ByteArray.empty
   for i in [0:nrHops] do
     let node := nodes[i]!
-    match unwrapNike geom node.priv pkt with
+    match unwrapNIKE geom node.priv pkt with
     | .error e => throw (IO.userError s!"hop {i}: unwrap failed: {e}")
     | .ok (payloadOut, _replayTag, _cmds, forwardPkt) =>
       if i < nrHops - 1 then

@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Lean.Data.Json
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.KemSphinx
+import CryptWalker.Sphinx.KEMSphinx
 import CryptWalker.Sphinx.SURB
 import CryptWalker.NIKE.X25519
 import CryptWalker.Util.newhex
@@ -16,7 +16,7 @@ import CryptWalker.Util.Bytes
 # KEM-Sphinx packet-creation vectors, for cross-checking against Go
 
 As `gen_nike_vectors`: builds packets with the Lean port's creation side
-(`createKEMHeader`/`newKEMPacket`/`newKemSURB`) and writes them out in the same `hexSphinxTest`
+(`createKEMHeader`/`newKEMPacket`/`newKEMSURB`) and writes them out in the same `hexSphinxTest`
 JSON shape `generate_kem/main.go` uses, so katzenpost's own `Unwrap` can check them. A
 `kemX25519` keypair *is* an X25519 keypair, so node generation is identical to
 `gen_nike_vectors`'s. -/
@@ -26,7 +26,7 @@ open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Types
-open CryptWalker.Sphinx.KemSphinx
+open CryptWalker.Sphinx.KEMSphinx
 open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.NIKE.X25519 (curve25519 basepointBytes)
 open CryptWalker.Util.Bytes (ofVector)
@@ -75,7 +75,7 @@ private def hexPathHop (h : PathHop) : Json :=
               ("PublicKey", Json.str (byteArrayToHex (ofVector h.publicKey))),
               ("Commands", Json.arr (h.commands.toArray.map (fun c => Json.str (byteArrayToHex c.toBytes))))]
 
-/-- As `gen_nike_vectors.buildVec`, over `createKEMHeader`/`newKEMPacket`/`newKemSURB`: one
+/-- As `gen_nike_vectors.buildVec`, over `createKEMHeader`/`newKEMPacket`/`newKEMSURB`: one
 ephemeral seed per hop instead of one client private key. -/
 def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   let nodes ← (List.range nrHops).toArray.mapM (fun _ => newNode)
@@ -89,8 +89,8 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   if withSURB then
     let kp1 ← randomVector 32
     let kp2 ← randomVector 32
-    match newKemSURB geom seeds (kp1 ++ kp2) filler path with
-    | .error e => throw (IO.userError s!"newKemSURB failed: {e}")
+    match newKEMSURB geom seeds (kp1 ++ kp2) filler path with
+    | .error e => throw (IO.userError s!"newKEMSURB failed: {e}")
     | .ok (s, k) =>
       surb := s; surbKeys := k
       match newPacketFromSURB geom surb payload with
@@ -109,7 +109,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   let mut finalPayload : ByteArray := ByteArray.empty
   for i in [0:nrHops] do
     let node := nodes[i]!
-    match unwrapKem geom node.priv pkt with
+    match unwrapKEM geom node.priv pkt with
     | .error e => throw (IO.userError s!"hop {i}: unwrap failed: {e}")
     | .ok (payloadOut, _replayTag, _cmds, forwardPkt) =>
       if i < nrHops - 1 then

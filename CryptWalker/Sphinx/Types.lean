@@ -9,8 +9,8 @@ namespace CryptWalker.Sphinx.Types
 
 open CryptWalker.Sphinx.Commands
 
-/-- A hop in a Sphinx path: node ID, its public key (an X25519 public key for `NikeSphinx`, a
-`kemX25519` ciphertext-target public key for `KemSphinx` — both `Vector UInt8 32`), and its
+/-- A hop in a Sphinx path: node ID, its public key (an X25519 public key for `NIKESphinx`, a
+`kemX25519` ciphertext-target public key for `KEMSphinx` — both `Vector UInt8 32`), and its
 non-`NextNodeHop` routing commands. Shared between the two variants, as Go's `PathHop` is (one
 struct with both a `NIKEPublicKey` and a `KEMPublicKey` field, only one populated per use) —
 concretely one field here since a given path is never both at once. -/

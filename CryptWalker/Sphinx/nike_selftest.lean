@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.NikeSphinx
+import CryptWalker.Sphinx.NIKESphinx
 import CryptWalker.Sphinx.SURB
 import CryptWalker.NIKE.X25519
 import CryptWalker.Util.newhex
@@ -15,11 +15,11 @@ import CryptWalker.Util.Bytes
 # NIKE-Sphinx create/unwrap round-trip self-test
 
 `createHeader`'s exact output can't be cross-checked against Go (the client's ephemeral
-randomness isn't recorded in katzenpost's vectors — see `NikeSphinx`'s module doc), so this
+randomness isn't recorded in katzenpost's vectors — see `NIKESphinx`'s module doc), so this
 checks it the only way available: build a packet with fresh Lean-side keys, then `Unwrap` it
 hop by hop with the system CSPRNG, and confirm the commands and final payload come back exactly
 as built. `Crypto.aez_test`/`Crypto.test`/`commands_test` already pin every primitive this
-exercises against Go; what's new here is that `createHeader`/`unwrapNike` compose them the same
+exercises against Go; what's new here is that `createHeader`/`unwrapNIKE` compose them the same
 way `sphinx.go` does.
 
 Runs at several hop counts, all equal to the geometry's `nrHops` (so no filler padding is
@@ -29,7 +29,7 @@ open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
 open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Commands
-open CryptWalker.Sphinx.NikeSphinx
+open CryptWalker.Sphinx.NIKESphinx
 open CryptWalker.NIKE.X25519 (curve25519 basepointBytes)
 open CryptWalker.Util.Bytes (ofVector)
 
@@ -79,7 +79,7 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
   for i in [0:n] do
     if !stop then
       let node := nodes[i]!
-      match unwrapNike geom node.priv pkt with
+      match unwrapNIKE geom node.priv pkt with
       | .error e =>
         IO.eprintln s!"  hop {i}: unwrap failed: {e}"
         ok := false
@@ -118,9 +118,9 @@ def runRound (geom : Geometry) : IO Bool := do
   let path ← buildPath nodes
   let clientPriv ← randomVector 32
   let payload ← randomBytes geom.forwardPayloadLength
-  match newNikePacket geom clientPriv ByteArray.empty path payload with
+  match newNIKEPacket geom clientPriv ByteArray.empty path payload with
   | .error e =>
-    IO.eprintln s!"newNikePacket failed: {e}"
+    IO.eprintln s!"newNIKEPacket failed: {e}"
     pure false
   | .ok pkt0 =>
     if pkt0.size ≠ geom.packetLength then
@@ -138,21 +138,21 @@ def runFillerRound : IO Bool := do
   let clientPriv ← randomVector 32
   let payload ← randomBytes geom.forwardPayloadLength
   let filler ← randomBytes ((geom.nrHops - 3) * geom.perHopRoutingInfoLength)
-  match newNikePacket geom clientPriv filler path payload with
+  match newNIKEPacket geom clientPriv filler path payload with
   | .error e =>
-    IO.eprintln s!"filler round: newNikePacket failed: {e}"
+    IO.eprintln s!"filler round: newNIKEPacket failed: {e}"
     pure false
   | .ok pkt0 => unwrapAll geom nodes pkt0 payload
 
-/-- The same round as `runRound`, but driven through `Sphinx.Sphinx.wrap`/`nikeSphinxScheme`
-instead of calling `newNikePacket` directly — confirms the abstract-interface unification
-actually produces a packet `unwrapNike` accepts, not just that it typechecks. -/
+/-- The same round as `runRound`, but driven through `Sphinx.Sphinx.wrap`/`NIKESphinxScheme`
+instead of calling `newNIKEPacket` directly — confirms the abstract-interface unification
+actually produces a packet `unwrapNIKE` accepts, not just that it typechecks. -/
 def runAbstractWrapRound (geom : Geometry) : IO Bool := do
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seed ← randomVector 32
   let payload ← randomVector geom.forwardPayloadLength
-  let scheme := nikeSphinxScheme geom
+  let scheme := NIKESphinxScheme geom
   match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Sphinx.initWith (fun _ => seed)) with
   | .error e _ =>
     IO.eprintln s!"abstract wrap failed: {e}"
@@ -160,12 +160,12 @@ def runAbstractWrapRound (geom : Geometry) : IO Bool := do
   | .ok pkt _ => unwrapAll geom nodes (ofVector pkt) (ofVector payload)
 
 /-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
-round-trip through `unwrapNike`/`SURB.decryptSURBPayload`, not just that they typecheck. -/
+round-trip through `unwrapNIKE`/`SURB.decryptSURBPayload`, not just that they typecheck. -/
 def runAbstractSURBRound (geom : Geometry) : IO Bool := do
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes true
   let seeds ← (List.range 3).toArray.mapM (fun _ => randomVector 32)
-  let scheme := nikeSphinxScheme geom
+  let scheme := NIKESphinxScheme geom
   let stream := fun i => seeds[i]!
   match scheme.newSURB path.toList ByteArray.empty (CryptWalker.Sphinx.Sphinx.initWith stream) with
   | .error e _ =>
@@ -189,7 +189,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapNike geom node.priv pkt with
+          match unwrapNIKE geom node.priv pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -216,7 +216,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
                     ok := false
       pure ok
 
-/-- Full SURB round trip: build a SURB (`newNikeSURB`), use it to build a reply packet
+/-- Full SURB round trip: build a SURB (`newNIKESURB`), use it to build a reply packet
 (`SURB.newPacketFromSURB`), unwrap that reply through every hop, and confirm
 `SURB.decryptSURBPayload` recovers the original payload — the creation-side counterpart to the
 byte-exact `newPacketFromSURB`/`decryptSURBPayload` checks in `nike_vectors_test` (which can
@@ -227,9 +227,9 @@ def runSURBRound (geom : Geometry) : IO Bool := do
   let clientSeed ← randomVector 32
   let kp1 ← randomVector 32
   let kp2 ← randomVector 32
-  match newNikeSURB geom clientSeed (kp1 ++ kp2) ByteArray.empty path with
+  match newNIKESURB geom clientSeed (kp1 ++ kp2) ByteArray.empty path with
   | .error e =>
-    IO.eprintln s!"newNikeSURB failed: {e}"
+    IO.eprintln s!"newNIKESURB failed: {e}"
     pure false
   | .ok (surb, surbKeys) =>
     if surb.size ≠ geom.surbLength then
@@ -253,7 +253,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapNike geom node.priv pkt with
+          match unwrapNIKE geom node.priv pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true

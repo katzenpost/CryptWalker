@@ -9,7 +9,7 @@ import CryptWalker.Sphinx.Commands
 import CryptWalker.Sphinx.Types
 import CryptWalker.Sphinx.Sphinx
 import CryptWalker.Sphinx.Common
-import CryptWalker.Sphinx.NikeSphinx
+import CryptWalker.Sphinx.NIKESphinx
 import CryptWalker.Sphinx.SURB
 import CryptWalker.Sphinx.Crypto.Stream
 import CryptWalker.Sphinx.Crypto.AEZ
@@ -19,14 +19,14 @@ import CryptWalker.KEM.Schemes
 import CryptWalker.Hash.Sha512
 import CryptWalker.Util.Bytes
 
-namespace CryptWalker.Sphinx.KemSphinx
+namespace CryptWalker.Sphinx.KEMSphinx
 
 open CryptWalker.Sphinx.Constants
 open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Common
-open CryptWalker.Sphinx.NikeSphinx (HopKeys deriveHopKeys)
+open CryptWalker.Sphinx.NIKESphinx (HopKeys deriveHopKeys)
 open CryptWalker.Sphinx.Crypto.Stream (keystream)
 open CryptWalker.Sphinx.Crypto.AEZ (sprpEncrypt sprpDecrypt)
 open CryptWalker.NIKE.X25519 (PublicKey PrivateKey)
@@ -38,10 +38,10 @@ open CryptWalker.Util.Bytes (ofVector)
 /-! # KEM-Sphinx (X25519, via the NIKE→KEM adapter)
 
 Port of `kemsphinx.go`, concrete to `KEM.kemX25519` (`sha256-v1` PRF over X25519). Differences
-from `NikeSphinx`, per `kemsphinx.go`/`docs/specs/kemsphinx.md`:
+from `NIKESphinx`, per `kemsphinx.go`/`docs/specs/kemsphinx.md`:
 
 * One KEM encapsulation per hop, independent of the others — no blinding chain, so no
-  `HopKeys.blindingFactor` (reused from `NikeSphinx` regardless, unused, matching how Go reuses
+  `HopKeys.blindingFactor` (reused from `NIKESphinx` regardless, unused, matching how Go reuses
   `crypto.PacketKeys` with `BlindingFactor = nil` rather than a separate type).
 * The header's group-element field becomes a KEM ciphertext (32 bytes here); every non-terminal
   hop's per-hop routing-info block embeds the *next* hop's ciphertext in its last 32 bytes,
@@ -49,7 +49,7 @@ from `NikeSphinx`, per `kemsphinx.go`/`docs/specs/kemsphinx.md`:
 * Forwarding just copies the embedded next-hop ciphertext into the group-element slot — no
   `Blind` step, since there is no group element to re-blind.
 
-`ctSize` (32) is `kemX25519`'s `ciphertextSize` — hardcoded here the same way `NikeSphinx`
+`ctSize` (32) is `kemX25519`'s `ciphertextSize` — hardcoded here the same way `NIKESphinx`
 hardcodes X25519's 32-byte public key size, rather than threaded from `KEM.KEM`. -/
 
 private def ctSize : Nat := 32
@@ -67,7 +67,7 @@ private def decap (sk ct : Vector UInt8 32) : Option (Vector UInt8 32) :=
   | .error _ _ => none
 
 /-- **`createKEMHeader`**. `ephemeralSeeds` (one per hop) plays the role Go's `io.Reader` does
-inside each `Encapsulate` call; `filler` is as in `NikeSphinx.createHeader`. -/
+inside each `Encapsulate` call; `filler` is as in `NIKESphinx.createHeader`. -/
 def createKEMHeader (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray)
     (path : Array PathHop) : Except String (ByteArray × Array SPRPKey) := do
   let nrHops := path.size
@@ -86,7 +86,7 @@ def createKEMHeader (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
       kemElements := kemElements.push ct
       keys := keys.push (deriveHopKeys ss)
 
-  -- Per-hop routing-info keystream and encrypted padding, as in NikeSphinx.
+  -- Per-hop routing-info keystream and encrypted padding, as in NIKESphinx.
   let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
   let mut riKeyStream : Array ByteArray := #[]
   let mut riPadding : Array ByteArray := #[]
@@ -140,7 +140,7 @@ def newKEMPacket (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (f
     b := sprpEncrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
-/-- As `NikeSphinx.newNikePacket_size`. -/
+/-- As `NIKESphinx.newNIKEPacket_size`. -/
 axiom newKEMPacket_size (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
     (h : newKEMPacket geom ephemeralSeeds filler path payload = .ok pkt)
@@ -149,9 +149,9 @@ axiom newKEMPacket_size (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 
 
 open CryptWalker.Sphinx.Sphinx (SeedStream nextSeed)
 
-/-- **`wrapKem`**: `Sphinx.Sphinx.wrap` for `kemSphinxScheme` — `newKEMPacket`, drawing one
+/-- **`wrapKEM`**: `Sphinx.Sphinx.wrap` for `KEMSphinxScheme` — `newKEMPacket`, drawing one
 ephemeral seed per hop from the seed stream instead of taking them as a bare array. -/
-def wrapKem (geom : Geometry) (path : List PathHop) (filler : ByteArray)
+def wrapKEM (geom : Geometry) (path : List PathHop) (filler : ByteArray)
     (payload : Vector UInt8 geom.forwardPayloadLength) :
     EStateM String SeedStream (Vector UInt8 geom.packetLength) := do
   let seeds ← path.toArray.mapM (fun _ => nextSeed)
@@ -162,8 +162,8 @@ def wrapKem (geom : Geometry) (path : List PathHop) (filler : ByteArray)
       newKEMPacket_size geom seeds filler path.toArray (ofVector payload) pkt h (by simp)
     pure ⟨pkt.data, hsize⟩
 
-/-- **`newKemSURB`**. As `NikeSphinx.newNikeSURB`, over `createKEMHeader`. -/
-def newKemSURB (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (keyPayload : Vector UInt8 64)
+/-- **`newKEMSURB`**. As `NIKESphinx.newNIKESURB`, over `createKEMHeader`. -/
+def newKEMSURB (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (keyPayload : Vector UInt8 64)
     (filler : ByteArray) (path : Array PathHop) : Except String (ByteArray × ByteArray) := do
   let (hdr, sprpKeys) ← createKEMHeader geom ephemeralSeeds filler path
   let mut k : ByteArray := ByteArray.empty
@@ -174,30 +174,30 @@ def newKemSURB (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (key
   let surb := hdr ++ ofVector (path[0]!).id ++ ofVector keyPayload
   pure (surb, k)
 
-/-- As `NikeSphinx.newNikeSURB_size`. -/
-axiom newKemSURB_size (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (keyPayload : Vector UInt8 64)
+/-- As `NIKESphinx.newNIKESURB_size`. -/
+axiom newKEMSURB_size (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (keyPayload : Vector UInt8 64)
     (filler : ByteArray) (path : Array PathHop) (surb surbKeys : ByteArray)
-    (h : newKemSURB geom ephemeralSeeds keyPayload filler path = .ok (surb, surbKeys)) :
+    (h : newKEMSURB geom ephemeralSeeds keyPayload filler path = .ok (surb, surbKeys)) :
     surb.size = geom.surbLength
 
-/-- **`wrapKemSURB`**: `Sphinx.Sphinx.newSURB` for `kemSphinxScheme` — draws one ephemeral seed
+/-- **`wrapKEMSURB`**: `Sphinx.Sphinx.newSURB` for `KEMSphinxScheme` — draws one ephemeral seed
 per hop plus `keyPayload` (two seeds' worth) from the seed stream. -/
-def wrapKemSURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
+def wrapKEMSURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
     EStateM String SeedStream (Vector UInt8 geom.surbLength × ByteArray) := do
   let seeds ← path.toArray.mapM (fun _ => nextSeed)
   let kp1 ← nextSeed
   let kp2 ← nextSeed
-  match h : newKemSURB geom seeds (kp1 ++ kp2) filler path.toArray with
+  match h : newKEMSURB geom seeds (kp1 ++ kp2) filler path.toArray with
   | .error e => throw e
   | .ok (surb, k) =>
     have hsize : surb.size = geom.surbLength :=
-      newKemSURB_size geom seeds (kp1 ++ kp2) filler path.toArray surb k h
+      newKEMSURB_size geom seeds (kp1 ++ kp2) filler path.toArray surb k h
     pure (⟨surb.data, hsize⟩, k)
 
-/-- **`unwrapKem`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`.
+/-- **`unwrapKEM`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`.
 Forwarding copies the next-hop ciphertext straight out of the decrypted routing-info block —
-unlike `unwrapNike`, no `Blind` step, since there is no group element to re-blind. -/
-def unwrapKem (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
+unlike `unwrapNIKE`, no `Blind` step, since there is no group element to re-blind. -/
+def unwrapKEM (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
   let geOff := 2
@@ -294,7 +294,7 @@ def unwrapKem (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
 /-- KEM-Sphinx (X25519 via the NIKE→KEM adapter) as a `Sphinx.Sphinx` instance. -/
-def kemSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
+def KEMSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   State := SeedStream
   PrivateKey := Vector UInt8 32
   Command := RoutingCommand
@@ -302,10 +302,10 @@ def kemSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   payloadLength := geom.forwardPayloadLength
   surbLength := geom.surbLength
   stateI := ⟨CryptWalker.Sphinx.Sphinx.initWith (fun _ => Vector.replicate 32 0)⟩
-  wrap := wrapKem geom
-  unwrap := unwrapKem geom
-  newSURB := wrapKemSURB geom
+  wrap := wrapKEM geom
+  unwrap := unwrapKEM geom
+  newSURB := wrapKEMSURB geom
   newPacketFromSURB := fun surb payload =>
     CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
 
-end CryptWalker.Sphinx.KemSphinx
+end CryptWalker.Sphinx.KEMSphinx

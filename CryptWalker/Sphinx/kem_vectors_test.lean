@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import CryptWalker.Sphinx.Geometry
-import CryptWalker.Sphinx.KemSphinx
+import CryptWalker.Sphinx.KEMSphinx
 import CryptWalker.Sphinx.SURB
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
@@ -20,13 +20,13 @@ which copy) — 10 real KEM-Sphinx packets built by *Go*'s `NewKEMSphinx` with `
 `KEMGeometryFromUserForwardPayloadLength(k, 103, withSURB, 5)`). Unlike the NIKE vectors, this
 file didn't already exist in katzenpost — `core/sphinx/testvectors/cmd/generate_kem` built it,
 structurally parallel to `sphinx_vectors_test.go`'s NIKE generator. This decodes `Packets[0]`
-and replays `unwrapKem` hop by hop, the same way. -/
+and replays `unwrapKEM` hop by hop, the same way. -/
 
 open Lean
 open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
 open CryptWalker.Sphinx.Commands
-open CryptWalker.Sphinx.KemSphinx
+open CryptWalker.Sphinx.KEMSphinx
 open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.Util.Bytes (ofVector)
 
@@ -81,7 +81,7 @@ def parseVec (j : Json) : Except String TestVec := do
   let surbKeys ← field j "SurbKeys"
   pure { nodes, path, packets, payload, surb, surbKeys }
 
-/-- Replay `unwrapKem` at every node, checking against the recorded `Packets`/`Payload`. Also,
+/-- Replay `unwrapKEM` at every node, checking against the recorded `Packets`/`Payload`. Also,
 for the `withSurb` half: `Packets[0]` there is Go's `NewPacketFromSURB(Surb, Payload)` output
 (as `nike_vectors_test`), so `newPacketFromSURB` gets checked byte-for-byte against Go here too. -/
 def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
@@ -106,7 +106,7 @@ def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   for i in [0:n] do
     if !stop then
       let node := v.nodes[i]!
-      match unwrapKem geom node.privateKey pkt with
+      match unwrapKEM geom node.privateKey pkt with
       | .error e =>
         IO.eprintln s!"    hop {i}: unwrap failed: {e}"
         ok := false; stop := true
