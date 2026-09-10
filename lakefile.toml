@@ -7,14 +7,21 @@ autoImplicit = false
 relaxedAutoImplicit = false
 
 [[require]]
-name = "mathlib"
-scope = "leanprover-community"
-rev = "v4.33.0-rc1"
-
-[[require]]
 name = "Bench"
 git = "https://github.com/david415/bench"
 rev = "main"
+
+[[require]]
+name = "VCVio"
+git = "https://github.com/dtumad/VCV-io.git"
+rev = "main"
+
+# Declared last: VCVio pins mathlib v4.33.1, so this direct requirement (matching that pin)
+# must come after VCVio's for Lake's reverse-declaration-order precedence to keep it authoritative.
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.33.1"
 
 [[lean_lib]]
 name = "CryptWalker"
