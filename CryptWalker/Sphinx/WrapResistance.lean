@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import VCVio.CryptoFoundations.HardnessAssumptions.DiffieHellman
 import CryptWalker.NIKE.X25519
+import CryptWalker.Sphinx.Sphinx
 
 /-! # Wrap-resistance (Danezis–Goldberg §4.3)
 
@@ -16,10 +17,11 @@ pair requires `α^{h_b(α, α^x)} = α′`, and since `h_b` is a random oracle, 
 so any single query hits the specific target `α′` with probability exactly `1/(q−1)`, and `c`
 queries give at most `c/(q−1)` by a union bound.
 
-`uniformHit_eq` below is that argument stripped of everything Sphinx-specific: a uniformly
-sampled `b` composed with *any* bijection lands on a fixed target with probability exactly
-`1/|domain|`, regardless of what the bijection is. `blind_wrapResistance` is the single-query
-instance of that fact for `X25519.lean`'s group (the `AddCommGroup Point` from
+`CryptWalker.Sphinx.Sphinx.uniformHit_eq` is that argument stripped of everything Sphinx-specific:
+a uniformly sampled `b` composed with *any* bijection lands on a fixed target with probability
+exactly `1/|domain|`, regardless of what the bijection is — it's also what `BlindedScheme`'s
+`wrap_resistant` field reduces to for every instance. `blind_wrapResistance` here is the
+single-query instance of that fact for `X25519.lean`'s group (the `AddCommGroup Point` from
 `Mathlib`'s `WeierstrassCurve.Affine.Point`, not a `Module`/field-of-scalars setup — Curve25519's
 scalars are plain `ℕ`-multiples, which every `AddCommGroup` already carries).
 
@@ -30,6 +32,7 @@ argument repeated `c` times under a union bound, not built here.
 `NIKESphinx.lean`'s `blind`, one rewrite away from `X25519.dh_commutes`'s picture, modulo going
 through `X25519_montgomery_ladder`'s byte-level ladder (`NIKESphinx` runs the ladder, whose own
 consistency with the group law is `curve25519_commutes`, itself an axiom — not re-derived here).
+`NIKESphinx.lean`'s `NIKESphinxBlinded` is the corresponding `BlindedScheme` instance.
 **KEM-Sphinx has no analogue.** Its per-hop step is an independent KEM encapsulation, not a
 group element re-blinded (`KEMSphinx.lean`: "no blinding chain, so no `Blind` step, since there
 is no group element to re-blind"). The corresponding property there would bound forging a KEM
@@ -39,24 +42,7 @@ integrity, not about this group action, and not formalized here. -/
 namespace CryptWalker.Sphinx.WrapResistance
 
 open OracleComp OracleSpec ENNReal
-
-/-! ## The general bound -/
-
-/-- A uniformly sampled `b : F`, pushed through a bijection `act`, hits any fixed `target`
-with probability exactly `1/|F|`. This is the whole mathematical content of wrap-resistance's
-`c = 1` case: `act` stands for "blind by this freshly drawn factor," and `target` is the header
-the adversary is trying to forge. -/
-theorem uniformHit_eq {F G : Type} [Fintype F] [SampleableType F] [DecidableEq G]
-    {act : F → G} (hact : Function.Bijective act) (target : G) :
-    Pr[= true | ($ᵗ F) >>= fun b => pure (decide (act b = target))] =
-      (Fintype.card F : ℝ≥0∞)⁻¹ := by
-  obtain ⟨b₀, rfl⟩ := hact.surjective target
-  simp only [probOutput_bind_eq_tsum, probOutput_uniformSample, probOutput_pure]
-  rw [tsum_fintype, Finset.sum_eq_single b₀]
-  · simp
-  · intro b _ hne
-    simp [show act b ≠ act b₀ from fun heq => hne (hact.injective heq)]
-  · exact absurd (Finset.mem_univ b₀)
+open CryptWalker.Sphinx.Sphinx (uniformHit_eq)
 
 /-! ## Sphinx's blinding step, for X25519 -/
 

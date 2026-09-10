@@ -15,6 +15,8 @@ import CryptWalker.Sphinx.Crypto.ChaCha20
 import CryptWalker.Sphinx.Crypto.Stream
 import CryptWalker.Sphinx.Crypto.AEZ
 import CryptWalker.NIKE.X25519_montgomery_ladder
+import CryptWalker.NIKE.X25519
+import CryptWalker.Sphinx.WrapResistance
 import CryptWalker.Hash.Sha512
 import CryptWalker.Util.Bytes
 
@@ -30,6 +32,8 @@ open CryptWalker.Sphinx.Crypto.ChaCha20 (keystream32)
 open CryptWalker.Sphinx.Crypto.Stream (keystream)
 open CryptWalker.Sphinx.Crypto.AEZ (sprpEncrypt sprpDecrypt)
 open CryptWalker.NIKE.X25519_montgomery_ladder (curve25519 basepointBytes)
+open CryptWalker.NIKE.X25519 (Point liftX)
+open CryptWalker.NIKE.X25519Common (toField)
 open CryptWalker.Hash.Sha512 (sha512_256)
 open CryptWalker.Util.Bytes (ofVector)
 
@@ -351,5 +355,21 @@ def NIKESphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   newPacketFromSURB := fun surb payload =>
     CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
   unwrap_complete := wrapNIKE_unwrapNIKE_complete geom
+
+/-- **`NIKESphinxScheme`'s `BlindedScheme` witness** — `Sphinx.Sphinx.wrap_resistant`, for real.
+`Envelope` is the header's group element: `parseEnvelope` reads the same 32 bytes at offset 2
+`unwrapNIKE` does (`geOff`/`riOff` above), then lifts them to a `Point` via `liftX`, defaulting
+to the identity on failure — which a well-formed header, whose element always came from an
+honest `dh`/`blind` chain, never triggers. `Factor` is left as `Fin N`, matching
+`WrapResistance.blind_wrapResistance`: this instance needs no bijectivity proof to construct
+(`wrap_resistant` is `BlindedScheme`'s free default), only whoever *uses* `wrap_resistant` needs
+to supply it, exactly as `blind_wrapResistance` already does. -/
+def NIKESphinxBlinded (geom : Geometry) (N : ℕ) [NeZero N] :
+    CryptWalker.Sphinx.Sphinx.BlindedScheme where
+  toSphinx := NIKESphinxScheme geom
+  Envelope := Point
+  parseEnvelope := fun pkt => (liftX (toField (toVec32 ((ofVector pkt).extract 2 34)))).getD 0
+  Factor := Fin N
+  blind := fun b P => (b : ℕ) • P
 
 end CryptWalker.Sphinx.NIKESphinx
