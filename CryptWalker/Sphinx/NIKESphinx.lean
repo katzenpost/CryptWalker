@@ -165,7 +165,7 @@ axiom newNIKEPacket_size (geom : Geometry) (clientPrivateKey : Vector UInt8 32) 
     (hpay : payload.size = geom.forwardPayloadLength) :
     pkt.size = geom.packetLength
 
-open CryptWalker.Sphinx.Sphinx (SeedStream nextSeed)
+open CryptWalker.Sphinx.Sphinx (SeedStream nextSeed unwrapChainAux)
 
 /-- **`wrapNIKE`**: `Sphinx.Sphinx.wrap` for `NIKESphinxScheme` — `newNIKEPacket`, drawing the
 client's ephemeral private key from the seed stream instead of taking it as a bare argument. -/
@@ -318,6 +318,21 @@ def unwrapNIKE (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
+/-- **Completeness**: `NIKESphinxScheme`'s witness for `Sphinx.Sphinx.unwrap_complete` — the
+claim that Sphinx onion-decrypts correctly, checked empirically by every vector and self-test
+round trip (`nike_vectors_test`; `nike_selftest`'s `runRound`/`runAbstractWrapRound`/
+`runAbstractSURBRound`), but not proved here for the reason the size axioms above aren't: real
+work, through `createHeader`'s blinding chain and `unwrapNIKE`'s AEZ/HMAC composition, out of
+scope for this pass. -/
+axiom wrapNIKE_unwrapNIKE_complete (geom : Geometry) (path : List PathHop)
+    (privKeys : List (Vector UInt8 32)) (filler : ByteArray)
+    (payload : Vector UInt8 geom.forwardPayloadLength) (st : SeedStream)
+    (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream) :
+    path ≠ [] →
+    path.map (·.publicKey) = privKeys.map (fun sk => curve25519 sk basepointBytes) →
+    wrapNIKE geom path filler payload st = .ok pkt st' →
+    unwrapChainAux (unwrapNIKE geom) privKeys (ofVector pkt) = .ok (some (ofVector payload))
+
 /-- NIKE-Sphinx (X25519) as a `Sphinx.Sphinx` instance. -/
 def NIKESphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   State := SeedStream
@@ -329,10 +344,12 @@ def NIKESphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   -- Inhabitance only, matching `KEM.Adapter.kemOfNike`'s `stateI`: a constant (hence degenerate)
   -- stream. Honest runs start from `Sphinx.Sphinx.initWith`.
   stateI := ⟨CryptWalker.Sphinx.Sphinx.initWith (fun _ => Vector.replicate 32 0)⟩
+  derivePublicKey := fun sk => curve25519 sk basepointBytes
   wrap := wrapNIKE geom
   unwrap := unwrapNIKE geom
   newSURB := wrapNIKESURB geom
   newPacketFromSURB := fun surb payload =>
     CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
+  unwrap_complete := wrapNIKE_unwrapNIKE_complete geom
 
 end CryptWalker.Sphinx.NIKESphinx

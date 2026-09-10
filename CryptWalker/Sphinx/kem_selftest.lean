@@ -152,6 +152,35 @@ def runAbstractWrapRound (geom : Geometry) : IO Bool := do
     pure false
   | .ok pkt _ => unwrapAll geom nodes (ofVector pkt) (ofVector payload)
 
+/-- As `NIKESphinx.nike_selftest`'s: empirical check of `Sphinx.Sphinx.unwrap_complete` (the
+property `wrapKEM_unwrapKEM_complete` axiomatizes). -/
+def runCompletenessRound (geom : Geometry) : IO Bool := do
+  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
+  let path ← buildPath nodes
+  let seeds ← nodes.mapM (fun _ => randomVector 32)
+  let payload ← randomVector geom.forwardPayloadLength
+  let scheme := KEMSphinxScheme geom
+  let stream := fun i => seeds[i]!
+  match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Sphinx.initWith stream) with
+  | .error e _ =>
+    IO.eprintln s!"completeness: wrap failed: {e}"
+    pure false
+  | .ok pkt _ =>
+    let privKeys := (nodes.map (·.priv)).toList
+    match CryptWalker.Sphinx.Sphinx.unwrapChainAux (unwrapKEM geom) privKeys (ofVector pkt) with
+    | .error e =>
+      IO.eprintln s!"completeness: unwrapChainAux failed: {e}"
+      pure false
+    | .ok none =>
+      IO.eprintln "completeness: unwrapChainAux returned no payload"
+      pure false
+    | .ok (some p) =>
+      if byteArrayToHex p ≠ byteArrayToHex (ofVector payload) then
+        IO.eprintln "completeness: payload mismatch"
+        pure false
+      else
+        pure true
+
 /-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
 round-trip through `unwrapKEM`/`SURB.decryptSURBPayload`. `wrapKEMSURB` draws one seed per hop
 plus two more (`keyPayload`), so the stream needs `nodes.size + 2` distinct entries. -/
@@ -290,6 +319,10 @@ def main : IO UInt32 := do
   let abstractOk ← runAbstractWrapRound (ofKEM 32 103 false 3)
   IO.println s!"abstract Sphinx.Sphinx.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
   ok := ok && abstractOk
+
+  let completeOk ← runCompletenessRound (ofKEM 32 103 false 3)
+  IO.println s!"Sphinx.Sphinx.unwrap_complete via unwrapChainAux (3 hops): {if completeOk then "ok" else "FAIL"}"
+  ok := ok && completeOk
 
   let abstractSurbOk ← runAbstractSURBRound (ofKEM 32 103 true 3)
   IO.println s!"abstract Sphinx.Sphinx.newSURB/newPacketFromSURB (3 hops): {if abstractSurbOk then "ok" else "FAIL"}"

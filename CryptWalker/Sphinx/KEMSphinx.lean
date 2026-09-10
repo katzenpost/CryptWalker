@@ -29,7 +29,7 @@ open CryptWalker.Sphinx.Common
 open CryptWalker.Sphinx.NIKESphinx (HopKeys deriveHopKeys)
 open CryptWalker.Sphinx.Crypto.Stream (keystream)
 open CryptWalker.Sphinx.Crypto.AEZ (sprpEncrypt sprpDecrypt)
-open CryptWalker.NIKE.X25519 (PublicKey PrivateKey)
+open CryptWalker.NIKE.X25519 (PublicKey PrivateKey curve25519 basepointBytes)
 open CryptWalker.KEM.Adapter (encapM decapM initWith)
 open CryptWalker.KEM (sha256v1PRF)
 open CryptWalker.Hash.Sha512 (sha512_256)
@@ -147,7 +147,7 @@ axiom newKEMPacket_size (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 
     (hpay : payload.size = geom.forwardPayloadLength) :
     pkt.size = geom.packetLength
 
-open CryptWalker.Sphinx.Sphinx (SeedStream nextSeed)
+open CryptWalker.Sphinx.Sphinx (SeedStream nextSeed unwrapChainAux)
 
 /-- **`wrapKEM`**: `Sphinx.Sphinx.wrap` for `KEMSphinxScheme` — `newKEMPacket`, drawing one
 ephemeral seed per hop from the seed stream instead of taking them as a bare array. -/
@@ -293,6 +293,18 @@ def unwrapKEM (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
+/-- As `NIKESphinx.wrapNIKE_unwrapNIKE_complete`: `KEMSphinxScheme`'s witness for
+`Sphinx.Sphinx.unwrap_complete`. `derivePublicKey` is the same X25519 formula NIKE's is — a
+`kemX25519` keypair *is* an X25519 keypair (see this file's module doc). -/
+axiom wrapKEM_unwrapKEM_complete (geom : Geometry) (path : List PathHop)
+    (privKeys : List (Vector UInt8 32)) (filler : ByteArray)
+    (payload : Vector UInt8 geom.forwardPayloadLength) (st : SeedStream)
+    (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream) :
+    path ≠ [] →
+    path.map (·.publicKey) = privKeys.map (fun sk => curve25519 sk basepointBytes) →
+    wrapKEM geom path filler payload st = .ok pkt st' →
+    unwrapChainAux (unwrapKEM geom) privKeys (ofVector pkt) = .ok (some (ofVector payload))
+
 /-- KEM-Sphinx (X25519 via the NIKE→KEM adapter) as a `Sphinx.Sphinx` instance. -/
 def KEMSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   State := SeedStream
@@ -302,10 +314,12 @@ def KEMSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   payloadLength := geom.forwardPayloadLength
   surbLength := geom.surbLength
   stateI := ⟨CryptWalker.Sphinx.Sphinx.initWith (fun _ => Vector.replicate 32 0)⟩
+  derivePublicKey := fun sk => curve25519 sk basepointBytes
   wrap := wrapKEM geom
   unwrap := unwrapKEM geom
   newSURB := wrapKEMSURB geom
   newPacketFromSURB := fun surb payload =>
     CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
+  unwrap_complete := wrapKEM_unwrapKEM_complete geom
 
 end CryptWalker.Sphinx.KEMSphinx

@@ -159,6 +159,36 @@ def runAbstractWrapRound (geom : Geometry) : IO Bool := do
     pure false
   | .ok pkt _ => unwrapAll geom nodes (ofVector pkt) (ofVector payload)
 
+/-- Empirical check of `Sphinx.Sphinx.unwrap_complete` (the property
+`wrapNIKE_unwrapNIKE_complete` axiomatizes): `unwrapChainAux`, given every hop's private key in
+path order, recovers the payload from a `wrap`-built packet in one call — no per-hop
+bookkeeping, unlike `unwrapAll`. -/
+def runCompletenessRound (geom : Geometry) : IO Bool := do
+  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
+  let path ← buildPath nodes
+  let seed ← randomVector 32
+  let payload ← randomVector geom.forwardPayloadLength
+  let scheme := NIKESphinxScheme geom
+  match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Sphinx.initWith (fun _ => seed)) with
+  | .error e _ =>
+    IO.eprintln s!"completeness: wrap failed: {e}"
+    pure false
+  | .ok pkt _ =>
+    let privKeys := (nodes.map (·.priv)).toList
+    match CryptWalker.Sphinx.Sphinx.unwrapChainAux (unwrapNIKE geom) privKeys (ofVector pkt) with
+    | .error e =>
+      IO.eprintln s!"completeness: unwrapChainAux failed: {e}"
+      pure false
+    | .ok none =>
+      IO.eprintln "completeness: unwrapChainAux returned no payload"
+      pure false
+    | .ok (some p) =>
+      if byteArrayToHex p ≠ byteArrayToHex (ofVector payload) then
+        IO.eprintln "completeness: payload mismatch"
+        pure false
+      else
+        pure true
+
 /-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
 round-trip through `unwrapNIKE`/`SURB.decryptSURBPayload`, not just that they typecheck. -/
 def runAbstractSURBRound (geom : Geometry) : IO Bool := do
@@ -298,6 +328,10 @@ def main : IO UInt32 := do
   let abstractOk ← runAbstractWrapRound (ofNIKE 32 103 false 3)
   IO.println s!"abstract Sphinx.Sphinx.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
   ok := ok && abstractOk
+
+  let completeOk ← runCompletenessRound (ofNIKE 32 103 false 3)
+  IO.println s!"Sphinx.Sphinx.unwrap_complete via unwrapChainAux (3 hops): {if completeOk then "ok" else "FAIL"}"
+  ok := ok && completeOk
 
   let abstractSurbOk ← runAbstractSURBRound (ofNIKE 32 103 true 3)
   IO.println s!"abstract Sphinx.Sphinx.newSURB/newPacketFromSURB (3 hops): {if abstractSurbOk then "ok" else "FAIL"}"
