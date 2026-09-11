@@ -326,21 +326,36 @@ def KEMSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
 
 /-! ## Wrap-resistance fails
 
-Contrast `NIKESphinx.NIKESphinxBlinded`, whose `wrap_resistant` bounds a forger to `1/N`
-(`Sphinx.WrapResistance.blind_wrapResistance`). NIKE-Sphinx's forwarded envelope is *computed*
-by the mix — `blind`, a scalar multiplication entangled with a hash of the shared secret, which
-nothing inverts. KEM-Sphinx's forwarded envelope, routing info, and next-hop MAC
-(`nextCiphertext`/`newRoutingInfo`/`nextMAC` above) are just slices of `b`, the *decryption* of
-bytes the packet's constructor chose freely — no hash/group step stands between that choice and
-the mix's output. `decap` (line 65 above) is total bar the seven small-order ciphertexts, so
-anyone holding `privKey` can compute the keystream for *any* `kemCiphertext` they pick, exactly
-what wrap-resistance's own threat model already grants ("even one whose private key x the
-adversary can select") — and once the keystream is known, `xorBytes_achieves_any_target` says
-every target routing-info block is reachable, with certainty. -/
+The root cause is structural, not cryptographic: NIKE-Sphinx has a public-key operation
+available — blinding, `factor • pk` — that KEM-Sphinx has no analogue of for a generic KEM, so
+this design instead carries a fresh KEM ciphertext per hop, protected only by the header's own
+stream-cipher-plus-MAC (`headerEncryption`/`headerMAC`, an AEAD-shaped construction). That
+construction isn't broken, and nothing here says it is: AEAD security is a guarantee against
+adversaries who *don't* hold the key, and was never meant to be one against adversaries who do.
+Wrap-resistance's own threat model hands the adversary the hop's private key ("even one whose
+private key x the adversary can select"), and knowing that key means knowing the shared secret,
+which means knowing the AEAD key — at which point the AEAD isn't defeated, it simply was never
+protecting against this party to begin with. Any key-holder can always produce a valid
+ciphertext+tag for whatever plaintext it wants; that's what "keyed encryption" means.
 
-/-- **KEM-Sphinx does not achieve wrap-resistance.** For any routing-info-block `target` a
-key-holder wants the mix to forward, there are raw (pre-decryption) bytes achieving it exactly —
-the opposite of a `1/N`-style bound. -/
+`NIKESphinx.NIKESphinxBlinded`'s `blind` is different in kind: it routes the forwarded envelope
+through a hash of the shared secret *composed with* a group operation, which the current hop's
+own key-holder cannot invert to land on a chosen output, despite holding every secret involved
+(`Sphinx.WrapResistance.blind_wrapResistance` bounds it to `1/N`). KEM-Sphinx has nothing playing
+that role — `nextCiphertext`/`newRoutingInfo`/`nextMAC` above are just slices of `b`, the AEAD's
+own decryption of bytes the packet's constructor chose freely, so the AEAD is the *only* thing
+between the adversary and the target, and it was never the right tool for that job. `decap`
+(line 65 above) is total bar the seven small-order ciphertexts, so anyone holding `privKey` can
+compute the header keystream for *any* `kemCiphertext` they pick, and once it's known,
+`xorBytes_achieves_any_target` says every target routing-info block is reachable, with
+certainty. -/
+
+/-- **KEM-Sphinx does not achieve wrap-resistance** — not because its AEAD-shaped header
+protection is weak, but because it's the only thing standing in for NIKE-Sphinx's blinding step,
+and AEAD security was never a guarantee against a party who holds the key, which wrap-resistance's
+own threat model grants the adversary. For any routing-info-block `target` a key-holder wants the
+mix to forward, there are raw (pre-decryption) bytes achieving it exactly — the opposite of a
+`1/N`-style bound. -/
 theorem unwrapKEM_routingInfoBlock_not_wrap_resistant (key : Vector UInt8 32) (iv : Vector UInt8 16)
     (target : ByteArray) :
     ∃ raw : ByteArray, xorBytes raw (keystream key iv target.size) = target :=
