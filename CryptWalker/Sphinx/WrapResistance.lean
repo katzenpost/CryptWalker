@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import VCVio.CryptoFoundations.HardnessAssumptions.DiffieHellman
 import CryptWalker.NIKE.X25519
-import CryptWalker.Sphinx.Sphinx
+import CryptWalker.Sphinx.Interface
 
 /-! # Wrap-resistance (Danezis–Goldberg §4.3)
 
@@ -17,7 +17,7 @@ pair requires `α^{h_b(α, α^x)} = α′`, and since `h_b` is a random oracle, 
 so any single query hits the specific target `α′` with probability exactly `1/(q−1)`, and `c`
 queries give at most `c/(q−1)` by a union bound.
 
-`CryptWalker.Sphinx.Sphinx.uniformHit_eq` is that argument stripped of everything Sphinx-specific:
+`CryptWalker.Sphinx.Interface.uniformHit_eq` is that argument stripped of everything Sphinx-specific:
 a uniformly sampled `b` composed with *any* bijection lands on a fixed target with probability
 exactly `1/|domain|`, regardless of what the bijection is — it's also what `BlindedScheme`'s
 `wrap_resistant` field reduces to for every instance. `blind_wrapResistance` here is the
@@ -42,7 +42,7 @@ integrity, not about this group action, and not formalized here. -/
 namespace CryptWalker.Sphinx.WrapResistance
 
 open OracleComp OracleSpec ENNReal
-open CryptWalker.Sphinx.Sphinx (uniformHit_eq)
+open CryptWalker.Sphinx.Interface (uniformHit_eq)
 
 /-! ## Sphinx's blinding step, for X25519 -/
 

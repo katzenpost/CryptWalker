@@ -366,7 +366,7 @@ AEZ in `τ = 0` mode is a length-preserving permutation by construction: every b
 `sprp_aez.json` vectors confirm it (ciphertext always exactly as long as plaintext). Stated as
 an axiom rather than proved from `aezTiny`/`aezCore`'s definitions — pushing a `for`-loop's size
 invariant through `Id.run do` is mechanical but long, like `NIKE.X25519`'s
-`curve25519_commutes`/`derivePub_safe`. `Sphinx.Sphinx` is what actually needs this: it's how
+`curve25519_commutes`/`derivePub_safe`. `Sphinx.Interface` is what actually needs this: it's how
 `unwrap` gets a packet-size-preserving type. -/
 
 axiom sprpEncrypt_size (key : Array UInt8) (iv msg : ByteArray) :

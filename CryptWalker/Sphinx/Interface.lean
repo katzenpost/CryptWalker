@@ -9,7 +9,11 @@ import VCVio.EvalDist.Bool
 import CryptWalker.Sphinx.Types
 import CryptWalker.Util.Bytes
 
-namespace CryptWalker.Sphinx.Sphinx
+namespace CryptWalker.Sphinx.Interface
+
+-- `Sphinx` repeats the namespace, as `NIKE`/`KEM` do theirs; unlike them this file imports
+-- Mathlib, so the linter actually sees it.
+set_option linter.dupNamespace false
 
 open CryptWalker.Util.Bytes (ofVector)
 open OracleComp OracleSpec ENNReal
@@ -173,4 +177,4 @@ structure BlindedScheme extends Sphinx where
         (Fintype.card Factor : ℝ≥0∞)⁻¹ :=
     fun _ target hbij => uniformHit_eq hbij target
 
-end CryptWalker.Sphinx.Sphinx
+end CryptWalker.Sphinx.Interface

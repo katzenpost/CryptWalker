@@ -7,7 +7,7 @@ import CryptWalker.Sphinx.Constants
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Commands
 import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.Sphinx
+import CryptWalker.Sphinx.Interface
 import CryptWalker.Sphinx.Common
 import CryptWalker.Sphinx.SURB
 import CryptWalker.Sphinx.Crypto.KDF
@@ -159,9 +159,9 @@ def newNIKEPacket (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler
 `geom.packetLength` bytes: `headerLength` (itself `createHeader`'s routing-info-block
 construction, accumulated over a `for` loop) plus `payloadTagLength + payload.size`
 (`sprpEncrypt`'s length preservation, applied in another loop). True by construction and
-confirmed by all 20 `sphinx_{nike,kem}_vectors.json` packets — see `Sphinx.Sphinx`'s doc comment
+confirmed by all 20 `sphinx_{nike,kem}_vectors.json` packets — see `Sphinx.Interface`'s doc comment
 for why this is an axiom rather than a proof through those loops. `wrapNIKE` uses it to give
-`Sphinx.Sphinx.wrap` a packet-length-preserving *type*, the same way `sprpDecrypt_size` lets
+`Sphinx.Interface.wrap` a packet-length-preserving *type*, the same way `sprpDecrypt_size` lets
 `unwrapNIKE` do that for `forwardPkt`. -/
 axiom newNIKEPacket_size (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (filler : ByteArray)
     (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
@@ -169,9 +169,9 @@ axiom newNIKEPacket_size (geom : Geometry) (clientPrivateKey : Vector UInt8 32) 
     (hpay : payload.size = geom.forwardPayloadLength) :
     pkt.size = geom.packetLength
 
-open CryptWalker.Sphinx.Sphinx (SeedStream nextSeed unwrapChainAux)
+open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
 
-/-- **`wrapNIKE`**: `Sphinx.Sphinx.wrap` for `NIKESphinxScheme` — `newNIKEPacket`, drawing the
+/-- **`wrapNIKE`**: `Sphinx.Interface.wrap` for `NIKESphinxScheme` — `newNIKEPacket`, drawing the
 client's ephemeral private key from the seed stream instead of taking it as a bare argument. -/
 def wrapNIKE (geom : Geometry) (path : List PathHop) (filler : ByteArray)
     (payload : Vector UInt8 geom.forwardPayloadLength) :
@@ -209,7 +209,7 @@ axiom newNIKESURB_size (geom : Geometry) (clientPrivateKey : Vector UInt8 32) (k
     (h : newNIKESURB geom clientPrivateKey keyPayload filler path = .ok (surb, surbKeys)) :
     surb.size = geom.surbLength
 
-/-- **`wrapNIKESURB`**: `Sphinx.Sphinx.newSURB` for `NIKESphinxScheme` — `newNIKESURB`, drawing
+/-- **`wrapNIKESURB`**: `Sphinx.Interface.newSURB` for `NIKESphinxScheme` — `newNIKESURB`, drawing
 the client's ephemeral key and `keyPayload` (two seeds' worth) from the seed stream instead of
 taking them as bare arguments. -/
 def wrapNIKESURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
@@ -224,7 +224,7 @@ def wrapNIKESURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
       newNIKESURB_size geom clientKey (kp1 ++ kp2) filler path.toArray surb k h
     pure (⟨surb.data, hsize⟩, k)
 
-/-- **`unwrapNIKE`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`
+/-- **`unwrapNIKE`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Interface.unwrap`
 (see that file). Unlike Go, a MAC mismatch reports only an error string, not also the replay
 tag. -/
 def unwrapNIKE (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
@@ -322,7 +322,7 @@ def unwrapNIKE (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
       if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
-/-- **Completeness**: `NIKESphinxScheme`'s witness for `Sphinx.Sphinx.unwrap_complete` — the
+/-- **Completeness**: `NIKESphinxScheme`'s witness for `Sphinx.Interface.unwrap_complete` — the
 claim that Sphinx onion-decrypts correctly, checked empirically by every vector and self-test
 round trip (`nike_vectors_test`; `nike_selftest`'s `runRound`/`runAbstractWrapRound`/
 `runAbstractSURBRound`), but not proved here for the reason the size axioms above aren't: real
@@ -337,8 +337,8 @@ axiom wrapNIKE_unwrapNIKE_complete (geom : Geometry) (path : List PathHop)
     wrapNIKE geom path filler payload st = .ok pkt st' →
     unwrapChainAux (unwrapNIKE geom) privKeys (ofVector pkt) = .ok (some (ofVector payload))
 
-/-- NIKE-Sphinx (X25519) as a `Sphinx.Sphinx` instance. -/
-def NIKESphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
+/-- NIKE-Sphinx (X25519) as a `Sphinx.Interface` instance. -/
+def NIKESphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Interface.Sphinx where
   State := SeedStream
   PrivateKey := Vector UInt8 32
   Command := RoutingCommand
@@ -346,8 +346,8 @@ def NIKESphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
   payloadLength := geom.forwardPayloadLength
   surbLength := geom.surbLength
   -- Inhabitance only, matching `KEM.Adapter.kemOfNike`'s `stateI`: a constant (hence degenerate)
-  -- stream. Honest runs start from `Sphinx.Sphinx.initWith`.
-  stateI := ⟨CryptWalker.Sphinx.Sphinx.initWith (fun _ => Vector.replicate 32 0)⟩
+  -- stream. Honest runs start from `Sphinx.Interface.initWith`.
+  stateI := ⟨CryptWalker.Sphinx.Interface.initWith (fun _ => Vector.replicate 32 0)⟩
   derivePublicKey := fun sk => curve25519 sk basepointBytes
   wrap := wrapNIKE geom
   unwrap := unwrapNIKE geom
@@ -356,7 +356,7 @@ def NIKESphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
     CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
   unwrap_complete := wrapNIKE_unwrapNIKE_complete geom
 
-/-- **`NIKESphinxScheme`'s `BlindedScheme` witness** — `Sphinx.Sphinx.wrap_resistant`, for real.
+/-- **`NIKESphinxScheme`'s `BlindedScheme` witness** — `Sphinx.Interface.wrap_resistant`, for real.
 `Envelope` is the header's group element: `parseEnvelope` reads the same 32 bytes at offset 2
 `unwrapNIKE` does (`geOff`/`riOff` above), then lifts them to a `Point` via `liftX`, defaulting
 to the identity on failure — which a well-formed header, whose element always came from an
@@ -365,7 +365,7 @@ honest `dh`/`blind` chain, never triggers. `Factor` is left as `Fin N`, matching
 (`wrap_resistant` is `BlindedScheme`'s free default), only whoever *uses* `wrap_resistant` needs
 to supply it, exactly as `blind_wrapResistance` already does. -/
 def NIKESphinxBlinded (geom : Geometry) (N : ℕ) [NeZero N] :
-    CryptWalker.Sphinx.Sphinx.BlindedScheme where
+    CryptWalker.Sphinx.Interface.BlindedScheme where
   toSphinx := NIKESphinxScheme geom
   Envelope := Point
   parseEnvelope := fun pkt => (liftX (toField (toVec32 ((ofVector pkt).extract 2 34)))).getD 0

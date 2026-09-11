@@ -7,7 +7,7 @@ import CryptWalker.Sphinx.Constants
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Commands
 import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.Sphinx
+import CryptWalker.Sphinx.Interface
 import CryptWalker.Sphinx.Common
 import CryptWalker.Sphinx.NIKESphinx
 import CryptWalker.Sphinx.SURB
@@ -149,9 +149,9 @@ axiom newKEMPacket_size (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 
     (hpay : payload.size = geom.forwardPayloadLength) :
     pkt.size = geom.packetLength
 
-open CryptWalker.Sphinx.Sphinx (SeedStream nextSeed unwrapChainAux)
+open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
 
-/-- **`wrapKEM`**: `Sphinx.Sphinx.wrap` for `KEMSphinxScheme` — `newKEMPacket`, drawing one
+/-- **`wrapKEM`**: `Sphinx.Interface.wrap` for `KEMSphinxScheme` — `newKEMPacket`, drawing one
 ephemeral seed per hop from the seed stream instead of taking them as a bare array. -/
 def wrapKEM (geom : Geometry) (path : List PathHop) (filler : ByteArray)
     (payload : Vector UInt8 geom.forwardPayloadLength) :
@@ -182,7 +182,7 @@ axiom newKEMSURB_size (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32
     (h : newKEMSURB geom ephemeralSeeds keyPayload filler path = .ok (surb, surbKeys)) :
     surb.size = geom.surbLength
 
-/-- **`wrapKEMSURB`**: `Sphinx.Sphinx.newSURB` for `KEMSphinxScheme` — draws one ephemeral seed
+/-- **`wrapKEMSURB`**: `Sphinx.Interface.newSURB` for `KEMSphinxScheme` — draws one ephemeral seed
 per hop plus `keyPayload` (two seeds' worth) from the seed stream. -/
 def wrapKEMSURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
     EStateM String SeedStream (Vector UInt8 geom.surbLength × ByteArray) := do
@@ -196,7 +196,7 @@ def wrapKEMSURB (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
       newKEMSURB_size geom seeds (kp1 ++ kp2) filler path.toArray surb k h
     pure (⟨surb.data, hsize⟩, k)
 
-/-- **`unwrapKEM`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Sphinx.unwrap`.
+/-- **`unwrapKEM`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Interface.unwrap`.
 Forwarding copies the next-hop ciphertext straight out of the decrypted routing-info block —
 unlike `unwrapNIKE`, no `Blind` step, since there is no group element to re-blind. -/
 def unwrapKEM (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
@@ -296,7 +296,7 @@ def unwrapKEM (geom : Geometry) (privKey : Vector UInt8 32) (pkt : ByteArray) :
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
 /-- As `NIKESphinx.wrapNIKE_unwrapNIKE_complete`: `KEMSphinxScheme`'s witness for
-`Sphinx.Sphinx.unwrap_complete`. `derivePublicKey` is the same X25519 formula NIKE's is — a
+`Sphinx.Interface.unwrap_complete`. `derivePublicKey` is the same X25519 formula NIKE's is — a
 `kemX25519` keypair *is* an X25519 keypair (see this file's module doc). -/
 axiom wrapKEM_unwrapKEM_complete (geom : Geometry) (path : List PathHop)
     (privKeys : List (Vector UInt8 32)) (filler : ByteArray)
@@ -307,15 +307,15 @@ axiom wrapKEM_unwrapKEM_complete (geom : Geometry) (path : List PathHop)
     wrapKEM geom path filler payload st = .ok pkt st' →
     unwrapChainAux (unwrapKEM geom) privKeys (ofVector pkt) = .ok (some (ofVector payload))
 
-/-- KEM-Sphinx (X25519 via the NIKE→KEM adapter) as a `Sphinx.Sphinx` instance. -/
-def KEMSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Sphinx.Sphinx where
+/-- KEM-Sphinx (X25519 via the NIKE→KEM adapter) as a `Sphinx.Interface` instance. -/
+def KEMSphinxScheme (geom : Geometry) : CryptWalker.Sphinx.Interface.Sphinx where
   State := SeedStream
   PrivateKey := Vector UInt8 32
   Command := RoutingCommand
   packetLength := geom.packetLength
   payloadLength := geom.forwardPayloadLength
   surbLength := geom.surbLength
-  stateI := ⟨CryptWalker.Sphinx.Sphinx.initWith (fun _ => Vector.replicate 32 0)⟩
+  stateI := ⟨CryptWalker.Sphinx.Interface.initWith (fun _ => Vector.replicate 32 0)⟩
   derivePublicKey := fun sk => curve25519 sk basepointBytes
   wrap := wrapKEM geom
   unwrap := unwrapKEM geom
