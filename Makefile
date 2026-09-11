@@ -21,7 +21,14 @@ TESTS := \
 	CryptWalker.Cipher.test \
 	CryptWalker.Sign.test \
 	CryptWalker.Sign.blinded_test \
-	CryptWalker.BACAP.test
+	CryptWalker.BACAP.test \
+	CryptWalker.Sphinx.Crypto.test \
+	CryptWalker.Sphinx.Crypto.aez_test \
+	CryptWalker.Sphinx.commands_test \
+	CryptWalker.Sphinx.nike_selftest \
+	CryptWalker.Sphinx.kem_selftest \
+	CryptWalker.Sphinx.nike_vectors_test \
+	CryptWalker.Sphinx.kem_vectors_test
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 
@@ -34,7 +41,8 @@ EXES := $(TESTS) CryptWalker.NIKE.benchmark
 
 .PHONY: all build test bench sorries clean help
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
-.PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap
+.PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
+.PHONY: gen-sphinx-vectors
 
 all: build ## build everything, library and executables
 
@@ -93,6 +101,13 @@ test-blinded: build ## blinded Ed25519 vectors from hpqc
 
 test-bacap: build ## BACAP vectors from hpqc
 	@$(BIN)/CryptWalker-BACAP-test
+
+test-sphinx-crypto: build ## Sphinx primitive-layer vectors (hash/MAC/stream/KDF) from katzenpost
+	@$(BIN)/CryptWalker-Sphinx-Crypto-test
+
+gen-sphinx-vectors: build ## build Sphinx packets with the Lean port, for cross-checking against katzenpost's Unwrap
+	@$(BIN)/CryptWalker-Sphinx-gen_nike_vectors
+	@$(BIN)/CryptWalker-Sphinx-gen_kem_vectors
 
 bench: build ## run the NIKE benchmarks
 	@$(BIN)/CryptWalker-NIKE-benchmark

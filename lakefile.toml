@@ -7,14 +7,21 @@ autoImplicit = false
 relaxedAutoImplicit = false
 
 [[require]]
-name = "mathlib"
-scope = "leanprover-community"
-rev = "v4.33.0-rc1"
-
-[[require]]
 name = "Bench"
 git = "https://github.com/david415/bench"
 rev = "main"
+
+[[require]]
+name = "VCVio"
+git = "https://github.com/dtumad/VCV-io.git"
+rev = "main"
+
+# Declared last: VCVio pins mathlib v4.33.1, so this direct requirement (matching that pin)
+# must come after VCVio's for Lake's reverse-declaration-order precedence to keep it authoritative.
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.33.1"
 
 [[lean_lib]]
 name = "CryptWalker"
@@ -53,3 +60,30 @@ name = "CryptWalker.Hash.hkdf_structured_test"
 
 [[lean_exe]]
 name = "CryptWalker.BACAP.test"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.Crypto.test"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.Crypto.aez_test"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.commands_test"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.nike_selftest"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.kem_selftest"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.nike_vectors_test"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.kem_vectors_test"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.gen_nike_vectors"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.gen_kem_vectors"

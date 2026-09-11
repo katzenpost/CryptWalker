@@ -93,14 +93,19 @@ def expandKey (key : Vector UInt8 32) : Array UInt8 := Id.run do
       w := w.push (w[4*(i - 8) + j]! ^^^ t[j]!)
   return w
 
-private def subBytes (s : Array UInt8) : Array UInt8 := s.map fun b => sbox[b.toNat]!
+/-- Not `private`: `Sphinx.Crypto.AEZ` reuses this directly as AEZ's AES4/AES10 round function
+composes the same four steps under a different (fixed, 4- or 10-round) key schedule than
+AES-256 proper. -/
+def subBytes (s : Array UInt8) : Array UInt8 := s.map fun b => sbox[b.toNat]!
 
-/-- Byte `i` of the state is row `i % 4`, column `i / 4`; row `r` rotates left by `r` columns. -/
-private def shiftRows (s : Array UInt8) : Array UInt8 :=
+/-- Byte `i` of the state is row `i % 4`, column `i / 4`; row `r` rotates left by `r` columns.
+Not `private`, for the same reason as `subBytes`. -/
+def shiftRows (s : Array UInt8) : Array UInt8 :=
   Array.ofFn fun i : Fin 16 => s[(i.val + 4 * (i.val % 4)) % 16]!
 
-/-- Each column multiplied by the fixed polynomial `{03}x³ + {01}x² + {01}x + {02}`. -/
-private def mixColumns (s : Array UInt8) : Array UInt8 :=
+/-- Each column multiplied by the fixed polynomial `{03}x³ + {01}x² + {01}x + {02}`. Not
+`private`, for the same reason as `subBytes`. -/
+def mixColumns (s : Array UInt8) : Array UInt8 :=
   Array.ofFn fun i : Fin 16 =>
     let a := fun j => s[4 * (i.val / 4) + j]!
     match i.val % 4 with

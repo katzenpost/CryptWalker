@@ -1,5 +1,5 @@
+import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.NIKE.X25519
-import CryptWalker.NIKE.X25519_math
 import CryptWalker.NIKE.NIKE
 
 open CryptWalker.NIKE.NIKE
@@ -22,9 +22,9 @@ the group version, 32-byte u-coordinates for the ladder — and their `Safe` pre
 the ladder rejects the small-order points, while in the group scalar multiplication is total
 and there is nothing to reject. -/
 
-def X25519Scheme : NIKE := X25519_math.Scheme
+def X25519Scheme : NIKE := X25519.Scheme
 
-def X25519LadderScheme : NIKE := X25519.LadderScheme
+def X25519LadderScheme : NIKE := X25519_montgomery_ladder.LadderScheme
 
 def Schemes : List NIKE :=
   [

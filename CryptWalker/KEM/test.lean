@@ -1,6 +1,6 @@
 
 import CryptWalker.NIKE.NIKE
-import CryptWalker.NIKE.X25519
+import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Schemes
