@@ -268,6 +268,11 @@ def combineKEM : KEM where
   -- Inhabitance only, inherited from the components. A real combined state is
   -- the pair of the components' own caller-supplied states.
   stateI := ⟨(k₁.stateI.default, k₂.stateI.default)⟩
+  -- Both components seeded from the *same* 32 bytes: adequate for two different sub-KEMs
+  -- (the intended use of a combiner), but would correlate their ephemeral randomness if `k₁`
+  -- and `k₂` happened to be the same scheme — not a case this combiner is meant for.
+  stateFromSeed := fun seed => (k₁.stateFromSeed seed, k₂.stateFromSeed seed)
+  derivePublicKey := fun sk => (k₁.derivePublicKey sk.1, k₂.derivePublicKey sk.2)
 
   generate := do
     let ⟨pk₁, sk₁, h₁⟩ ← liftFst k₁ k₂ k₁.generate

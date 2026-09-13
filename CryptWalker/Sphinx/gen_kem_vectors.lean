@@ -31,8 +31,7 @@ open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.NIKE.X25519_montgomery_ladder (curve25519 basepointBytes)
 open CryptWalker.Util.Bytes (ofVector)
 
-private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
-private def x25519Prf := CryptWalker.KEM.sha256v1PRF
+private def x25519Kem := CryptWalker.KEM.kemX25519Ladder
 
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)
@@ -92,7 +91,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   if withSURB then
     let kp1 ← randomVector 32
     let kp2 ← randomVector 32
-    match newKEMSURB x25519Prf x25519Nike geom seeds (kp1 ++ kp2) filler path with
+    match newKEMSURB x25519Kem geom seeds (kp1 ++ kp2) filler path with
     | .error e => throw (IO.userError s!"newKEMSURB failed: {e}")
     | .ok (s, k) =>
       surb := s; surbKeys := k
@@ -103,7 +102,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
           throw (IO.userError "first-hop ID mismatch")
         pkt0 := p
   else
-    match newKEMPacket x25519Prf x25519Nike geom seeds filler path payload with
+    match newKEMPacket x25519Kem geom seeds filler path payload with
     | .error e => throw (IO.userError s!"newKEMPacket failed: {e}")
     | .ok p => pkt0 := p
 
@@ -112,7 +111,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   let mut finalPayload : ByteArray := ByteArray.empty
   for i in [0:nrHops] do
     let node := nodes[i]!
-    match unwrapKEM x25519Prf x25519Nike geom (ofVector node.priv) pkt with
+    match unwrapKEM x25519Kem geom (ofVector node.priv) pkt with
     | .error e => throw (IO.userError s!"hop {i}: unwrap failed: {e}")
     | .ok (payloadOut, _replayTag, _cmds, forwardPkt) =>
       if i < nrHops - 1 then

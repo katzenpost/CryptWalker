@@ -31,8 +31,7 @@ open CryptWalker.Sphinx.KEMSphinx
 open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.Util.Bytes (ofVector)
 
-private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
-private def x25519Prf := CryptWalker.KEM.sha256v1PRF
+private def x25519Kem := CryptWalker.KEM.kemX25519Ladder
 
 def field (j : Json) (k : String) : Except String ByteArray := do
   let s ← (← j.getObjVal? k).getStr?
@@ -110,7 +109,7 @@ def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   for i in [0:n] do
     if !stop then
       let node := v.nodes[i]!
-      match unwrapKEM x25519Prf x25519Nike geom (ofVector node.privateKey) pkt with
+      match unwrapKEM x25519Kem geom (ofVector node.privateKey) pkt with
       | .error e =>
         IO.eprintln s!"    hop {i}: unwrap failed: {e}"
         ok := false; stop := true

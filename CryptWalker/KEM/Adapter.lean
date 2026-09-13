@@ -178,6 +178,8 @@ def kemOfNike : KEM where
 
   encap := encapM F nike
   decap := decapM F nike
+  stateFromSeed := fun seed => initWith (fun _ => seed)
+  derivePublicKey := nike.derivePublicKey
 
   -- Inhabitance only: a constant stream, hence degenerate (every keypair and
   -- every ephemeral would coincide). Honest runs start from `initWith`.

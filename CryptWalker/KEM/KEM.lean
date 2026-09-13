@@ -43,6 +43,21 @@ structure KEM where
   generate : EStateM KEMError State (Σ' (pk : PublicKey), {sk : PrivateKey //
     ∀ s c k s', encap pk s = .ok (c, k) s' → ∀ t, ∃ t', decap sk c t = .ok k t'})
 
+  /-- Seed the KEM's internal randomness deterministically — needed by a caller (Sphinx, in
+  particular) that must reproduce one specific `encap`/`decap` run, e.g. because a packet's bytes
+  have to be an exact function of the caller's own seed stream, not of the system CSPRNG. Only as
+  strong as one 32-byte seed can make it: a KEM whose own operations need to draw more
+  independent randomness internally than a single seed can stretch to gets no guarantee here
+  beyond determinism (`kemOfNike`'s instance, the only one this project constructs directly,
+  needs exactly one draw per `encap`, so this is exact for it, not merely adequate). -/
+  stateFromSeed : Vector UInt8 32 → State
+
+  /-- Derive a public key from a private key directly, independent of `generate`'s joint
+  sampling — what every KEM this project can construct already computes internally (a NIKE
+  adapter's `nike.derivePublicKey`), needed by a caller that must recover its own public key from
+  a private key alone rather than generating a fresh pair. -/
+  derivePublicKey : PrivateKey → PublicKey
+
   decode_encode_pub  : ∀ pk, decodePublicKey  (encodePublicKey  pk) = some pk
   decode_encode_priv : ∀ sk, decodePrivateKey (encodePrivateKey sk) = some sk
   decode_encode_ct   : ∀ c,  decodeCiphertext (encodeCiphertext c)  = some c
@@ -73,6 +88,8 @@ instance : Inhabited KEM := ⟨{
   decap := fun _ _ => pure ()
   encap := fun _ => pure ((), ())
   generate := pure ⟨(), (), fun _ _ _ _ _ t => ⟨t, rfl⟩⟩
+  stateFromSeed := fun _ => ()
+  derivePublicKey := fun _ => ()
 
   decode_encode_pub  := fun _ => rfl
   decode_encode_priv := fun _ => rfl

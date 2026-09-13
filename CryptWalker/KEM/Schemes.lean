@@ -81,23 +81,18 @@ keeps `nike/schemes` and `kem/schemes` as two independent maps, and so does this
 this file exposed a bare `Schemes : List String := ["X25519"]`, wrong on both counts —
 capitalized unlike `hpqc`'s own name, and not actually paired with a scheme.) -/
 
-/-- One entry in the scheme registry: a scheme's canonical `hpqc` name, the actual implementation
-`byName` should return for it, and the `prf`/`nike` it was built from — every KEM this project can
-currently construct is `kemOfNike`-shaped (`kemOfNike` is the only KEM constructor in the codebase),
-so `prf`/`nike` are required, not optional; a future non-adapter KEM would need to revisit this. -/
+/-- One entry in the scheme registry: a scheme's canonical `hpqc` name paired with the actual
+implementation `byName` should return for it. `KEM.KEM` carries everything a caller (including
+`Sphinx.KEMSphinx`) needs directly — `derivePublicKey`, `stateFromSeed` — so, unlike an earlier
+version of this structure, there is no need to also carry the `prf`/`nike` a `kemOfNike`-built
+scheme happens to be made from; that stays an internal detail of `Adapter.kemOfNike`. -/
 structure RegistryEntry where
   hpqcName : String
   scheme : KEM
-  prf : Adapter.PRF
-  nike : NIKE
 
-def x25519LadderEntry : RegistryEntry :=
-  { hpqcName := "x25519-ladder", scheme := kemX25519Ladder, prf := sha256v1PRF
-    nike := X25519_montgomery_ladder.LadderScheme }
+def x25519LadderEntry : RegistryEntry := { hpqcName := "x25519-ladder", scheme := kemX25519Ladder }
 
-def x25519GroupEntry : RegistryEntry :=
-  { hpqcName := "x25519", scheme := kemX25519, prf := sha256v1PRF
-    nike := CryptWalker.NIKE.X25519.Scheme }
+def x25519GroupEntry : RegistryEntry := { hpqcName := "x25519", scheme := kemX25519 }
 
 def registry : List RegistryEntry := [x25519LadderEntry, x25519GroupEntry]
 
@@ -106,13 +101,5 @@ def registry : List RegistryEntry := [x25519LadderEntry, x25519GroupEntry]
 project has not ported the post-quantum KEMs or the hybrid combiners. -/
 def byName (name : String) : Option KEM :=
   (registry.find? (·.hpqcName.toLower == name.toLower)).map (·.scheme)
-
-/-- As `byName`, but returning the whole entry — needed wherever a caller must build a fresh
-scheme instance rather than just call `KEM.encap`/`decap` on the registered one, since `KEM.KEM`
-has no generic "derive a public key from a given private key" operation (only `generate`, which
-samples a fresh keypair jointly): `Sphinx.KEMSphinx` needs the underlying `nike`'s own
-`derivePublicKey` for that. -/
-def adapterByName (name : String) : Option RegistryEntry :=
-  registry.find? (·.hpqcName.toLower == name.toLower)
 
 end CryptWalker.KEM
