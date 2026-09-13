@@ -30,6 +30,9 @@ open CryptWalker.Sphinx.KEMSphinx
 open CryptWalker.NIKE.X25519_montgomery_ladder (curve25519 basepointBytes)
 open CryptWalker.Util.Bytes (ofVector)
 
+private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
+private def x25519Prf := CryptWalker.KEM.sha256v1PRF
+
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)
   pure (Vector.ofFn fun i : Fin n => bs[i.val]!)
@@ -62,7 +65,7 @@ private def buildPath (nodes : Array Node) (isSURB : Bool := false) : IO (Array 
           pure [.recipient rid, .surbReply sid]
         else
           pure [.recipient rid]
-    path := path.push { id := node.id, publicKey := node.pub, commands := cmds }
+    path := path.push { id := node.id, publicKey := ofVector node.pub, commands := cmds }
   pure path
 
 def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPayload : ByteArray) :
@@ -74,7 +77,7 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
   for i in [0:n] do
     if !stop then
       let node := nodes[i]!
-      match unwrapKEM geom node.priv pkt with
+      match unwrapKEM x25519Prf x25519Nike geom (ofVector node.priv) pkt with
       | .error e =>
         IO.eprintln s!"  hop {i}: unwrap failed: {e}"
         ok := false
@@ -111,7 +114,7 @@ def runRound (geom : Geometry) : IO Bool := do
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomBytes geom.forwardPayloadLength
-  match newKEMPacket geom seeds ByteArray.empty path payload with
+  match newKEMPacket x25519Prf x25519Nike geom seeds ByteArray.empty path payload with
   | .error e =>
     IO.eprintln s!"newKEMPacket failed: {e}"
     pure false
@@ -123,28 +126,28 @@ def runRound (geom : Geometry) : IO Bool := do
       unwrapAll geom nodes pkt0 payload
 
 def runFillerRound : IO Bool := do
-  let geom := ofKEM 32 103 false 5
+  let geom ← IO.ofExcept (ofKEM "x25519" 103 false 5)
   let nodes ← (List.range 3).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomBytes geom.forwardPayloadLength
   let filler ← randomBytes ((geom.nrHops - 3) * geom.perHopRoutingInfoLength)
-  match newKEMPacket geom seeds filler path payload with
+  match newKEMPacket x25519Prf x25519Nike geom seeds filler path payload with
   | .error e =>
     IO.eprintln s!"filler round: newKEMPacket failed: {e}"
     pure false
   | .ok pkt0 => unwrapAll geom nodes pkt0 payload
 
-/-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`KEMSphinxScheme`
+/-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`kemSphinxScheme`
 instead of calling `newKEMPacket` directly. `wrapKEM` draws one seed *per hop*, so the stream
 must actually vary with the counter — unlike `NIKESphinx`'s version of this check, which draws
 only one seed total and can get away with a constant stream. -/
 def runAbstractWrapRound (geom : Geometry) : IO Bool := do
+  let scheme := kemSphinxSchemeOf x25519Prf x25519Nike geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomVector geom.forwardPayloadLength
-  let scheme := KEMSphinxScheme geom
   let stream := fun i => seeds[i]!
   match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
@@ -155,19 +158,19 @@ def runAbstractWrapRound (geom : Geometry) : IO Bool := do
 /-- As `NIKESphinx.nike_selftest`'s: empirical check of `Sphinx.Interface.unwrap_complete` (the
 property `wrapKEM_unwrapKEM_complete` axiomatizes). -/
 def runCompletenessRound (geom : Geometry) : IO Bool := do
+  let scheme := kemSphinxSchemeOf x25519Prf x25519Nike geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomVector geom.forwardPayloadLength
-  let scheme := KEMSphinxScheme geom
   let stream := fun i => seeds[i]!
   match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
     IO.eprintln s!"completeness: wrap failed: {e}"
     pure false
   | .ok pkt _ =>
-    let privKeys := (nodes.map (·.priv)).toList
-    match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapKEM geom) privKeys (ofVector pkt) with
+    let privKeys := (nodes.map (fun n => ofVector n.priv)).toList
+    match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapKEM x25519Prf x25519Nike geom) privKeys (ofVector pkt) with
     | .error e =>
       IO.eprintln s!"completeness: unwrapChainAux failed: {e}"
       pure false
@@ -185,10 +188,10 @@ def runCompletenessRound (geom : Geometry) : IO Bool := do
 round-trip through `unwrapKEM`/`SURB.decryptSURBPayload`. `wrapKEMSURB` draws one seed per hop
 plus two more (`keyPayload`), so the stream needs `nodes.size + 2` distinct entries. -/
 def runAbstractSURBRound (geom : Geometry) : IO Bool := do
+  let scheme := kemSphinxSchemeOf x25519Prf x25519Nike geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes true
   let seeds ← (List.range (nodes.size + 2)).toArray.mapM (fun _ => randomVector 32)
-  let scheme := KEMSphinxScheme geom
   let stream := fun i => seeds[i]!
   match scheme.newSURB path.toList ByteArray.empty (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
@@ -212,7 +215,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapKEM geom node.priv pkt with
+          match unwrapKEM x25519Prf x25519Nike geom (ofVector node.priv) pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -248,7 +251,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let kp1 ← randomVector 32
   let kp2 ← randomVector 32
-  match newKEMSURB geom seeds (kp1 ++ kp2) ByteArray.empty path with
+  match newKEMSURB x25519Prf x25519Nike geom seeds (kp1 ++ kp2) ByteArray.empty path with
   | .error e =>
     IO.eprintln s!"newKEMSURB failed: {e}"
     pure false
@@ -274,7 +277,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapKEM geom node.priv pkt with
+          match unwrapKEM x25519Prf x25519Nike geom (ofVector node.priv) pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -307,7 +310,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
 def main : IO UInt32 := do
   let mut ok := true
   for nrHops in [1, 2, 3, 5] do
-    let geom := ofKEM 32 103 false nrHops
+    let geom ← IO.ofExcept (ofKEM "x25519" 103 false nrHops)
     let roundOk ← runRound geom
     IO.println s!"{nrHops} hop(s), no filler: {if roundOk then "ok" else "FAIL"}"
     ok := ok && roundOk
@@ -316,20 +319,22 @@ def main : IO UInt32 := do
   IO.println s!"3 hop(s) of 5 (filler path): {if fillerOk then "ok" else "FAIL"}"
   ok := ok && fillerOk
 
-  let abstractOk ← runAbstractWrapRound (ofKEM 32 103 false 3)
+  let geom3 ← IO.ofExcept (ofKEM "x25519" 103 false 3)
+  let abstractOk ← runAbstractWrapRound geom3
   IO.println s!"abstract Sphinx.Interface.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
   ok := ok && abstractOk
 
-  let completeOk ← runCompletenessRound (ofKEM 32 103 false 3)
+  let completeOk ← runCompletenessRound geom3
   IO.println s!"Sphinx.Interface.unwrap_complete via unwrapChainAux (3 hops): {if completeOk then "ok" else "FAIL"}"
   ok := ok && completeOk
 
-  let abstractSurbOk ← runAbstractSURBRound (ofKEM 32 103 true 3)
+  let geom3surb ← IO.ofExcept (ofKEM "x25519" 103 true 3)
+  let abstractSurbOk ← runAbstractSURBRound geom3surb
   IO.println s!"abstract Sphinx.Interface.newSURB/newPacketFromSURB (3 hops): {if abstractSurbOk then "ok" else "FAIL"}"
   ok := ok && abstractSurbOk
 
   for nrHops in [1, 2, 3, 5] do
-    let geom := ofKEM 32 103 true nrHops
+    let geom ← IO.ofExcept (ofKEM "x25519" 103 true nrHops)
     let surbOk ← runSURBRound geom
     IO.println s!"SURB round trip ({nrHops} hop(s)): {if surbOk then "ok" else "FAIL"}"
     ok := ok && surbOk

@@ -31,6 +31,9 @@ open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.NIKE.X25519_montgomery_ladder (curve25519 basepointBytes)
 open CryptWalker.Util.Bytes (ofVector)
 
+private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
+private def x25519Prf := CryptWalker.KEM.sha256v1PRF
+
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)
   pure (Vector.ofFn fun i : Fin n => bs[i.val]!)
@@ -63,7 +66,7 @@ private def buildPath (nodes : Array Node) (isSURB : Bool) : IO (Array PathHop) 
           pure [.recipient rid, .surbReply sid]
         else
           pure [.recipient rid]
-    path := path.push { id := node.id, publicKey := node.pub, commands := cmds }
+    path := path.push { id := node.id, publicKey := ofVector node.pub, commands := cmds }
   pure path
 
 private def hexNode (n : Node) : Json :=
@@ -72,7 +75,7 @@ private def hexNode (n : Node) : Json :=
 
 private def hexPathHop (h : PathHop) : Json :=
   Json.mkObj [("ID", Json.str (byteArrayToHex (ofVector h.id))),
-              ("PublicKey", Json.str (byteArrayToHex (ofVector h.publicKey))),
+              ("PublicKey", Json.str (byteArrayToHex h.publicKey)),
               ("Commands", Json.arr (h.commands.toArray.map (fun c => Json.str (byteArrayToHex c.toBytes))))]
 
 /-- As `gen_nike_vectors.buildVec`, over `createKEMHeader`/`newKEMPacket`/`newKEMSURB`: one
@@ -89,7 +92,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   if withSURB then
     let kp1 ← randomVector 32
     let kp2 ← randomVector 32
-    match newKEMSURB geom seeds (kp1 ++ kp2) filler path with
+    match newKEMSURB x25519Prf x25519Nike geom seeds (kp1 ++ kp2) filler path with
     | .error e => throw (IO.userError s!"newKEMSURB failed: {e}")
     | .ok (s, k) =>
       surb := s; surbKeys := k
@@ -100,7 +103,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
           throw (IO.userError "first-hop ID mismatch")
         pkt0 := p
   else
-    match newKEMPacket geom seeds filler path payload with
+    match newKEMPacket x25519Prf x25519Nike geom seeds filler path payload with
     | .error e => throw (IO.userError s!"newKEMPacket failed: {e}")
     | .ok p => pkt0 := p
 
@@ -109,7 +112,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   let mut finalPayload : ByteArray := ByteArray.empty
   for i in [0:nrHops] do
     let node := nodes[i]!
-    match unwrapKEM geom node.priv pkt with
+    match unwrapKEM x25519Prf x25519Nike geom (ofVector node.priv) pkt with
     | .error e => throw (IO.userError s!"hop {i}: unwrap failed: {e}")
     | .ok (payloadOut, _replayTag, _cmds, forwardPkt) =>
       if i < nrHops - 1 then
@@ -141,7 +144,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
 def main : IO UInt32 := do
   let mut vecs : Array Json := #[]
   for withSURB in [false, true] do
-    let geom := ofKEM 32 103 withSURB 5
+    let geom ← IO.ofExcept (ofKEM "x25519" 103 withSURB 5)
     for nrHops in [1, 2, 3, 4, 5] do
       let v ← buildVec geom withSURB nrHops
       vecs := vecs.push v

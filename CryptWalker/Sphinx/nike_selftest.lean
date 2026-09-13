@@ -33,6 +33,8 @@ open CryptWalker.Sphinx.NIKESphinx
 open CryptWalker.NIKE.X25519_montgomery_ladder (curve25519 basepointBytes)
 open CryptWalker.Util.Bytes (ofVector)
 
+private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
+
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)
   pure (Vector.ofFn fun i : Fin n => bs[i.val]!)
@@ -65,7 +67,7 @@ private def buildPath (nodes : Array Node) (isSURB : Bool := false) : IO (Array 
           pure [.recipient rid, .surbReply sid]
         else
           pure [.recipient rid]
-    path := path.push { id := node.id, publicKey := node.pub, commands := cmds }
+    path := path.push { id := node.id, publicKey := ofVector node.pub, commands := cmds }
   pure path
 
 /-- Unwrap `pkt` at every node in order, checking forwarding commands and the final payload
@@ -79,7 +81,7 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
   for i in [0:n] do
     if !stop then
       let node := nodes[i]!
-      match unwrapNIKE geom node.priv pkt with
+      match unwrapNIKE x25519Nike geom (ofVector node.priv) pkt with
       | .error e =>
         IO.eprintln s!"  hop {i}: unwrap failed: {e}"
         ok := false
@@ -118,7 +120,7 @@ def runRound (geom : Geometry) : IO Bool := do
   let path ← buildPath nodes
   let clientPriv ← randomVector 32
   let payload ← randomBytes geom.forwardPayloadLength
-  match newNIKEPacket geom clientPriv ByteArray.empty path payload with
+  match newNIKEPacket x25519Nike geom (ofVector clientPriv) ByteArray.empty path payload with
   | .error e =>
     IO.eprintln s!"newNIKEPacket failed: {e}"
     pure false
@@ -132,27 +134,27 @@ def runRound (geom : Geometry) : IO Bool := do
 /-- A round using only 3 of a 5-hop geometry's slots, so `createHeader` exercises the random
 filler for the two skipped hops. -/
 def runFillerRound : IO Bool := do
-  let geom := ofNIKE 32 103 false 5
+  let geom ← IO.ofExcept (ofNIKE "x25519-ladder" 103 false 5)
   let nodes ← (List.range 3).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let clientPriv ← randomVector 32
   let payload ← randomBytes geom.forwardPayloadLength
   let filler ← randomBytes ((geom.nrHops - 3) * geom.perHopRoutingInfoLength)
-  match newNIKEPacket geom clientPriv filler path payload with
+  match newNIKEPacket x25519Nike geom (ofVector clientPriv) filler path payload with
   | .error e =>
     IO.eprintln s!"filler round: newNIKEPacket failed: {e}"
     pure false
   | .ok pkt0 => unwrapAll geom nodes pkt0 payload
 
-/-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`NIKESphinxScheme`
+/-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`nikeSphinxScheme`
 instead of calling `newNIKEPacket` directly — confirms the abstract-interface unification
 actually produces a packet `unwrapNIKE` accepts, not just that it typechecks. -/
 def runAbstractWrapRound (geom : Geometry) : IO Bool := do
+  let scheme := nikeSphinxCore x25519Nike geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seed ← randomVector 32
   let payload ← randomVector geom.forwardPayloadLength
-  let scheme := NIKESphinxScheme geom
   match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Interface.initWith (fun _ => seed)) with
   | .error e _ =>
     IO.eprintln s!"abstract wrap failed: {e}"
@@ -164,18 +166,18 @@ def runAbstractWrapRound (geom : Geometry) : IO Bool := do
 path order, recovers the payload from a `wrap`-built packet in one call — no per-hop
 bookkeeping, unlike `unwrapAll`. -/
 def runCompletenessRound (geom : Geometry) : IO Bool := do
+  let scheme := nikeSphinxCore x25519Nike geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seed ← randomVector 32
   let payload ← randomVector geom.forwardPayloadLength
-  let scheme := NIKESphinxScheme geom
   match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Interface.initWith (fun _ => seed)) with
   | .error e _ =>
     IO.eprintln s!"completeness: wrap failed: {e}"
     pure false
   | .ok pkt _ =>
-    let privKeys := (nodes.map (·.priv)).toList
-    match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapNIKE geom) privKeys (ofVector pkt) with
+    let privKeys := (nodes.map (fun n => ofVector n.priv)).toList
+    match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapNIKE x25519Nike geom) privKeys (ofVector pkt) with
     | .error e =>
       IO.eprintln s!"completeness: unwrapChainAux failed: {e}"
       pure false
@@ -192,10 +194,10 @@ def runCompletenessRound (geom : Geometry) : IO Bool := do
 /-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
 round-trip through `unwrapNIKE`/`SURB.decryptSURBPayload`, not just that they typecheck. -/
 def runAbstractSURBRound (geom : Geometry) : IO Bool := do
+  let scheme := nikeSphinxCore x25519Nike geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes true
   let seeds ← (List.range 3).toArray.mapM (fun _ => randomVector 32)
-  let scheme := NIKESphinxScheme geom
   let stream := fun i => seeds[i]!
   match scheme.newSURB path.toList ByteArray.empty (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
@@ -219,7 +221,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapNIKE geom node.priv pkt with
+          match unwrapNIKE x25519Nike geom (ofVector node.priv) pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -257,7 +259,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
   let clientSeed ← randomVector 32
   let kp1 ← randomVector 32
   let kp2 ← randomVector 32
-  match newNIKESURB geom clientSeed (kp1 ++ kp2) ByteArray.empty path with
+  match newNIKESURB x25519Nike geom (ofVector clientSeed) (kp1 ++ kp2) ByteArray.empty path with
   | .error e =>
     IO.eprintln s!"newNIKESURB failed: {e}"
     pure false
@@ -283,7 +285,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapNIKE geom node.priv pkt with
+          match unwrapNIKE x25519Nike geom (ofVector node.priv) pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -316,7 +318,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
 def main : IO UInt32 := do
   let mut ok := true
   for nrHops in [1, 2, 3, 5] do
-    let geom := ofNIKE 32 103 false nrHops
+    let geom ← IO.ofExcept (ofNIKE "x25519-ladder" 103 false nrHops)
     let roundOk ← runRound geom
     IO.println s!"{nrHops} hop(s), no filler: {if roundOk then "ok" else "FAIL"}"
     ok := ok && roundOk
@@ -325,20 +327,22 @@ def main : IO UInt32 := do
   IO.println s!"3 hop(s) of 5 (filler path): {if fillerOk then "ok" else "FAIL"}"
   ok := ok && fillerOk
 
-  let abstractOk ← runAbstractWrapRound (ofNIKE 32 103 false 3)
+  let geom3 ← IO.ofExcept (ofNIKE "x25519-ladder" 103 false 3)
+  let abstractOk ← runAbstractWrapRound geom3
   IO.println s!"abstract Sphinx.Interface.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
   ok := ok && abstractOk
 
-  let completeOk ← runCompletenessRound (ofNIKE 32 103 false 3)
+  let completeOk ← runCompletenessRound geom3
   IO.println s!"Sphinx.Interface.unwrap_complete via unwrapChainAux (3 hops): {if completeOk then "ok" else "FAIL"}"
   ok := ok && completeOk
 
-  let abstractSurbOk ← runAbstractSURBRound (ofNIKE 32 103 true 3)
+  let geom3surb ← IO.ofExcept (ofNIKE "x25519-ladder" 103 true 3)
+  let abstractSurbOk ← runAbstractSURBRound geom3surb
   IO.println s!"abstract Sphinx.Interface.newSURB/newPacketFromSURB (3 hops): {if abstractSurbOk then "ok" else "FAIL"}"
   ok := ok && abstractSurbOk
 
   for nrHops in [1, 2, 3, 5] do
-    let geom := ofNIKE 32 103 true nrHops
+    let geom ← IO.ofExcept (ofNIKE "x25519-ladder" 103 true nrHops)
     let surbOk ← runSURBRound geom
     IO.println s!"SURB round trip ({nrHops} hop(s)): {if surbOk then "ok" else "FAIL"}"
     ok := ok && surbOk

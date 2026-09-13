@@ -40,6 +40,16 @@ theorem extract_append_right (a b : ByteArray) :
     rw [ByteArray.getElem_extract, ByteArray.getElem_append_right (by omega)]
     simp
 
+/-- Extracting a range that lies entirely in the left half of a concatenation only sees that
+half. -/
+theorem extract_append_of_le (a b : ByteArray) {lo hi : Nat} (h : hi ≤ a.size) :
+    (a ++ b).extract lo hi = a.extract lo hi := by
+  apply ByteArray.ext_getElem
+  · simp [ByteArray.size_extract, ByteArray.size_append]; omega
+  · intro i h1 h2
+    rw [ByteArray.getElem_extract, ByteArray.getElem_extract,
+      ByteArray.getElem_append_left (by simp [ByteArray.size_extract] at h1; omega)]
+
 /-- Splitting at any point and rejoining is the identity. -/
 theorem append_extract (b : ByteArray) (n : Nat) (h : n ≤ b.size) :
     b.extract 0 n ++ b.extract n b.size = b := by
