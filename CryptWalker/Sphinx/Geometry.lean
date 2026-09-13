@@ -134,4 +134,56 @@ def ofKEM (kemSchemeName : String) (userForwardPayloadLength : Nat) (withSURB : 
   | some scheme =>
     pure (buildKEM kemSchemeName scheme.ciphertextSize userForwardPayloadLength withSURB nrHops)
 
+open CryptWalker.NIKE.NIKE (NIKE)
+open CryptWalker.KEM.KEM (KEM)
+
+/-- What it means for `geom` to have actually been built for `nike` via `buildNIKE` — exactly
+`buildNIKE`'s own field equations, spelled out directly rather than through the existence of some
+unnamed `ofNIKE` call. Every `Geometry.ofNIKE` result satisfies this for the `nike` it resolved
+(`ofNIKE_validForNIKE`). `NIKESphinx.lean`'s `nike`/`geom`-generic functions (`createHeader`,
+`newNIKEPacket`, `newNIKESURB`) accept *any* `(nike, geom)` pair — nothing in their types pins them
+together — so their size theorems need this as an explicit hypothesis to relate `geom`'s fixed
+fields to whichever specific `nike` a caller actually hands them. -/
+@[reducible] def Geometry.ValidForNIKE (geom : Geometry) (nike : NIKE) : Prop :=
+  geom.nextNodeHopLength = CryptWalker.Sphinx.Constants.nextNodeHopLength ∧
+  geom.perHopRoutingInfoLength = geom.nextNodeHopLength + surbReplyLength ∧
+  geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops ∧
+  geom.headerLength = adLength + nike.publicKeySize + geom.routingInfoLength + macLength ∧
+  geom.packetLength = geom.headerLength + geom.payloadTagLength + geom.forwardPayloadLength ∧
+  geom.surbLength = geom.headerLength + nodeIDLength + CryptWalker.Sphinx.Constants.sprpKeyMaterialLength
+
+/-- As `Geometry.ValidForNIKE`, for the KEM side (`buildKEM`): the group-element/ciphertext slot's
+width is `kem.ciphertextSize` rather than a NIKE's `publicKeySize`, and it's folded into
+`perHopRoutingInfoLength` too (`KEMSphinx.createKEMHeader` embeds a full ciphertext at every hop,
+not just the header's leading element). -/
+@[reducible] def Geometry.ValidForKEM (geom : Geometry) (kem : KEM) : Prop :=
+  geom.nextNodeHopLength = CryptWalker.Sphinx.Constants.nextNodeHopLength ∧
+  geom.perHopRoutingInfoLength = geom.nextNodeHopLength + surbReplyLength + kem.ciphertextSize ∧
+  geom.routingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops ∧
+  geom.headerLength = adLength + kem.ciphertextSize + geom.routingInfoLength + macLength ∧
+  geom.packetLength = geom.headerLength + geom.payloadTagLength + geom.forwardPayloadLength ∧
+  geom.surbLength = geom.headerLength + nodeIDLength + CryptWalker.Sphinx.Constants.sprpKeyMaterialLength
+
+theorem ofNIKE_validForNIKE (nikeSchemeName : String) (userForwardPayloadLength : Nat)
+    (withSURB : Bool) (nrHops : Nat) (geom : Geometry) (nike : NIKE)
+    (h : ofNIKE nikeSchemeName userForwardPayloadLength withSURB nrHops = .ok geom)
+    (hn : CryptWalker.NIKE.byName nikeSchemeName = some nike) :
+    geom.ValidForNIKE nike := by
+  unfold ofNIKE at h
+  rw [hn] at h
+  injection h with h
+  subst h
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+theorem ofKEM_validForKEM (kemSchemeName : String) (userForwardPayloadLength : Nat)
+    (withSURB : Bool) (nrHops : Nat) (geom : Geometry) (kem : KEM)
+    (h : ofKEM kemSchemeName userForwardPayloadLength withSURB nrHops = .ok geom)
+    (hk : CryptWalker.KEM.byName kemSchemeName = some kem) :
+    geom.ValidForKEM kem := by
+  unfold ofKEM at h
+  rw [hk] at h
+  injection h with h
+  subst h
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+
 end CryptWalker.Sphinx.Geometry

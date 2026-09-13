@@ -47,6 +47,14 @@ def RoutingCommand.toBytes : RoutingCommand → ByteArray
   | .nodeDelay d        => ⟨#[0x80]⟩ ++ ofVector (u32be d)
   | .null               => ⟨#[0x00]⟩
 
+/-- The one command size `createHeader`/`createKEMHeader` need to reason about their per-hop
+routing-info budget in terms of: appending a `.nextNodeHop` costs exactly `nextNodeHopLength`. -/
+@[simp] theorem RoutingCommand.nextNodeHop_toBytes_size (id mac : Vector UInt8 32) :
+    (RoutingCommand.nextNodeHop id mac).toBytes.size = nextNodeHopLength := by
+  simp only [RoutingCommand.toBytes, ByteArray.size_append, CryptWalker.Util.Bytes.size_ofVector,
+    nextNodeHopLength, commandTagLength, nodeIDLength, macLength]
+  rfl
+
 /-- `commands.FromBytes` for one command. `none` on success with no command (an empty buffer,
 or the `null` terminal), matching Go's `cmd == nil`; `.error` on a malformed buffer. Returns the
 parsed command (if any) together with the unconsumed remainder. -/

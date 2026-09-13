@@ -47,6 +47,16 @@ private def xor16 (a b : Block) : Block := Array.ofFn fun i : Fin 16 => a[i.val]
 private def xor4 (a b c d : Block) : Block :=
   Array.ofFn fun i : Fin 16 => a[i.val]! ^^^ b[i.val]! ^^^ c[i.val]! ^^^ d[i.val]!
 
+@[simp] private theorem xor16_size (a b : Block) : (xor16 a b).size = 16 := by simp [xor16]
+
+@[simp] private theorem xor4_size (a b c d : Block) : (xor4 a b c d).size = 16 := by simp [xor4]
+
+@[simp] private theorem shiftRows_size (s : Array UInt8) : (shiftRows s).size = 16 := by
+  simp [shiftRows]
+
+@[simp] private theorem mixColumns_size (s : Array UInt8) : (mixColumns s).size = 16 := by
+  simp [mixColumns]
+
 /-- GF(2¹²⁸) doubling: shift the 16-byte big-endian value left by one bit, reducing by the
 primitive polynomial `x¹²⁸+x⁷+x²+x+1` (conditionally XOR `0x87` into the low byte) when the top
 bit overflows. -/
@@ -70,6 +80,35 @@ private def aesRound (s rk : Block) : Block := xor16 (mixColumns (shiftRows (sub
 
 private def roundsApply (s : Block) (schedule : List Block) : Block := schedule.foldl aesRound s
 
+@[simp] private theorem aesRound_size (s rk : Block) : (aesRound s rk).size = 16 := by
+  simp [aesRound]
+
+/-- `roundsApply` "forgets" whatever size its starting block had after the first round, since
+`aesRound`'s output is always 16 bytes regardless of its input — so as long as the schedule is
+nonempty, the final size is 16 no matter what. Every schedule this file ever builds (`initState`'s
+`aes4Sched`/`aes10Sched`) is a literal 4- or 10-element list, so the hypothesis is always
+dischargeable by `simp`/`decide` at the call site. -/
+private theorem foldl_aesRound_size_or_eq (l : List Block) (s : Block) :
+    (l.foldl aesRound s).size = 16 ∨ (l = [] ∧ (l.foldl aesRound s).size = s.size) := by
+  induction l generalizing s with
+  | nil => right; exact ⟨rfl, rfl⟩
+  | cons hd tl ih =>
+    left
+    rw [List.foldl_cons]
+    rcases ih (aesRound s hd) with h | ⟨-, h⟩
+    · exact h
+    · rw [h]; simp
+
+private theorem foldl_aesRound_size {l : List Block} (s : Block) (h : l ≠ []) :
+    (l.foldl aesRound s).size = 16 := by
+  rcases foldl_aesRound_size_or_eq l s with h' | ⟨hl, -⟩
+  · exact h'
+  · exact absurd hl h
+
+private theorem roundsApply_size {s : Block} {l : List Block} (h : l ≠ []) :
+    (roundsApply s l).size = 16 :=
+  foldl_aesRound_size s h
+
 structure EState where
   I0 : Block
   I1 : Block
@@ -85,6 +124,29 @@ def aes4 (e : EState) (j i l src : Block) : Block := roundsApply (xor4 j i l src
 
 /-- `AES10(l; src)`: whiten with the call-site `l` alone, then 10 fixed-schedule rounds. -/
 def aes10 (e : EState) (l src : Block) : Block := roundsApply (xor16 src l) e.aes10Sched
+
+private theorem aes4_size {e : EState} (h : e.aes4Sched ≠ []) (j i l src : Block) :
+    (aes4 e j i l src).size = 16 :=
+  roundsApply_size h
+
+private theorem aes10_size {e : EState} (h : e.aes10Sched ≠ []) (l src : Block) :
+    (aes10 e l src).size = 16 :=
+  roundsApply_size h
+
+/-- Unconditional version: `aes4`'s whitened input is already size 16 (via `xor4_size`), so the
+result is size 16 whether or not `e.aes4Sched` is empty (an empty schedule just returns it as-is). -/
+@[simp] private theorem aes4_size' (e : EState) (j i l src : Block) : (aes4 e j i l src).size = 16 := by
+  unfold aes4 roundsApply
+  rcases foldl_aesRound_size_or_eq e.aes4Sched (xor4 j i l src) with h | ⟨-, h⟩
+  · exact h
+  · rw [h]; exact xor4_size j i l src
+
+/-- Unconditional version: `aes10`'s whitened input is already size 16 (via `xor16_size`). -/
+@[simp] private theorem aes10_size' (e : EState) (l src : Block) : (aes10 e l src).size = 16 := by
+  unfold aes10 roundsApply
+  rcases foldl_aesRound_size_or_eq e.aes10Sched (xor16 src l) with h | ⟨-, h⟩
+  · exact h
+  · rw [h]; exact xor16_size src l
 
 /-- `eState.init`, restricted to an already-48-byte extracted key (see module doc). -/
 def initState (key48 : Block) : EState :=
@@ -106,6 +168,12 @@ def initState (key48 : Block) : EState :=
     aes4Sched := [j0, i0, l1, l0]
     aes10Sched := [i0, j0, l1, i0, j0, l1, i0, j0, l1, i0] }
 
+@[simp] private theorem initState_aes4Sched_ne_nil (key48 : Block) :
+    (initState key48).aes4Sched ≠ [] := by simp [initState]
+
+@[simp] private theorem initState_aes10Sched_ne_nil (key48 : Block) :
+    (initState key48).aes10Sched ≠ [] := by simp [initState]
+
 /-! ## `aezHash`, restricted to no additional data
 
 Still general over nonce length (the AD-hashing loop is what's dropped, not the nonce loop),
@@ -114,6 +182,9 @@ a hash of sixteen zero bytes). -/
 
 private def oneZeroPad (src : Block) (sz : Nat) : Block :=
   Array.ofFn fun i : Fin 16 => if i.val < sz then src[i.val]! else if i.val == sz then 0x80 else 0
+
+@[simp] private theorem oneZeroPad_size (src : Block) (sz : Nat) : (oneZeroPad src sz).size = 16 := by
+  simp [oneZeroPad]
 
 def aezHashNoAD (e : EState) (nonce : ByteArray) : Block := Id.run do
   -- Hash of tau (= 0 for Sphinx): buf is sixteen zero bytes; E(3,1).
@@ -136,16 +207,78 @@ def aezHashNoAD (e : EState) (nonce : ByteArray) : Block := Id.run do
     sum := xor16 sum (aes4 e e.J2 e.I0 (e.L[0]!) frag)
   return sum
 
+/-- Folding any number of `.set!` calls — whatever indices or values, however many, in whatever
+order — never changes an array's size. This is the one fact behind every size-preservation proof
+below: every `for`-loop in `aezTiny`/`pass1`/`pass2`/`aezCore` that mutates an `Array UInt8`
+accumulator does so only via `.set!` at some index and value that are each pure functions of the
+loop variable (never of the accumulator itself). -/
+private theorem foldl_set!_size {α} (idx : Nat → Nat) (f : Nat → α) (l : List Nat) (a : Array α) :
+    (l.foldl (fun acc i => acc.set! (idx i) (f i)) a).size = a.size := by
+  induction l generalizing a with
+  | nil => rfl
+  | cons hd tl ih => rw [List.foldl_cons, ih, Array.size_set!]
+
+/-- The `rounds/2`-style loop in `aezTinyLR`/`aezCore`'s passes threads a pair of blocks (here,
+`Block × Block`, ignoring whatever else — `Int` counters and the like — rides along in further
+components) where each step unconditionally replaces both with a fresh, always-16-byte value
+(`xor16`'s output). So regardless of how many times it runs, and regardless of the *starting*
+sizes, both components come out exactly 16 bytes — *provided* the starting sizes already are, to
+cover the zero-iteration case where the fold returns its input unchanged. -/
+private theorem foldl_pair16_size {α β} (l : List β) (step : Block × Block × α → β → Block × Block × α)
+    (hstep1 : ∀ acc x, (step acc x).1.size = 16) (hstep2 : ∀ acc x, (step acc x).2.1.size = 16)
+    (a : Block × Block × α) (ha1 : a.1.size = 16) (ha2 : a.2.1.size = 16) :
+    (l.foldl step a).1.size = 16 ∧ (l.foldl step a).2.1.size = 16 := by
+  induction l generalizing a with
+  | nil => exact ⟨ha1, ha2⟩
+  | cons hd tl ih => rw [List.foldl_cons]; exact ih (step a hd) (hstep1 a hd) (hstep2 a hd)
+
+/-- `pass1`/`pass2`'s loop: whatever else its accumulator carries (`x`/`y`, the `ii` counter
+block), the `ByteArray` component (read off by `out`) grows by exactly 32 bytes every iteration —
+so after `l.length` iterations, it's grown by `32 * l.length`, regardless of what the accumulator
+actually is or how the other components evolve. -/
+private theorem foldl_append32_size {α γ} (l : List γ) (step : α → γ → α) (out : α → ByteArray)
+    (hstep : ∀ acc x, (out (step acc x)).size = (out acc).size + 32) (a : α) :
+    (out (l.foldl step a)).size = (out a).size + 32 * l.length := by
+  induction l generalizing a with
+  | nil => simp
+  | cons hd tl ih =>
+    rw [List.foldl_cons, ih (step a hd), hstep, List.length_cons]
+    omega
+
+/-- `pass1`/`pass2`'s loop body ends with `if i % 8 == 0 then ii := doubleBlock ii`, which
+elaborates to `if c then pure (.yield a) else pure (.yield b)` — not the flat
+`pure (.yield (f a b))` shape `List.forIn_pure_yield_eq_foldl` needs. This pushes the `pure`
+outward first (matching `NIKESphinx.lean`'s identically-named, identically-shaped fact for the
+`Except`-monad case), so that conversion can still fire. -/
+private theorem ite_pure_yield {α} (c : Prop) [Decidable c] (a b : α) :
+    (if c then (pure (ForInStep.yield a) : Id (ForInStep α)) else pure (ForInStep.yield b)) =
+      pure (ForInStep.yield (if c then a else b)) := by
+  split <;> rfl
+
 /-! ## `aezTiny`: inputs shorter than 32 bytes -/
 
-/-- `d = 0`: encipher; `d = 1`: decipher. -/
-def aezTiny (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) : ByteArray := Id.run do
+/-- `aezTiny`'s `(i0, rounds)` pair, pulled out under its own name so the size-preservation proof
+below can treat it as an opaque `Nat × Nat` — it only ever feeds an `L[i0]!` index and a loop
+trip count, neither of which affects `aezTiny`'s output *size* (every branch of every loop below
+is a `.set!`, unconditionally preserving size regardless of how many times it runs or which
+index it touches), so there is nothing to gain from a size proof case-splitting on it — and
+plenty to lose, since it would multiply every other case split by its own four branches. -/
+private def aezTinyParams (inBytes : Nat) : Nat × Nat :=
+  if inBytes == 1 then (7, 24)
+  else if inBytes == 2 then (7, 16)
+  else if inBytes < 16 then (7, 10)
+  else (6, 8)
+
+/-- `aezTiny`'s Feistel-round computation, producing the pair `(L, R)` the merge step below
+consumes. Pulled out under its own name for exactly one reason: `aezTiny`'s size-preservation
+proof only needs to know `(aezTinyLR ..).1.size = 16 ∧ (aezTinyLR ..).2.size = 16` (proved once,
+in isolation, the same way `roundsApply_size` is), and can otherwise treat this whole computation
+as opaque — without this split, every occurrence of `L`/`R` inside the merge step's own
+`for`-loops gets inlined into a separate copy of this entire computation, and the resulting term
+is too large for `simp`/`split` to process. -/
+private def aezTinyLR (e : EState) (delta : Block) (inArr : ByteArray) (d rounds i0 : Nat) :
+    Block × Block := Id.run do
   let inBytes := inArr.size
-  let (i0, rounds) :=
-    if inBytes == 1 then (7, 24)
-    else if inBytes == 2 then (7, 16)
-    else if inBytes < 16 then (7, 10)
-    else (6, 8)
   let half := (inBytes + 1) / 2
   let mut L : Block := zero16
   let mut R : Block := zero16
@@ -192,6 +325,14 @@ def aezTiny (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) : ByteArr
     R := xor16 R tmp2
 
     j := j + 2 * step
+  return (L, R)
+
+/-- `d = 0`: encipher; `d = 1`: decipher. -/
+def aezTiny (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) : ByteArray := Id.run do
+  let inBytes := inArr.size
+  let (i0, rounds) := aezTinyParams inBytes
+  let half := (inBytes + 1) / 2
+  let (L, R) := aezTinyLR e delta inArr d rounds i0
 
   -- Go's merge buffer is `[2*blockSize]byte` (32 bytes) here, not one block: `inBytes` can be
   -- up to 31, which overruns a 16-byte `Block`.
@@ -214,6 +355,33 @@ def aezTiny (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) : ByteArr
     let tmp := aes4 e zero16 e.I1 (e.L[3]!) buf2
     out := out.set! 0 (out.get! 0 ^^^ (tmp[0]! &&& 0x80))
   return out
+
+set_option maxHeartbeats 8000000 in
+private theorem aezTinyLR_size (e : EState) (delta : Block) (inArr : ByteArray) (d rounds i0 : Nat) :
+    (aezTinyLR e delta inArr d rounds i0).1.size = 16 ∧
+      (aezTinyLR e delta inArr d rounds i0).2.size = 16 := by
+  unfold aezTinyLR
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', List.forIn_pure_yield_eq_foldl, pure_bind]
+  repeat' split
+  all_goals
+    simp only [Id.run, pure, bind, zero16, Array.size_replicate, foldl_set!_size,
+      Array.size_set!]
+  all_goals
+    exact foldl_pair16_size _ _ (fun _ _ => xor16_size ..) (fun _ _ => xor16_size ..) _
+      (by simp only [zero16, Array.size_replicate, foldl_set!_size, Array.size_set!])
+      (by simp only [zero16, Array.size_replicate, foldl_set!_size, Array.size_set!])
+
+set_option maxHeartbeats 8000000 in
+private theorem aezTiny_size (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) :
+    (aezTiny e delta inArr d).size = inArr.size := by
+  unfold aezTiny
+  obtain ⟨hL, hR⟩ := aezTinyLR_size e delta inArr d (aezTinyParams inArr.size).2
+    (aezTinyParams inArr.size).1
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', List.forIn_pure_yield_eq_foldl, pure_bind]
+  repeat' split
+  all_goals
+    simp only [Id.run, pure, bind, ByteArray.size, ByteArray.set!, ByteArray.get!, zero16,
+      foldl_set!_size, Array.size_replicate, Array.size_set!, ByteArray.size_set!, hL, hR]
 
 /-! ## `aezCore`: inputs of 32 bytes or more
 
@@ -242,6 +410,21 @@ private def pass1 (e : EState) (inArr : ByteArray) (nChunks : Nat) : ByteArray �
     if i % 8 == 0 then ii := doubleBlock ii
   return (out, x)
 
+set_option maxHeartbeats 800000 in
+private theorem pass1_size (e : EState) (inArr : ByteArray) (nChunks : Nat) :
+    (pass1 e inArr nChunks).1.size = 32 * nChunks := by
+  unfold pass1
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind, ite_pure_yield]
+  simp only [Id.run, pure, bind]
+  rw [show (32 * nChunks : Nat)
+      = (ByteArray.empty : ByteArray).size + 32 * (List.range' 0 nChunks).length by
+    simp [List.length_range']]
+  exact foldl_append32_size _ _ Prod.fst
+    (fun acc x => by
+      split <;> simp only [ByteArray.size_append] <;> simp only [ByteArray.size, xor16_size] <;>
+        omega) _
+
 /-- Pass 2: returns `(outPrefix, Y)`, given `S` (fixed across all chunks) and pass 1's output
 prefix to read `P1a`/`P1b` from. -/
 private def pass2 (e : EState) (pass1Out : ByteArray) (s : Block) (nChunks : Nat) :
@@ -265,6 +448,21 @@ private def pass2 (e : EState) (pass1Out : ByteArray) (s : Block) (nChunks : Nat
     out := out ++ (⟨b2⟩ : ByteArray) ++ (⟨a2⟩ : ByteArray)
     if i % 8 == 0 then ii := doubleBlock ii
   return (out, y)
+
+set_option maxHeartbeats 800000 in
+private theorem pass2_size (e : EState) (pass1Out : ByteArray) (s : Block) (nChunks : Nat) :
+    (pass2 e pass1Out s nChunks).1.size = 32 * nChunks := by
+  unfold pass2
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind, ite_pure_yield]
+  simp only [Id.run, pure, bind]
+  rw [show (32 * nChunks : Nat)
+      = (ByteArray.empty : ByteArray).size + 32 * (List.range' 0 nChunks).length by
+    simp [List.length_range']]
+  exact foldl_append32_size _ _ Prod.fst
+    (fun acc x => by
+      split <;> simp only [ByteArray.size_append] <;> simp only [ByteArray.size, xor16_size] <;>
+        omega) _
 
 def aezCore (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) : ByteArray := Id.run do
   let len := inArr.size
@@ -333,6 +531,31 @@ def aezCore (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) : ByteArr
 
   return pass2Out ++ fragOut ++ lastTwo
 
+@[simp] private theorem ofFn_size {n} (f : Fin n → UInt8) : (Array.ofFn f).size = n := by simp
+
+/-- Targeted versions of `ByteArray.size`'s unfolding, applying only to a literal `⟨_⟩`/`.empty`
+constructor rather than an arbitrary `ByteArray`-valued term — unlike bare `ByteArray.size`, these
+don't touch a plain variable's `.size` (e.g. `inArr.size`), which would otherwise desync it from
+hypotheses/`by_cases` names stated in terms of `inArr.size`. -/
+@[simp] private theorem byteArray_mk_size (a : Array UInt8) : (⟨a⟩ : ByteArray).size = a.size := rfl
+
+@[simp] private theorem byteArray_empty_size : (ByteArray.empty : ByteArray).size = 0 := rfl
+
+set_option maxHeartbeats 1000000 in
+theorem aezCore_size (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat)
+    (h : 32 ≤ inArr.size) : (aezCore e delta inArr d).size = inArr.size := by
+  unfold aezCore
+  simp only [Id.run, pure, bind]
+  by_cases h64 : inArr.size ≥ 64 <;>
+    by_cases h16 : inArr.size % 32 ≥ 16 <;>
+      by_cases hgt : inArr.size % 32 > 0 <;>
+        simp only [h64, h16, hgt, if_true, if_false, ite_true, ite_false] <;>
+        simp only [ByteArray.size_append] <;>
+        (try simp only [pass1_size, pass2_size]) <;>
+        simp only [byteArray_mk_size, byteArray_empty_size, xor16_size, xor4_size, aes4_size',
+          aes10_size', ofFn_size] <;>
+        omega
+
 /-! ## Top-level dispatch, matching `encipher`/`decipher`/`SPRPEncrypt`/`SPRPDecrypt` -/
 
 def encipher (e : EState) (delta : Block) (inArr : ByteArray) : ByteArray :=
@@ -363,16 +586,41 @@ def sprpDecrypt (key : Array UInt8) (iv : ByteArray) (msg : ByteArray) : ByteArr
 AEZ in `τ = 0` mode is a length-preserving permutation by construction: every branch of
 `aezTiny`/`aezCore` assembles its output from pieces sized off `inArr.size` itself
 (`aezCore`'s three regions total `initialBytes + fragBytes + 32 = inArr.size`), and all 12
-`sprp_aez.json` vectors confirm it (ciphertext always exactly as long as plaintext). Stated as
-an axiom rather than proved from `aezTiny`/`aezCore`'s definitions — pushing a `for`-loop's size
-invariant through `Id.run do` is mechanical but long, like `NIKE.X25519`'s
-`curve25519_commutes`/`derivePub_safe`. `Sphinx.Interface` is what actually needs this: it's how
-`unwrap` gets a packet-size-preserving type. -/
+`sprp_aez.json` vectors confirm it (ciphertext always exactly as long as plaintext). Proved from
+`aezTiny`/`aezCore`'s definitions by pushing each `for`-loop's size invariant through `Id.run do`
+(`aezTinyLR_size`, `pass1_size`/`pass2_size`, `aezCore_size`). `Sphinx.Interface` is what actually
+needs this: it's how `unwrap` gets a packet-size-preserving type. -/
 
-axiom sprpEncrypt_size (key : Array UInt8) (iv msg : ByteArray) :
-    (sprpEncrypt key iv msg).size = msg.size
+theorem encipher_size (e : EState) (delta : Block) (inArr : ByteArray) :
+    (encipher e delta inArr).size = inArr.size := by
+  unfold encipher
+  split
+  · next h =>
+      have h0 : inArr.size = 0 := by simpa using h
+      rw [h0]; rfl
+  · split
+    · next h1 h2 => exact aezTiny_size e delta inArr 0
+    · next h1 h2 => exact aezCore_size e delta inArr 0 (by omega)
 
-axiom sprpDecrypt_size (key : Array UInt8) (iv msg : ByteArray) :
-    (sprpDecrypt key iv msg).size = msg.size
+theorem decipher_size (e : EState) (delta : Block) (inArr : ByteArray) :
+    (decipher e delta inArr).size = inArr.size := by
+  unfold decipher
+  split
+  · next h =>
+      have h0 : inArr.size = 0 := by simpa using h
+      rw [h0]; rfl
+  · split
+    · next h1 h2 => exact aezTiny_size e delta inArr 1
+    · next h1 h2 => exact aezCore_size e delta inArr 1 (by omega)
+
+theorem sprpEncrypt_size (key : Array UInt8) (iv msg : ByteArray) :
+    (sprpEncrypt key iv msg).size = msg.size := by
+  unfold sprpEncrypt
+  exact encipher_size _ _ _
+
+theorem sprpDecrypt_size (key : Array UInt8) (iv msg : ByteArray) :
+    (sprpDecrypt key iv msg).size = msg.size := by
+  unfold sprpDecrypt
+  exact decipher_size _ _ _
 
 end CryptWalker.Sphinx.Crypto.AEZ

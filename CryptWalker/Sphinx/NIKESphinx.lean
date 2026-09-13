@@ -249,6 +249,10 @@ private theorem ite_pure_yield {α : Type} (c : Prop) [Decidable c] (a b : α) :
       pure (ForInStep.yield (if c then a else b)) := by
   split <;> rfl
 
+@[simp] private theorem byteArray_empty_size : (ByteArray.empty : ByteArray).size = 0 := rfl
+
+@[simp] private theorem byteArray_mk_size (a : Array UInt8) : (⟨a⟩ : ByteArray).size = a.size := rfl
+
 set_option maxHeartbeats 1000000 in
 /-- `createHeader`'s header always starts with `v0AD ++ groupElements[0]!`, and
 `groupElements[0]!` is `clientPublicKey0` untouched — the blinding loop only ever writes indices
@@ -327,6 +331,254 @@ private theorem createHeader_hdr_bytesPub (nike : NIKE) (geom : Geometry)
       simpa [hv0, hpub] using CryptWalker.Util.Bytes.extract_append_right v0AD
         (ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)))
 
+/-- The per-iteration size growth of `createHeader`'s routing-info assembly loop (the third and
+final `for` loop): whatever the current fragment/budget/terminal-ness happen to be, a successful
+step always grows the accumulated `routingInfo` by exactly `geom.perHopRoutingInfoLength` bytes —
+`zeroPadTo` pads (never truncates, since the budget check bounds the fragment first) up to that
+width, and `xorBytes` afterward doesn't change the size. -/
+private theorem createHeader_loop3_step (nike : NIKE) (geom : Geometry) (path : Array PathHop)
+    (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
+    (nrHops : Nat) (hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (iRev : Nat) (hiRev : iRev < nrHops)
+    (ri mb ri' mb' : ByteArray)
+    (hstep :
+      (do
+        let i := nrHops - 1 - iRev
+        let isTerminal := i == nrHops - 1
+        let hop := path[i]!
+        let budget := if isTerminal then geom.perHopRoutingInfoLength
+          else geom.perHopRoutingInfoLength - geom.nextNodeHopLength
+        let mut riFragment ← commandsToBytes budget hop.commands
+        if !isTerminal then
+          let next := path[i + 1]!
+          riFragment := riFragment ++ (RoutingCommand.nextNodeHop next.id (toVec32 mb)).toBytes
+        let routingInfo := zeroPadTo geom.perHopRoutingInfoLength riFragment ++ ri
+        let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
+        let mPreimage := v0AD ++ groupElements[i]! ++ routingInfo
+          ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
+        let macBytes := ofVector (mac (keys[i]!).headerMAC mPreimage)
+        pure (ForInStep.yield (routingInfo, macBytes)) :
+          Except String (ForInStep (ByteArray × ByteArray))) = Except.ok (ForInStep.yield (ri', mb'))) :
+    ri'.size = ri.size + geom.perHopRoutingInfoLength := by
+  dsimp only at hstep
+  obtain ⟨riFragment0, hriFragment0, hstep⟩ := Except.eq_ok_of_bind_eq_ok hstep
+  by_cases hterm : nrHops - 1 - iRev = nrHops - 1
+  · have hcond : (nrHops - 1 - iRev == nrHops - 1) = true := by simp [hterm]
+    have hcond' : (!(nrHops - 1 - iRev == nrHops - 1)) = false := by simp [hterm]
+    simp only [hcond'] at hstep
+    simp only [hcond] at hriFragment0
+    simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
+      Bool.false_eq_true, reduceIte] at hstep hriFragment0
+    have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength := commandsToBytes_size_le hriFragment0
+    simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq, Prod.mk.injEq] at hstep
+    rw [← hstep.1, size_xorBytes, ByteArray.size_append, zeroPadTo_size hle0]; omega
+  · have hcond : (nrHops - 1 - iRev == nrHops - 1) = false := by simp [hterm]
+    have hcond' : (!(nrHops - 1 - iRev == nrHops - 1)) = true := by simp [hterm]
+    simp only [hcond'] at hstep
+    simp only [hcond] at hriFragment0
+    simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
+      Bool.false_eq_true, reduceIte] at hstep hriFragment0
+    have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength - geom.nextNodeHopLength :=
+      commandsToBytes_size_le hriFragment0
+    have hle1 : (riFragment0 ++ (RoutingCommand.nextNodeHop (path[nrHops - 1 - iRev + 1]!).id
+        (toVec32 mb)).toBytes).size ≤ geom.perHopRoutingInfoLength := by
+      simp only [ByteArray.size_append, RoutingCommand.nextNodeHop_toBytes_size]
+      omega
+    simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq, Prod.mk.injEq] at hstep
+    rw [← hstep.1, size_xorBytes, ByteArray.size_append, zeroPadTo_size hle1]; omega
+
+/-- The routing-info loop's step never exits via `.done` (no `break`) — companion to
+`createHeader_loop3_step`, split out as its own term-mode lemma (rather than an inline tactic
+block at the call site) so its `hstep` parameter's type can be unified from context lazily, the
+same way `createHeader_loop3_step`'s can — an inline `by`-tactic block there gets elaborated too
+eagerly, before the step function itself has been pinned down from `hLoop3`. -/
+private theorem createHeader_loop3_never_done (nike : NIKE) (geom : Geometry) (path : Array PathHop)
+    (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
+    (nrHops : Nat) (iRev : Nat) (ri mb : ByteArray) (a' : ByteArray × ByteArray)
+    (hstep :
+      (do
+        let i := nrHops - 1 - iRev
+        let isTerminal := i == nrHops - 1
+        let hop := path[i]!
+        let budget := if isTerminal then geom.perHopRoutingInfoLength
+          else geom.perHopRoutingInfoLength - geom.nextNodeHopLength
+        let mut riFragment ← commandsToBytes budget hop.commands
+        if !isTerminal then
+          let next := path[i + 1]!
+          riFragment := riFragment ++ (RoutingCommand.nextNodeHop next.id (toVec32 mb)).toBytes
+        let routingInfo := zeroPadTo geom.perHopRoutingInfoLength riFragment ++ ri
+        let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
+        let mPreimage := v0AD ++ groupElements[i]! ++ routingInfo
+          ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
+        let macBytes := ofVector (mac (keys[i]!).headerMAC mPreimage)
+        pure (ForInStep.yield (routingInfo, macBytes)) :
+          Except String (ForInStep (ByteArray × ByteArray))) = Except.ok (ForInStep.done a')) :
+    False := by
+  dsimp only at hstep
+  obtain ⟨riFragment0, -, hstep⟩ := Except.eq_ok_of_bind_eq_ok hstep
+  split at hstep <;> injection hstep with hstep <;> injection hstep
+
+set_option maxHeartbeats 1000000 in
+/-- **`createHeader`**'s `hdr.size`: `2 + nike.publicKeySize + geom.routingInfoLength +
+macLength`, matching `geom.headerLength` whenever `geom` was actually built for `nike` (the
+`hcompat`-style hypotheses below spell out exactly what that means, rather than assuming it
+silently: `geom.headerLength`, `geom.routingInfoLength` and `geom.perHopRoutingInfoLength` all
+come from `Geometry.buildNIKE`, which any `Geometry.ofNIKE nike.hpqcName ...` satisfies by
+construction). -/
+theorem createHeader_hdr_size (nike : NIKE) (geom : Geometry) (clientPrivateKey filler : ByteArray)
+    (path : Array PathHop) (hdr : ByteArray) (sprpKeys : Array SPRPKey)
+    (hvalid : geom.ValidForNIKE nike)
+    (h : createHeader nike geom clientPrivateKey filler path = .ok (hdr, sprpKeys)) :
+    hdr.size = geom.headerLength := by
+  obtain ⟨hnnh, hperhopEq, hrouting, hheader, -, -⟩ := hvalid
+  have hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength := by omega
+  unfold createHeader at h
+  dsimp only at h
+  split at h
+  case isTrue =>
+    have h' : (Except.error "sphinx: invalid path" : Except String (ByteArray × Array SPRPKey)) =
+        Except.ok (hdr, sprpKeys) := h
+    injection h'
+  case isFalse =>
+    split at h
+    case isTrue =>
+      have h' : (Except.error "sphinx: invalid filler length" :
+          Except String (ByteArray × Array SPRPKey)) = Except.ok (hdr, sprpKeys) := h
+      injection h'
+    case isFalse =>
+      rename_i h1 h2
+      simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+        Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl,
+        ite_pure_yield, pure_bind] at h
+      obtain ⟨clientSk, hSk, h⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+      obtain ⟨hop0, hHop0, h⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+      obtain ⟨loop1Final, hLoop1, h⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+      obtain ⟨loop3Final, hLoop3, h⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+      have hpos : 0 < path.size := by
+        simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at h1
+        omega
+      have hgen : path.size ≤ geom.nrHops := by
+        simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at h1
+        omega
+      injection h with h
+      have hhdr := congrArg Prod.fst h
+      simp only at hhdr
+      -- `groupElements[0]!`, untouched by loop1 — same argument as `createHeader_hdr_bytesPub`.
+      have hidx0 : loop1Final.1[0]! =
+          (Array.replicate path.size (ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)))
+            : Array ByteArray)[0]! :=
+        CryptWalker.Sphinx.Common.List.forIn_congr_of_forall_mem _ _
+          (fun (st : Array ByteArray × Array HopKeys × ByteArray) => st.1[0]!)
+          (by
+            intro a a' i hi hgb
+            obtain ⟨ss, -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
+            obtain ⟨y', -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hgb
+            injection hgb with hgb
+            rw [← hgb]
+            exact Array.getElem!_set!_ne a.1 i 0 _ (by obtain ⟨j, -, rfl⟩ := List.mem_range'.mp hi; omega))
+          (by
+            intro a a' i hi hgb
+            obtain ⟨ss, -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
+            obtain ⟨y', -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hgb
+            exact absurd hgb (by simp))
+          _ _ hLoop1
+      have hpub : (ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk))).size
+          = nike.publicKeySize := Util.Bytes.size_ofVector _
+      have hge0size : loop1Final.1[0]!.size = nike.publicKeySize := by
+        rw [hidx0, getElem!_pos _ _ (by simpa using hpos), Array.getElem_replicate, hpub]
+      -- `loop3Final.1`'s size, by pushing `createHeader_loop3_step` through the loop.
+      have hinit_size :
+          (if geom.nrHops > path.size then filler else (ByteArray.empty : ByteArray)).size
+            = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength := by
+        split
+        · next hgt =>
+            simp only [Bool.and_eq_true, decide_eq_true_eq, not_and, not_not] at h2
+            exact h2 hgt
+        · next hle =>
+            have : geom.nrHops - path.size = 0 := by omega
+            simp only [byteArray_empty_size, this, Nat.zero_mul]
+      have hloop3size : loop3Final.1.size =
+          (if geom.nrHops > path.size then filler else (ByteArray.empty : ByteArray)).size
+            + path.size * geom.perHopRoutingInfoLength := by
+        have hraw : (if geom.nrHops > path.size then filler else (ByteArray.empty : ByteArray)).size
+            + (List.range' 0 path.size).length * geom.perHopRoutingInfoLength = loop3Final.1.size := by
+          refine (CryptWalker.Sphinx.Common.List.forIn_add_of_forall_mem (List.range' 0 path.size) _
+            (fun (a : ByteArray × ByteArray) => a.1.size) geom.perHopRoutingInfoLength ?_ ?_ _ _ hLoop3).symm
+          · intro a a' iRev hiRev hgb
+            have hiRev' : iRev < path.size := by
+              obtain ⟨j, hj, rfl⟩ := List.mem_range'.mp hiRev; omega
+            obtain ⟨riFragment0, hriFragment0, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
+            by_cases hterm : path.size - 1 - iRev = path.size - 1
+            · have hcond : (path.size - 1 - iRev == path.size - 1) = true := by simp [hterm]
+              have hcond' : (!(path.size - 1 - iRev == path.size - 1)) = false := by simp [hterm]
+              simp only [hcond'] at hgb
+              simp only [hcond] at hriFragment0
+              simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true,
+                ite_false, Bool.false_eq_true, reduceIte] at hgb hriFragment0
+              have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength :=
+                commandsToBytes_size_le hriFragment0
+              simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hgb
+              rw [← congrArg Prod.fst hgb, size_xorBytes, ByteArray.size_append,
+                zeroPadTo_size hle0]
+              show geom.perHopRoutingInfoLength + a.1.size = a.1.size + geom.perHopRoutingInfoLength
+              omega
+            · have hcond : (path.size - 1 - iRev == path.size - 1) = false := by simp [hterm]
+              have hcond' : (!(path.size - 1 - iRev == path.size - 1)) = true := by simp [hterm]
+              simp only [hcond'] at hgb
+              simp only [hcond] at hriFragment0
+              simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true,
+                ite_false, Bool.false_eq_true, reduceIte] at hgb hriFragment0
+              have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength - geom.nextNodeHopLength :=
+                commandsToBytes_size_le hriFragment0
+              have hle1 : (riFragment0 ++ (RoutingCommand.nextNodeHop (path[path.size - 1 - iRev + 1]!).id
+                  (toVec32 a.2)).toBytes).size ≤ geom.perHopRoutingInfoLength := by
+                simp only [ByteArray.size_append, RoutingCommand.nextNodeHop_toBytes_size]
+                omega
+              simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hgb
+              rw [← congrArg Prod.fst hgb, size_xorBytes, ByteArray.size_append,
+                zeroPadTo_size hle1]
+              show geom.perHopRoutingInfoLength + a.1.size = a.1.size + geom.perHopRoutingInfoLength
+              omega
+          · intro a a' iRev hiRev hgb
+            obtain ⟨riFragment0, -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
+            split at hgb <;> injection hgb with hgb <;> injection hgb
+        simpa [List.length_range'] using hraw.symm
+      have hlne : List.range' 0 path.size ≠ [] := by
+        simp only [ne_eq, List.range'_eq_nil_iff]; omega
+      have hmacsize : loop3Final.2.size = 32 := by
+        refine CryptWalker.Sphinx.Common.List.forIn_const_of_forall_mem (List.range' 0 path.size) hlne
+          _ (fun (a : ByteArray × ByteArray) => a.2.size) 32 ?_ ?_ _ _ hLoop3
+        · intro a a' iRev hiRev hgb
+          obtain ⟨riFragment0, hriFragment0, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
+          by_cases hterm : path.size - 1 - iRev = path.size - 1
+          · have hcond' : (!(path.size - 1 - iRev == path.size - 1)) = false := by simp [hterm]
+            simp only [hcond'] at hgb
+            simp only [decide_eq_true_eq, if_true, if_false, ite_true, ite_false,
+              Bool.false_eq_true, reduceIte] at hgb
+            simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hgb
+            rw [← congrArg Prod.snd hgb]
+            exact Util.Bytes.size_ofVector _
+          · have hcond' : (!(path.size - 1 - iRev == path.size - 1)) = true := by simp [hterm]
+            simp only [hcond'] at hgb
+            simp only [decide_eq_true_eq, if_true, if_false, ite_true, ite_false,
+              Bool.false_eq_true, reduceIte] at hgb
+            simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hgb
+            rw [← congrArg Prod.snd hgb]
+            exact Util.Bytes.size_ofVector _
+        · intro a a' iRev hiRev hgb
+          obtain ⟨riFragment0, -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
+          split at hgb <;> injection hgb with hgb <;> injection hgb
+      have hv0 : v0AD.size = 2 := rfl
+      have hmulcombine : (geom.nrHops - path.size) * geom.perHopRoutingInfoLength
+          + path.size * geom.perHopRoutingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops := by
+        rw [← Nat.add_mul, Nat.sub_add_cancel hgen, Nat.mul_comm]
+      rw [← hhdr]
+      simp only [ByteArray.size_append, hv0, hge0size, hloop3size, hinit_size, hmacsize,
+        byteArray_empty_size]
+      rw [hheader, hrouting, ← hmulcombine]
+      simp only [adLength, macLength]
+
 /-- **`newNIKEPacket`**. -/
 def newNIKEPacket (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) : Except String ByteArray := do
@@ -372,11 +624,38 @@ confirmed by all 20 `sphinx_{nike,kem}_vectors.json` packets — see `Sphinx.Int
 for why this is an axiom rather than a proof through those loops. `wrapNIKE` uses it to give
 `Sphinx.Interface.wrap` a packet-length-preserving *type*, the same way `sprpDecrypt_size` lets
 `unwrapNIKE` do that for `forwardPkt`. -/
-axiom newNIKEPacket_size (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
+theorem newNIKEPacket_size (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
+    (hvalid : geom.ValidForNIKE nike)
     (h : newNIKEPacket nike geom clientPrivateKey filler path payload = .ok pkt)
     (hpay : payload.size = geom.forwardPayloadLength) :
-    pkt.size = geom.packetLength
+    pkt.size = geom.packetLength := by
+  obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
+  have hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength := by omega
+  unfold newNIKEPacket at h
+  dsimp only at h
+  split at h
+  case isTrue =>
+    have h' : (Except.error
+        s!"sphinx: invalid payload length: {payload.size}, expected {geom.forwardPayloadLength}" :
+        Except String ByteArray) = Except.ok pkt := h
+    injection h'
+  case isFalse =>
+    simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+      Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind] at h
+    obtain ⟨x, hx, hfx⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+    have hpkt : pkt = x.1 ++ (List.range' 0 x.2.size).foldl
+        (fun b a ↦ sprpEncrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
+        ({ data := Array.replicate geom.payloadTagLength 0 } ++ payload) := by
+      injection hfx with hfx; exact hfx.symm
+    have hhdrsize := createHeader_hdr_size nike geom clientPrivateKey filler path x.1 x.2 hvalid hx
+    have hfoldsize := CryptWalker.Sphinx.Common.List.foldl_size_preserving (List.range' 0 x.2.size)
+      (fun b a ↦ sprpEncrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
+      (fun b a ↦ CryptWalker.Sphinx.Crypto.AEZ.sprpEncrypt_size _ _ b)
+      ({ data := Array.replicate geom.payloadTagLength 0 } ++ payload)
+    rw [hpkt, ByteArray.size_append, hhdrsize, hfoldsize, ByteArray.size_append, hpacket]
+    simp only [byteArray_mk_size, Array.size_replicate]
+    omega
 
 open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
 
@@ -413,11 +692,27 @@ def newNIKESURB (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
 sprpKeyMaterialLength`, and `newNIKESURB`'s `surb` is exactly `hdr ++ id(32) ++
 keyPayload(64)` with `hdr.size = geom.headerLength` (`createHeader`'s own loop-accumulated
 invariant, the same one `newNIKEPacket_size` relies on). -/
-axiom newNIKESURB_size (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
+theorem newNIKESURB_size (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
     (keyPayload : Vector UInt8 64) (filler : ByteArray) (path : Array PathHop)
+    (hvalid : geom.ValidForNIKE nike)
     (surb surbKeys : ByteArray)
     (h : newNIKESURB nike geom clientPrivateKey keyPayload filler path = .ok (surb, surbKeys)) :
-    surb.size = geom.surbLength
+    surb.size = geom.surbLength := by
+  obtain ⟨-, -, -, -, -, hsurb⟩ := id hvalid
+  unfold newNIKESURB at h
+  dsimp only at h
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind] at h
+  obtain ⟨x, hx, hfx⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+  have hsurbeq : surb = x.1 ++ ofVector (path[0]!).id ++ ofVector keyPayload := by
+    injection hfx with hfx
+    exact congrArg Prod.fst hfx.symm
+  have hhdrsize := createHeader_hdr_size nike geom clientPrivateKey filler path x.1 x.2 hvalid hx
+  rw [hsurbeq, ByteArray.size_append, ByteArray.size_append, hhdrsize, hsurb,
+    CryptWalker.Util.Bytes.size_ofVector, CryptWalker.Util.Bytes.size_ofVector]
+  simp only [nodeIDLength, CryptWalker.Sphinx.Constants.sprpKeyMaterialLength,
+    CryptWalker.Sphinx.Constants.sprpKeyLength, CryptWalker.Sphinx.Constants.sprpIVLength,
+    CryptWalker.Sphinx.Constants.streamIVLength]
 
 /-- **`wrapNIKESURB`**: `Sphinx.Interface.newSURB` for `NIKESphinxScheme` — `newNIKESURB`, drawing
 the client's ephemeral key and `keyPayload` (two seeds' worth) from the seed stream instead of
@@ -427,12 +722,11 @@ def wrapNIKESURB (nike : NIKE) (geom : Geometry) (path : List PathHop) (filler :
   let clientKey ← nextSeed
   let kp1 ← nextSeed
   let kp2 ← nextSeed
-  match h : newNIKESURB nike geom (ofVector clientKey) (kp1 ++ kp2) filler path.toArray with
+  match newNIKESURB nike geom (ofVector clientKey) (kp1 ++ kp2) filler path.toArray with
   | .error e => throw e
   | .ok (surb, k) =>
-    have hsize : surb.size = geom.surbLength :=
-      newNIKESURB_size nike geom (ofVector clientKey) (kp1 ++ kp2) filler path.toArray surb k h
-    pure (⟨surb.data, hsize⟩, k)
+    if hsize : surb.size = geom.surbLength then pure (⟨surb.data, hsize⟩, k)
+    else throw "sphinx: internal error: newNIKESURB produced a wrong-sized SURB"
 
 /-- **`unwrapNIKE`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Interface.unwrap`
 (see that file). Unlike Go, a MAC mismatch reports only an error string, not also the replay
@@ -556,6 +850,7 @@ axiom wrapNIKE_unwrapNIKE_complete (nike : NIKE) (geom : Geometry) (path : List 
 private theorem wrapNIKE_bytesPub (nike : NIKE) (geom : Geometry) (path : List PathHop)
     (filler : ByteArray) (payload : Vector UInt8 geom.forwardPayloadLength) (i : Nat)
     (str : Nat → Vector UInt8 32) (v : Vector UInt8 geom.packetLength) (s' : SeedStream)
+    (hvalid : geom.ValidForNIKE nike)
     (h : wrapNIKE nike geom path filler payload (i, str) = .ok v s') :
     (ofVector v).extract 2 (2 + nike.publicKeySize) = nikeSelfPublicKeyBytes nike (ofVector (str i)) := by
   rcases hX : newNIKEPacket nike geom (ofVector (str i)) filler path.toArray (ofVector payload) with e | raw
@@ -564,8 +859,8 @@ private theorem wrapNIKE_bytesPub (nike : NIKE) (geom : Geometry) (path : List P
       match newNIKEPacket nike geom (ofVector (str i)) filler path.toArray (ofVector payload), hX with
       | _, rfl => rfl
     rw [hw] at h; injection h
-  · have hsize := newNIKEPacket_size nike geom (ofVector (str i)) filler path.toArray (ofVector payload) raw hX
-      (by simp)
+  · have hsize := newNIKEPacket_size nike geom (ofVector (str i)) filler path.toArray (ofVector payload) raw
+      hvalid hX (by simp)
     have hw : wrapNIKE nike geom path filler payload (i, str) = .ok ⟨raw.data, hsize⟩ (i + 1, str) := by
       simp only [wrapNIKE, Bind.bind, EStateM.bind, nextSeed]
       match newNIKEPacket nike geom (ofVector (str i)) filler path.toArray (ofVector payload), hX with
@@ -581,14 +876,15 @@ payload the rest of `wrap` is building. -/
 theorem wrapNIKE_envelope_indep (nike : NIKE) (geom : Geometry) (hop0 hop1 : PathHop)
     (rest0 rest1 : List PathHop) (filler0 filler1 : ByteArray)
     (payload0 payload1 : Vector UInt8 geom.forwardPayloadLength)
-    (st : SeedStream) (pkt0 pkt1 : Vector UInt8 geom.packetLength) (st0' st1' : SeedStream) :
+    (st : SeedStream) (pkt0 pkt1 : Vector UInt8 geom.packetLength) (st0' st1' : SeedStream)
+    (hvalid : geom.ValidForNIKE nike) :
     wrapNIKE nike geom (hop0 :: rest0) filler0 payload0 st = .ok pkt0 st0' →
     wrapNIKE nike geom (hop1 :: rest1) filler1 payload1 st = .ok pkt1 st1' →
     (ofVector pkt0).extract 2 (2 + nike.publicKeySize) = (ofVector pkt1).extract 2 (2 + nike.publicKeySize) := by
   intro h0 h1
   obtain ⟨i, str⟩ := st
-  rw [wrapNIKE_bytesPub nike geom (hop0 :: rest0) filler0 payload0 i str pkt0 st0' h0,
-    wrapNIKE_bytesPub nike geom (hop1 :: rest1) filler1 payload1 i str pkt1 st1' h1]
+  rw [wrapNIKE_bytesPub nike geom (hop0 :: rest0) filler0 payload0 i str pkt0 st0' hvalid h0,
+    wrapNIKE_bytesPub nike geom (hop1 :: rest1) filler1 payload1 i str pkt1 st1' hvalid h1]
 
 /-- A `Sphinx` scheme whose header carries a re-blindable public-key element: `Envelope` is that
 element's type (`parseEnvelope` extracts it from a packet), `Factor` is the space a fresh
@@ -661,7 +957,8 @@ is defined unconditionally (needed by test/vector-generation code, which can't r
 `nikeSphinxScheme`'s `Except` return because `NIKESphinxScheme` has `Type`-valued fields, putting it
 in `Type 1`, which `IO.ofExcept` cannot hold). `noncomputable` — see `nikeSphinxCore`'s doc comment
 if only the base `Sphinx` fields are actually needed. -/
-noncomputable def nikeSphinxSchemeOf (nike : NIKE) (geom : Geometry) : NIKESphinxScheme where
+noncomputable def nikeSphinxSchemeOf (nike : NIKE) (geom : Geometry)
+    (hvalid : geom.ValidForNIKE nike) : NIKESphinxScheme where
   toSphinx := nikeSphinxCore nike geom
   Envelope := nike.PublicKey
   parseEnvelope := fun pkt =>
@@ -672,20 +969,26 @@ noncomputable def nikeSphinxSchemeOf (nike : NIKE) (geom : Geometry) : NIKESphin
       st0' st1' h0 h1 =>
     congrArg (fun b => (nike.decodePublicKey (toVecN nike.publicKeySize b)).getD default)
       (wrapNIKE_envelope_indep nike geom hop0 hop1 rest0 rest1 filler0 filler1 payload0 payload1
-        st pkt0 pkt1 st0' st1' h0 h1)
+        st pkt0 pkt1 st0' st1' hvalid h0 h1)
   nike := nike
 
 /-- Build a `NIKESphinxScheme` for whatever NIKE `geom.scheme` names, resolved through
 `CryptWalker.NIKE.byName` — the same registry `Geometry.ofNIKE` itself resolves against. Genuinely
-agnostic to *which* registered NIKE this is: no size check, no wrapper type — every `NIKE` already
+agnostic to *which* registered NIKE this is: no fixed-size wrapper type — every `NIKE` already
 carries the size information this file needs, in its own `publicKeySize`/`privateKeySize`/
-`sharedSecretSize` fields. Registering a new NIKE needs no change here. -/
+`sharedSecretSize` fields. Registering a new NIKE needs no change here. The one runtime check this
+adds beyond the original axiom-based version: `geom` must actually agree with `nike` on the packet
+layout constants (`geom.ValidForNIKE nike`, decidable since it's just `Nat` equalities) — true of
+any `geom` obtained from `Geometry.ofNIKE name ...` for this same `name`, and rejected explicitly
+(rather than silently trusted) otherwise. -/
 noncomputable def nikeSphinxScheme (geom : Geometry) : Except String NIKESphinxScheme :=
   match geom.scheme with
   | .inr name => throw s!"sphinx: geometry scheme {name} is a KEM, not a NIKE"
   | .inl name =>
     match CryptWalker.NIKE.byName name with
     | none => throw s!"sphinx: NIKE scheme {name} not implemented"
-    | some nike => pure (nikeSphinxSchemeOf nike geom)
+    | some nike =>
+      if hvalid : geom.ValidForNIKE nike then pure (nikeSphinxSchemeOf nike geom hvalid)
+      else throw s!"sphinx: geometry is not valid for NIKE scheme {name}"
 
 end CryptWalker.Sphinx.NIKESphinx

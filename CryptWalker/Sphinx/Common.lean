@@ -149,10 +149,87 @@ theorem List.forIn_congr_of_forall_mem {α β ε γ : Type} (l : List β)
       rw [← hfinal']
       exact hdone init a' b List.mem_cons_self hstep
 
+/-- As `List.forIn_congr_of_forall_mem`, but for a loop that *grows* `φ` by a fixed `k` at every
+successful step rather than leaving it unchanged — what `createHeader`/`createKEMHeader`'s
+routing-info assembly loop needs (`φ` = the accumulated routing-info block's size, `k` =
+`geom.perHopRoutingInfoLength`). None of this project's loops ever exit via `.done` (no `break`),
+so `hdone` only needs to rule that outcome out, not describe it. -/
+theorem List.forIn_add_of_forall_mem {α β ε : Type} (l : List β)
+    (f : β → α → Except ε (ForInStep α)) (φ : α → ℕ) (k : ℕ)
+    (hyield : ∀ (a a' : α) (b : β), b ∈ l → f b a = Except.ok (ForInStep.yield a') → φ a' = φ a + k)
+    (hdone : ∀ (a a' : α) (b : β), b ∈ l → f b a = Except.ok (ForInStep.done a') → False) :
+    ∀ (init final : α), forIn l init f = Except.ok final → φ final = φ init + l.length * k := by
+  induction l with
+  | nil =>
+    intro init final hfinal
+    simp only [List.forIn_nil] at hfinal
+    injection hfinal with hfinal
+    simp [← hfinal]
+  | cons b bs ih =>
+    intro init final hfinal
+    rw [List.forIn_cons] at hfinal
+    obtain ⟨step, hstep, hfinal'⟩ := Except.eq_ok_of_bind_eq_ok hfinal
+    cases step with
+    | yield a' =>
+      simp only at hfinal'
+      rw [ih (fun a a' b' hb' hgb' => hyield a a' b' (List.mem_cons_of_mem b hb') hgb')
+        (fun a a' b' hb' hgb' => hdone a a' b' (List.mem_cons_of_mem b hb') hgb') a' final hfinal',
+        hyield init a' b List.mem_cons_self hstep, List.length_cons]
+      ring
+    | done a' =>
+      exact absurd hstep (fun hh => hdone init a' b List.mem_cons_self hh)
+
+/-- As `List.forIn_congr_of_forall_mem`, but for a loop whose step *overwrites* `ψ` to a fixed
+value `v` at every successful step (rather than leaving it unchanged) — what
+`createHeader`/`createKEMHeader`'s routing-info loop needs for its `macBytes` component: every
+iteration recomputes it fresh from `mac`, always 32 bytes, regardless of what it was before. Needs
+`l ≠ []` (unlike `forIn_add_of_forall_mem`'s `+k`, which is vacuously true at `0`): an empty loop
+never overwrites anything, so `ψ`'s final value is just whatever `init` had. -/
+theorem List.forIn_const_of_forall_mem {α β ε γ : Type} (l : List β) (hl : l ≠ [])
+    (f : β → α → Except ε (ForInStep α)) (ψ : α → γ) (v : γ)
+    (hyield : ∀ (a a' : α) (b : β), b ∈ l → f b a = Except.ok (ForInStep.yield a') → ψ a' = v)
+    (hdone : ∀ (a a' : α) (b : β), b ∈ l → f b a = Except.ok (ForInStep.done a') → False) :
+    ∀ (init final : α), forIn l init f = Except.ok final → ψ final = v := by
+  induction l with
+  | nil => exact absurd rfl hl
+  | cons b bs ih =>
+    intro init final hfinal
+    rw [List.forIn_cons] at hfinal
+    obtain ⟨step, hstep, hfinal'⟩ := Except.eq_ok_of_bind_eq_ok hfinal
+    cases step with
+    | yield a' =>
+      simp only at hfinal'
+      by_cases hbsnil : bs = []
+      · subst hbsnil
+        simp only [List.forIn_nil] at hfinal'
+        injection hfinal' with hfinal'
+        rw [← hfinal']
+        exact hyield init a' b List.mem_cons_self hstep
+      · exact ih hbsnil (fun a a' b' hb' hgb' => hyield a a' b' (List.mem_cons_of_mem b hb') hgb')
+          (fun a a' b' hb' hgb' => hdone a a' b' (List.mem_cons_of_mem b hb') hgb') a' final hfinal'
+    | done a' =>
+      exact absurd hstep (fun hh => hdone init a' b List.mem_cons_self hh)
+
 def mac (key : Vector UInt8 32) (msg : ByteArray) : Vector UInt8 32 := hmacSha256 (ofVector key) msg
 
 def zeroPadTo (n : Nat) (b : ByteArray) : ByteArray :=
   if b.size ≥ n then b else b ++ ⟨Array.replicate (n - b.size) 0⟩
+
+/-- Targeted version of `ByteArray.size`'s unfolding, applying only to a literal `⟨_⟩` constructor
+rather than an arbitrary `ByteArray`-valued term — as `AEZ.lean`'s `byteArray_mk_size`, avoids
+touching a plain variable's `.size` (which desyncs it from unrelated hypotheses) and the
+`ByteArray.size`/`ByteArray.size_data` simp-loop that arises from unfolding `.size` generically. -/
+@[simp] private theorem byteArray_mk_size (a : Array UInt8) : (⟨a⟩ : ByteArray).size = a.size := rfl
+
+/-- `zeroPadTo` only ever *grows* `b` up to exactly `n` — given the caller already knows
+`b.size ≤ n` (as `createHeader`/`createKEMHeader` do, from `commandsToBytes`'s budget check), the
+result is always exactly `n` bytes, not merely "at least `n`". -/
+theorem zeroPadTo_size {n : Nat} {b : ByteArray} (h : b.size ≤ n) : (zeroPadTo n b).size = n := by
+  unfold zeroPadTo
+  split
+  · omega
+  · simp only [ByteArray.size_append, byteArray_mk_size, Array.size_replicate]
+    omega
 
 /-- Go's "leave spare room for one" check: `budget` is what's left of `perHopRoutingInfoLength`
 for the caller's *own* commands once whatever `createHeader`/`createKEMHeader` appends
@@ -162,5 +239,72 @@ def commandsToBytes (budget : Nat) (cmds : List RoutingCommand) : Except String 
   if b.size > budget then
     throw "sphinx: invalid commands, oversized serialized block"
   pure b
+
+/-- `commandsToBytes`'s only failure path is its own explicit budget check, so success always
+means the serialized block fit within `budget`. -/
+theorem commandsToBytes_size_le {budget : Nat} {cmds : List RoutingCommand} {b : ByteArray}
+    (h : commandsToBytes budget cmds = .ok b) : b.size ≤ budget := by
+  unfold commandsToBytes at h
+  dsimp only at h
+  split at h
+  · injection h
+  · next hle =>
+      injection h with h
+      rw [← h]
+      omega
+
+/-- A `List.foldl` whose step preserves a `ByteArray`'s size leaves the fold's overall size
+unchanged — what `newNIKEPacket`/`newNIKESURB`'s (and their KEM counterparts') per-hop
+`sprpEncrypt`/`sprpDecrypt` fold need, since each is length-preserving
+(`AEZ.sprpEncrypt_size`/`sprpDecrypt_size`) regardless of how many hops the fold runs over. -/
+theorem List.foldl_size_preserving {α : Type} (l : List α) (step : ByteArray → α → ByteArray)
+    (hstep : ∀ b a, (step b a).size = b.size) (init : ByteArray) :
+    (l.foldl step init).size = init.size := by
+  induction l generalizing init with
+  | nil => rfl
+  | cons hd tl ih => rw [List.foldl_cons, ih, hstep]
+
+/-- What `createKEMHeader`'s per-hop encapsulation loop needs for its `kemElements` array: if
+every successful step only ever *pushes* one more fixed-size `ByteArray` (never touching earlier
+entries), then every entry of the final array has that size, given every entry of the initial
+array already does. -/
+theorem List.forIn_push_size_of_forall_mem {α β ε : Type} (l : List β) (n : Nat)
+    (π : α → Array ByteArray) (f : β → α → Except ε (ForInStep α))
+    (hyield : ∀ (a a' : α) (b : β), b ∈ l →
+      f b a = Except.ok (ForInStep.yield a') → ∃ x, x.size = n ∧ π a' = (π a).push x)
+    (hdone : ∀ (a a' : α) (b : β), b ∈ l →
+      f b a = Except.ok (ForInStep.done a') → False) :
+    ∀ (init final : α), (∀ j (hj : j < (π init).size), ((π init)[j]'hj).size = n) →
+      forIn l init f = Except.ok final →
+      ∀ j (hj : j < (π final).size), ((π final)[j]'hj).size = n := by
+  induction l with
+  | nil =>
+    intro init final hinit hfinal
+    simp only [List.forIn_nil] at hfinal
+    injection hfinal with hfinal
+    rw [← hfinal]; exact hinit
+  | cons b bs ih =>
+    intro init final hinit hfinal
+    rw [List.forIn_cons] at hfinal
+    obtain ⟨step, hstep, hfinal'⟩ := Except.eq_ok_of_bind_eq_ok hfinal
+    cases step with
+    | yield a' =>
+      simp only at hfinal'
+      obtain ⟨x, hx, hxeq⟩ := hyield init a' b List.mem_cons_self hstep
+      have hinit' : ∀ j (hj : j < (π a').size), ((π a')[j]'hj).size = n := by
+        rw [hxeq]
+        intro j hj
+        simp only [Array.size_push] at hj
+        rcases Nat.lt_or_ge j (π init).size with hjlt | hjge
+        · rw [Array.getElem_push_lt hjlt]
+          exact hinit j hjlt
+        · have hje : j = (π init).size := by omega
+          subst hje
+          rw [Array.getElem_push_eq]
+          exact hx
+      exact ih (fun a a' b' hb' hgb' => hyield a a' b' (List.mem_cons_of_mem b hb') hgb')
+        (fun a a' b' hb' hgb' => hdone a a' b' (List.mem_cons_of_mem b hb') hgb') a' final hinit' hfinal'
+    | done a' =>
+      exact absurd hstep (fun hh => hdone init a' b List.mem_cons_self hh)
 
 end CryptWalker.Sphinx.Common
