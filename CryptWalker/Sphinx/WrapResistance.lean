@@ -19,8 +19,8 @@ queries give at most `c/(q−1)` by a union bound.
 
 `CryptWalker.Sphinx.Interface.uniformHit_eq` is that argument stripped of everything Sphinx-specific:
 a uniformly sampled `b` composed with *any* bijection lands on a fixed target with probability
-exactly `1/|domain|`, regardless of what the bijection is — it's also what `BlindedScheme`'s
-`wrap_resistant` field reduces to for every instance. `blind_wrapResistance` here is the
+exactly `1/|domain|`, regardless of what the bijection is — it's also what
+`NIKESphinxScheme.wrap_resistant` reduces to for every instance. `blind_wrapResistance` here is the
 single-query instance of that fact for `X25519.lean`'s group (the `AddCommGroup Point` from
 `Mathlib`'s `WeierstrassCurve.Affine.Point`, not a `Module`/field-of-scalars setup — Curve25519's
 scalars are plain `ℕ`-multiples, which every `AddCommGroup` already carries).
@@ -32,7 +32,7 @@ argument repeated `c` times under a union bound, not built here.
 `NIKESphinx.lean`'s `blind`, one rewrite away from `X25519.dh_commutes`'s picture, modulo going
 through `X25519_montgomery_ladder`'s byte-level ladder (`NIKESphinx` runs the ladder, whose own
 consistency with the group law is `curve25519_commutes`, itself an axiom — not re-derived here).
-`NIKESphinx.lean`'s `NIKESphinxBlinded` is the corresponding `BlindedScheme` instance.
+`NIKESphinx.lean`'s `nikeSphinxScheme` is the corresponding `NIKESphinxScheme` instance.
 **KEM-Sphinx has no analogue.** Its per-hop step is an independent KEM encapsulation, not a
 group element re-blinded (`KEMSphinx.lean`: "no blinding chain, so no `Blind` step, since there
 is no group element to re-blind"). The corresponding property there would bound forging a KEM

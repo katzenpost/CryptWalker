@@ -27,30 +27,32 @@ used nowhere else in this project, from VCVio's `PRG.lean`) is reused three time
 bespoke PRF/PRP game, matching the paper's own remark that for this proof "we treat them as
 random oracles."
 
-## Two idealizations, matching the paper's own hand-wave
+## One idealization, one computational assumption
 
 The paper says, of ρ and μ, "for the purposes of this section, we treat them as random oracles"
 (§4, before §4.2's proof) — i.e. §4.2/§4.4 do not use ρ/μ/π's PRG/PRF/PRP security directly, but
-an idealization one step stronger. Two idealizations are used here, both standard and both
-isolated as explicit hypotheses (never baked into a proof), matching this codebase's existing
-convention of naming rather than re-deriving deep assumptions (`WrapResistance.lean`'s `hbij`,
-`NIKE.X25519`'s `curve25519_commutes`):
+an idealization one step stronger. This file needs exactly one exact idealization and one
+genuine computational assumption, both isolated as explicit hypotheses (never baked into a
+proof), matching this codebase's existing convention of naming rather than re-deriving deep
+assumptions (`WrapResistance.lean`'s `hbij`, `NIKE.X25519`'s `curve25519_commutes`):
 
 * **DDH** (`DiffieHellman.lean`, unchanged): `s0`'s indistinguishability from an independent
-  random group element.
-* **Joint random-oracle independence**: `hρ, hμ, hπ`, queried at the same fresh `s0`, behave as
-  three *independent* random functions — captured here as a single hypothesis, that
-  `s0 ↦ (hρ s0, hμ s0, hπ s0)` is a bijection onto the product `Seed × KeyMu × KeyPi` (so that
-  pushing a uniform `s0` through it lands on the *product*'s uniform distribution, which is
-  exactly independent-per-factor uniform sampling — `SampleableType (α × β)`'s own definition,
-  `(·,·) <$> ($ᵗ α) <*> ($ᵗ β)`, is literally that). Without this, `ρ(hρ s0)`, `μ(hμ s0, ·)` and
-  `π(hπ s0, ·)`'s three keys would stay perfectly correlated (all deterministic functions of the
-  same `s0`) and the three PRG hybrid steps below could not be run independently of one another.
+  random group element — an exact idealization (`s0 = (a*b)•g` vs. `c•g` for independent `c`, no
+  approximation), same as everywhere else DDH is used.
+* **Joint random-oracle "independence"**: `hρ, hμ, hπ`, queried at the same fresh `s0`, are
+  intended to behave as three *independent* random functions. Earlier this was modeled as an
+  exact bijection `s0 ↦ (hρ s0, hμ s0, hπ s0)` onto `Seed × KeyMu × KeyPi` — clean to state, but
+  false for any real, expanding key-derivation function (an HKDF-Expand-style KDF stretching a
+  short secret into more key material than it has entropy for cannot be injective, by
+  pigeonhole, so it certainly isn't bijective). The correct, honest version treats this map as a
+  `PRGScheme` (`jointKeyPRG`, in `KeyIndependence` below) and bounds the gap it introduces by that
+  PRG's own `prgAdvantage`, exactly like the other three hybrid steps — see `jointKeyPRG`'s own
+  doc comment for the full argument.
 
-Once both idealizations are in hand, β0/γ0/δ0's keys are exactly three independent uniform
-values, and ρ/μ/π's own (real, standard) `PRGScheme.prgAdvantage` bounds the rest — the genuinely
-cryptographic content, not re-derived here (same boundary `sprpEncrypt_size`/`curve25519_commutes`
-already draw between "proved" and "assumed" in this project).
+Once both are in hand, β0/γ0/δ0's keys are — up to that PRG's own advantage — three independent
+uniform values, and ρ/μ/π's own (real, standard) `PRGScheme.prgAdvantage` bounds the rest, the
+same boundary `sprpEncrypt_size`/`curve25519_commutes` already draw between "proved" and
+"assumed" in this project.
 
 ## Out of scope
 
@@ -203,33 +205,57 @@ def game2' (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Del
   let guess ← A (buildFromKeys S (x • S.g) p.1 p.2.1 p.2.2 (if b then c1 else c0))
   return (b == guess)
 
-/-- **`G2` ⇒ `G2'`**: pushing a uniform `c'` through the bijection `c' ↦ (hρ(c'•g), hμ(c'•g),
-hπ(c'•g))` (`hgBij`: `g` generates the DH group, so scalar multiplication by a uniform scalar is
-itself a bijection onto it, exactly the idealization `Sphinx.WrapResistance`'s `hbij` already
-makes; `hjoint`: the module doc's random-oracle-independence idealization) lands on the uniform
-distribution over `Seed × KeyMu × KeyPi` — which, by `SampleableType (α × β)`'s own definition
-as independent component draws, *is* sampling `seed, kmu, kpi` independently. -/
-theorem probTrue_game2_eq_game2'
-    (hgBij : Function.Bijective (fun c' : F => c' • S.g))
-    (hjoint : Function.Bijective (fun s0 : G => (S.hρ s0, S.hμ s0, S.hπ s0)))
+/-- **`G2` ⇒ `G2'` is a PRG hybrid step, not an exact equality.** The three random-oracle-keyed
+values are *modeled* as an independent triple once `s0` is uniform, but the map that actually
+produces them, `c' ↦ (hρ(c'•g), hμ(c'•g), hπ(c'•g))`, is a genuine key-derivation function on a
+real scheme — for `NIKESphinx`'s `sphinxKDF`, an HKDF-Expand call turning a 32-byte shared secret
+into 160 bytes of key material. That map **cannot be a bijection** onto `Seed × KeyMu × KeyPi`
+whenever the codomain is larger than `F` (pigeonhole: an expanding KDF has no injective inverse,
+let alone a bijective one) — so unlike `hgBij`-style idealizations elsewhere in this project, an
+*exact*-equality hypothesis here would be false for the concrete scheme, not merely unproved.
+The honest version is computational: `c' ↦ (hρ(c'•g), hμ(c'•g), hπ(c'•g))` is a `PRGScheme`
+(`jointKeyPRG`) from `F` to `Seed × KeyMu × KeyPi`, and `G2`/`G2'` are its real/ideal experiments
+composed with the rest of the game — bounded by `jointKeyPRG`'s own `prgAdvantage`, not claimed
+to vanish. -/
+def jointKeyPRG : PRGScheme F (Seed × KeyMu × KeyPi) :=
+  ⟨fun c' => (S.hρ (c' • S.g), S.hμ (c' • S.g), S.hπ (c' • S.g))⟩
+
+/-- The joint-key hybrid's reduction adversary: given a `Seed × KeyMu × KeyPi` value (real —
+`jointKeyPRG`'s output for a fresh `c'` — or ideal, fresh-uniform), sample `x`/`b` and finish. -/
+def jointAdversaryOf
+    (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
+    (c0 c1 : Choice Beta Delta) (x : F) : PRGAdversary (Seed × KeyMu × KeyPi) := fun p => do
+  let b ← $ᵗ Bool
+  let guess ← A (buildFromKeys S (x • S.g) p.1 p.2.1 p.2.2 (if b then c1 else c0))
+  return (b == guess)
+
+/-- `prgRealExp (jointKeyPRG) (jointAdversaryOf ... x)` reconstructs `game2` exactly: both sample
+`x`, then `c'`, then `b`, in that order. -/
+theorem probTrue_game2_eq_prgRealExp_joint
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
-    Pr[= true | game2 S A c0 c1] = Pr[= true | game2' S A c0 c1] := by
-  unfold game2 game2'
+    Pr[= true | game2 S A c0 c1] =
+      Pr[= true | do
+        let x ← $ᵗ F
+        prgRealExp (jointKeyPRG S) (jointAdversaryOf S A c0 c1 x)] := by
+  unfold game2 prgRealExp jointKeyPRG jointAdversaryOf
+  rfl
+
+/-- `prgIdealExp (jointAdversaryOf ... x)` reconstructs `game2'` up to reordering the independent
+`b`/`p` samples — `probOutput_bind_bind_swap` handles that, the same way
+`probTrue_game2_eq_ddhExpRand`/`probTrue_game3` already do elsewhere in this file. -/
+theorem probTrue_game2'_eq_prgIdealExp_joint
+    (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
+    (c0 c1 : Choice Beta Delta) :
+    Pr[= true | game2' S A c0 c1] =
+      Pr[= true | do
+        let x ← $ᵗ F
+        prgIdealExp (jointAdversaryOf S A c0 c1 x)] := by
+  unfold game2' prgIdealExp jointAdversaryOf
   refine probOutput_bind_congr' ($ᵗ F) true fun x => ?_
-  rw [probOutput_bind_bind_swap ($ᵗ F) ($ᵗ Bool)
-    (fun c' b => A (buildFrom S (x • S.g) (c' • S.g) (if b then c1 else c0)) >>=
+  rw [probOutput_bind_bind_swap ($ᵗ Bool) ($ᵗ (Seed × KeyMu × KeyPi))
+    (fun b p => A (buildFromKeys S (x • S.g) p.1 p.2.1 p.2.2 (if b then c1 else c0)) >>=
       fun guess => pure (b == guess)) true]
-  refine probOutput_bind_congr' ($ᵗ Bool) true fun b => ?_
-  have hcomp : Function.Bijective
-      (fun c' : F => (S.hρ (c' • S.g), S.hμ (c' • S.g), S.hπ (c' • S.g))) :=
-    hjoint.comp hgBij
-  simpa using probOutput_bind_bijective_uniform_cross
-    (α := F) (β := Seed × KeyMu × KeyPi)
-    (fun c' => (S.hρ (c' • S.g), S.hμ (c' • S.g), S.hπ (c' • S.g))) hcomp
-    (fun p => A (buildFromKeys S (x • S.g) p.1 p.2.1 p.2.2 (if b then c1 else c0)) >>=
-      fun guess => pure (b == guess))
-    true
 
 end KeyIndependence
 
@@ -346,25 +372,31 @@ variable [SampleableType F] [SampleableType Seed] [SampleableType KeyMu] [Sample
   [SampleableType Beta] [SampleableType Gamma] [SampleableType Delta]
   [SampleableType (Seed × KeyMu × KeyPi)] [Finite F]
 
-/-- **Main theorem (§4.4)**: the adversary's advantage is bounded by the DDH-distinguishing
-advantage of the constructed reduction (`ddhAdversaryOf`) plus the gap between `G2'` and `G3` —
-by `probTrue_game2'_eq_prgRealExp_combined`/`probTrue_game3_eq_prgIdealExp_combined`, that gap
-*is* the combined `ρ/μ/π`-derivation's one-shot PRG-distinguishing advantage against the
-constructed adversary `combinedAdversaryOf`, averaged over the coin flip picking `combinedPRG
-S c0` vs `combinedPRG S c1` — supplied here as `hprg` directly, rather than routed back through
-`PRGScheme.prgAdvantage`'s own definition, to avoid re-deriving the coin-averaging bookkeeping;
-a caller instantiating `hprg` from an actual `ρ/μ/π` security assumption does that rewriting via
-the two lemmas named above. `hddh` is `ddhDistAdvantage`'s own bound, unpacked at the call site
-the same way. Both idealizations (`hgBij`, `hjoint`) and `game3`'s zero-advantage fact
-(`probTrue_game3`) are used internally with no further hypotheses. -/
+/-- **Main theorem (§4.4)**: the adversary's advantage is bounded by three gaps, one per hybrid
+step, each a genuine computational assumption rather than an idealization claimed to vanish
+exactly:
+
+* `hddh` — `ddhDistAdvantage`'s own bound on the constructed reduction `ddhAdversaryOf`
+  (`G ⇒ G2`), unpacked at the call site via `probTrue_gameReal_eq_ddhExpReal`/
+  `probTrue_game2_eq_ddhExpRand`.
+* `hjointPRG` — the gap between `G2` and `G2'`, which by `probTrue_game2_eq_prgRealExp_joint`/
+  `probTrue_game2'_eq_prgIdealExp_joint` *is* `jointKeyPRG`'s own one-shot PRG-distinguishing
+  advantage against `jointAdversaryOf`. This replaced an earlier exact-bijection idealization
+  that turned out to be false for any expanding KDF (see `jointKeyPRG`'s doc comment) — this is
+  the corrected, honest version.
+* `hprg` — the gap between `G2'` and `G3`, the combined `ρ/μ/π`-derivation's PRG advantage
+  against `combinedAdversaryOf`, via `probTrue_game2'_eq_prgRealExp_combined`/
+  `probTrue_game3_eq_prgIdealExp_combined`, as before.
+
+`game3`'s zero-advantage fact (`probTrue_game3`) is used internally with no further hypotheses. -/
 theorem advantage_le
-    (hgBij : Function.Bijective (fun c' : F => c' • S.g))
-    (hjoint : Function.Bijective (fun s0 : G => (S.hρ s0, S.hμ s0, S.hπ s0)))
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
-    [∀ v, NeverFail (A v)] (c0 c1 : Choice Beta Delta) (εDDH εPRG : ℝ)
+    [∀ v, NeverFail (A v)] (c0 c1 : Choice Beta Delta) (εDDH εJoint εPRG : ℝ)
     (hddh : ddhDistAdvantage S.g (ddhAdversaryOf S A c0 c1) ≤ εDDH)
+    (hjointPRG : |(Pr[= true | game2 S A c0 c1]).toReal -
+      (Pr[= true | game2' S A c0 c1]).toReal| ≤ εJoint)
     (hprg : |(Pr[= true | game2' S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal| ≤ εPRG) :
-    advantage S A c0 c1 ≤ εDDH + εPRG := by
+    advantage S A c0 c1 ≤ εDDH + εJoint + εPRG := by
   unfold advantage
   have e1 : (Pr[= true | gameReal S A c0 c1]).toReal =
       (Pr[= true | ddhExpReal S.g (ddhAdversaryOf S A c0 c1)]).toReal := by
@@ -372,8 +404,6 @@ theorem advantage_le
   have e2 : (Pr[= true | game2 S A c0 c1]).toReal =
       (Pr[= true | ddhExpRand S.g (ddhAdversaryOf S A c0 c1)]).toReal := by
     rw [probTrue_game2_eq_ddhExpRand]
-  have e3 : (Pr[= true | game2 S A c0 c1]).toReal = (Pr[= true | game2' S A c0 c1]).toReal := by
-    rw [probTrue_game2_eq_game2' S hgBij hjoint]
   have e4 : (Pr[= true | game3 S A c0 c1]).toReal = 1 / 2 := probTrue_game3 S A c0 c1
   calc |(Pr[= true | gameReal S A c0 c1]).toReal - 1 / 2|
       = |(Pr[= true | gameReal S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal| := by
@@ -381,13 +411,29 @@ theorem advantage_le
     _ ≤ |(Pr[= true | gameReal S A c0 c1]).toReal - (Pr[= true | game2 S A c0 c1]).toReal| +
           |(Pr[= true | game2 S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal| :=
         abs_sub_le _ _ _
+    _ ≤ |(Pr[= true | gameReal S A c0 c1]).toReal - (Pr[= true | game2 S A c0 c1]).toReal| +
+          (|(Pr[= true | game2 S A c0 c1]).toReal - (Pr[= true | game2' S A c0 c1]).toReal| +
+           |(Pr[= true | game2' S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal|) := by
+        gcongr
+        exact abs_sub_le _ _ _
     _ = |(Pr[= true | ddhExpReal S.g (ddhAdversaryOf S A c0 c1)]).toReal -
           (Pr[= true | ddhExpRand S.g (ddhAdversaryOf S A c0 c1)]).toReal| +
-        |(Pr[= true | game2' S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal| := by
+        (|(Pr[= true | game2 S A c0 c1]).toReal - (Pr[= true | game2' S A c0 c1]).toReal| +
+         |(Pr[= true | game2' S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal|) := by
         congr 1
-        · rw [e1, e2]
-        · rw [e3]
-    _ ≤ εDDH + εPRG := add_le_add hddh hprg
+        rw [e1, e2]
+    _ ≤ εDDH + (εJoint + εPRG) := add_le_add hddh (add_le_add hjointPRG hprg)
+    _ = εDDH + εJoint + εPRG := by ring
+
+/-- `advantage_le`'s statement, closed over every scheme it's about — usable as a proof
+obligation's type without repeating its argument list at each use site. -/
+abbrev AdvantageLeType :=
+  ∀ (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
+    [∀ v, NeverFail (A v)] (c0 c1 : Choice Beta Delta) (εDDH εJoint εPRG : ℝ),
+    ddhDistAdvantage S.g (ddhAdversaryOf S A c0 c1) ≤ εDDH →
+    |(Pr[= true | game2 S A c0 c1]).toReal - (Pr[= true | game2' S A c0 c1]).toReal| ≤ εJoint →
+    |(Pr[= true | game2' S A c0 c1]).toReal - (Pr[= true | game3 S A c0 c1]).toReal| ≤ εPRG →
+    advantage S A c0 c1 ≤ εDDH + εJoint + εPRG
 
 end MainTheorem
 

@@ -208,6 +208,13 @@ theorem integrity_bound [Nonempty Yy]
       exact zero_le
   exact hstep.trans (hhard (inducedInstance ρhat0 ρ0 f) B)
 
+/-- `integrity_bound`'s statement, closed over every scheme it's about. -/
+abbrev IntegrityBoundType [Nonempty Yy] (S : Sys F G) (hρ : G → Seed) (ρhat0 : Seed → Kappa)
+    (ρ0 : Seed → Idx) (f : Idx → Yy → Kappa) :=
+  ∀ (ε : ℝ≥0∞), ProblemPHard (Seed := Seed) (Idx := Idx) (Yy := Yy) (Kappa := Kappa) ε →
+    ∀ (Game : ProbComp (Forgery F G)) (Accepted : Forgery F G → Prop),
+    DecompositionWitness S hρ ρhat0 ρ0 f Accepted → Pr[Accepted | Game] ≤ ε
+
 end Integrity
 
 end CryptWalker.Sphinx.Integrity
