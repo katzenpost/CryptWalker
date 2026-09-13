@@ -7,6 +7,9 @@ import VCVio.OracleComp.Constructions.SampleableType
 import VCVio.EvalDist.Bool
 
 import CryptWalker.Sphinx.Types
+import CryptWalker.Sphinx.Geometry
+import CryptWalker.Sphinx.Indistinguishability
+import CryptWalker.Sphinx.Integrity
 import CryptWalker.Util.Bytes
 
 namespace CryptWalker.Sphinx.Interface
@@ -68,53 +71,73 @@ structure Sphinx where
   [stateI : Inhabited State]
   [privI : Inhabited PrivateKey]
 
-  packetLength : Nat
-  payloadLength : Nat
-  surbLength : Nat
+  geometry : Geometry.Geometry
 
-  /-- The public key a node holding `sk` must publish, for `wrap` and `unwrap sk` to agree on
-  which hop `sk` is. -/
-  derivePublicKey : PrivateKey → Vector UInt8 32
+  /-- Raw bytes — width depends on which NIKE/KEM this scheme wraps, not fixed here. -/
+  derivePublicKey : PrivateKey → ByteArray
 
-  /-- Build a forward packet from `path` and `payload`, drawing whatever ephemeral key material
-  it needs from `State`. -/
-  wrap : List Types.PathHop → (filler : ByteArray) → Vector UInt8 payloadLength →
-    EStateM String State (Vector UInt8 packetLength)
+  wrap : List Types.PathHop → (filler : ByteArray) → Vector UInt8 geometry.forwardPayloadLength →
+    EStateM String State (Vector UInt8 geometry.packetLength)
 
-  /-- `(payload, replayTag, cmds, forwardPkt)`. Deterministic, so `Except`, not `EStateM`. -/
+  /-- `(payload, replayTag, cmds, forwardPkt)`. -/
   unwrap : PrivateKey → (pkt : ByteArray) →
     Except String (Option ByteArray × Vector UInt8 32 × List Command × Option (Vector UInt8 pkt.size))
 
-  /-- Build a SURB for `path`, drawing ephemeral key material as `wrap` does. `(surb,
-  surbKeys)`; `surbKeys` decrypts what a reply built from `surb` gets encrypted with. -/
   newSURB : List Types.PathHop → (filler : ByteArray) →
-    EStateM String State (Vector UInt8 surbLength × ByteArray)
+    EStateM String State (Vector UInt8 geometry.surbLength × ByteArray)
 
-  /-- Build a reply packet from a `surb` (`newSURB`'s output) and a plaintext `payload`.
-  `(packet, firstHopID)`. -/
-  newPacketFromSURB : Vector UInt8 surbLength → ByteArray →
+  newPacketFromSURB : Vector UInt8 geometry.surbLength → ByteArray →
     Except String (ByteArray × Vector UInt8 32)
 
-  /-- **Completeness**: any packet `wrap` builds, `unwrap` can undo, given `path`'s own private
-  keys in order (`derivePublicKey`-matched) and a nonempty `path`. -/
+  /-- **Completeness**: any packet `wrap` builds, `unwrap` can undo. -/
   unwrap_complete : ∀ (path : List Types.PathHop) (privKeys : List PrivateKey)
-      (filler : ByteArray) (payload : Vector UInt8 payloadLength) (st : State)
-      (pkt : Vector UInt8 packetLength) (st' : State),
+      (filler : ByteArray) (payload : Vector UInt8 geometry.forwardPayloadLength) (st : State)
+      (pkt : Vector UInt8 geometry.packetLength) (st' : State),
     path ≠ [] →
     path.map (·.publicKey) = privKeys.map derivePublicKey →
     wrap path filler payload st = .ok pkt st' →
     unwrapChainAux unwrap privKeys (ofVector pkt) = .ok (some (ofVector payload))
 
-/-- Trivial instance, witnessing satisfiability, as `NIKE`/`KEM`'s own `Inhabited` instances. -/
+  /-- **Indistinguishability** (§4.4): `Indistinguishability.advantage_le`, closed over every
+  scheme it's about. Free for every instance — see that theorem's own module doc for the games
+  and hardness assumptions it reduces to. -/
+  indistinguishable : ∀ {F G Seed KeyMu KeyPi Beta Gamma Delta : Type}
+      [Field F] [AddCommGroup G] [Module F G] [AddCommGroup Beta]
+      [SampleableType F] [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi]
+      [SampleableType Beta] [SampleableType Gamma] [SampleableType Delta]
+      [SampleableType (Seed × KeyMu × KeyPi)] [Finite F]
+      (S : Indistinguishability.Sys F G Seed KeyMu KeyPi Beta Gamma Delta),
+      Indistinguishability.AdvantageLeType S :=
+    fun S => Indistinguishability.advantage_le S
+
+  /-- **Integrity** (§4.2): `Integrity.integrity_bound`, closed over every scheme it's about.
+  Free for every instance — see that theorem's own module doc for `ProblemP`, its named hardness
+  hypothesis. -/
+  integrity : ∀ {F G Seed Idx Yy Kappa : Type} [Field F] [AddCommGroup G] [Module F G]
+      [Nonempty Yy] (S : Integrity.Sys F G) (hρ : G → Seed) (ρhat0 : Seed → Kappa)
+      (ρ0 : Seed → Idx) (f : Idx → Yy → Kappa),
+      Integrity.IntegrityBoundType S hρ ρhat0 ρ0 f :=
+    fun S hρ ρhat0 ρ0 f => Integrity.integrity_bound S hρ ρhat0 ρ0 f
+
 instance : Inhabited Sphinx := ⟨{
   State := SeedStream
   PrivateKey := Unit
   Command := Unit
-  packetLength := 0
-  payloadLength := 0
-  surbLength := 0
-  derivePublicKey := fun _ => Vector.replicate 32 0
-  -- Always fails, so `unwrap_complete` holds vacuously.
+  geometry :=
+    { scheme := .inl ""
+      packetLength := 0
+      nrHops := 0
+      headerLength := 0
+      routingInfoLength := 0
+      perHopRoutingInfoLength := 0
+      surbLength := 0
+      sphinxPlaintextHeaderLength := 0
+      payloadTagLength := 0
+      forwardPayloadLength := 0
+      userForwardPayloadLength := 0
+      nextNodeHopLength := 0
+      sprpKeyMaterialLength := 0 }
+  derivePublicKey := fun _ => ByteArray.empty
   wrap := fun _ _ _ => throw "sphinx: uninhabited"
   unwrap := fun _ _ => .ok (none, default, [], none)
   newSURB := fun _ _ => pure (Vector.emptyWithCapacity 0, ByteArray.empty)
@@ -132,8 +155,8 @@ Wrap-resistance isn't that shape: it's a probabilistic bound on adversarial forg
 content — "a freshly drawn blinding factor is unlikely to hit a chosen target" — depends on
 structure (a public-key element, a factor space, a blinding action) that a scheme built on a
 group-element blinding chain has and a KEM-based scheme (independent per-hop encapsulation, no
-element to re-blind) does not. `BlindedScheme` below is for the former; there is no analogous
-structure for the latter here. -/
+element to re-blind) does not. `NIKESphinx.NIKESphinxScheme` carries that structure directly;
+there is no analogous structure for KEM-Sphinx. -/
 
 /-- A uniformly sampled `b : F`, pushed through a bijection `act`, hits any fixed `target` with
 probability exactly `1/|F|`. The whole mathematical content of wrap-resistance's single-query
@@ -150,31 +173,5 @@ theorem uniformHit_eq {F G : Type} [Fintype F] [SampleableType F] [DecidableEq G
   · intro b _ hne
     simp [show act b ≠ act b₀ from fun heq => hne (hact.injective heq)]
   · exact absurd (Finset.mem_univ b₀)
-
-/-- A `Sphinx` scheme whose header carries a re-blindable public-key element: `Envelope` is that
-element's type (`parseEnvelope` extracts it from a packet), `Factor` is the space a fresh
-blinding value is drawn from, and `blind` is the re-blinding action. `wrap_resistant` needs no
-per-instance proof — it's `uniformHit_eq` specialized to `act := blind · e`, true for *every*
-instance automatically. Its hypothesis, `Function.Bijective (blind · e)`, is what actually
-carries content, and is false (so the implication holds vacuously) for a degenerate `e` such as
-a group's identity element — exactly the case a well-formed header never produces. -/
-structure BlindedScheme extends Sphinx where
-  Envelope : Type
-  [envelopeDecEq : DecidableEq Envelope]
-  /-- The header's public-key element, read out of a packet. -/
-  parseEnvelope : Vector UInt8 packetLength → Envelope
-  /-- The space a fresh blinding factor is drawn from. -/
-  Factor : Type
-  [factorFintype : Fintype Factor]
-  [factorSampleable : SampleableType Factor]
-  /-- Re-blind an envelope element by a factor. -/
-  blind : Factor → Envelope → Envelope
-  /-- **Wrap-resistance.** Whenever blinding by `e` is a bijection — the case for any `e` that
-  actually generates the (sub)group a well-formed header's element lives in — a freshly drawn
-  factor hits a chosen `target` with probability exactly `1/|Factor|`. -/
-  wrap_resistant : ∀ (e target : Envelope), Function.Bijective (blind · e) →
-      Pr[= true | ($ᵗ Factor) >>= fun b => pure (decide (blind b e = target))] =
-        (Fintype.card Factor : ℝ≥0∞)⁻¹ :=
-    fun _ target hbij => uniformHit_eq hbij target
 
 end CryptWalker.Sphinx.Interface
