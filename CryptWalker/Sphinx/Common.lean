@@ -265,6 +265,32 @@ theorem List.forIn_exists_trace {α β ε : Type} (l : List β) (f : β → α �
           show f (tl[j']'hj') (s j') = Except.ok (ForInStep.yield (s (j' + 1)))
           exact hstep j' hj'
 
+/-- As `List.forIn_exists_trace`, for a plain (non-monadic) `List.foldl` instead of a `forIn` loop
+that can throw or exit early: the trace of intermediate accumulator values through `l.foldl g init`,
+recoverable one step at a time. What a loop body with no `throw`/`←` reduces to once
+`List.forIn_pure_yield_eq_foldl` fires (`createKEMHeader`/`createHeader`'s per-hop keystream/padding
+loop, e.g. — it never fails, so its own `forIn` collapses to a bare `foldl` under that simp lemma,
+losing the `Except`-bind structure `forIn_exists_trace` was built for). -/
+theorem List.foldl_exists_trace {α β : Type} (l : List β) (g : α → β → α) (init : α) :
+    ∃ s : Nat → α, s 0 = init ∧ s l.length = l.foldl g init ∧
+      ∀ j (hj : j < l.length), s (j + 1) = g (s j) (l[j]'hj) := by
+  induction l generalizing init with
+  | nil => exact ⟨fun _ => init, rfl, rfl, by simp⟩
+  | cons hd tl ih =>
+    obtain ⟨s, hs0, hsl, hstep⟩ := ih (g init hd)
+    refine ⟨fun j => match j with | 0 => init | j' + 1 => s j', rfl, ?_, ?_⟩
+    · show s tl.length = (hd :: tl).foldl g init
+      rw [List.foldl_cons]; exact hsl
+    · intro j hj
+      cases j with
+      | zero =>
+        show s 0 = g init ((hd :: tl)[0]'hj)
+        exact hs0
+      | succ j' =>
+        have hj' : j' < tl.length := by simpa using hj
+        show s (j' + 1) = g (s j') ((hd :: tl)[j' + 1]'hj)
+        exact hstep j' hj'
+
 def mac (key : Vector UInt8 32) (msg : ByteArray) : Vector UInt8 32 := hmacSha256 (ofVector key) msg
 
 def zeroPadTo (n : Nat) (b : ByteArray) : ByteArray :=
