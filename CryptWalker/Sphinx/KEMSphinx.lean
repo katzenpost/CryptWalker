@@ -529,6 +529,93 @@ private theorem getElem!_push_eq' {α : Type} [Inhabited α] (a : Array α) (x :
     (hi : i = a.size) : (a.push x)[i]! = x := by
   rw [hi]; exact getElem!_push_eq a x
 
+/-- **`createKEMHeader`'s first loop, at the content level**: `kemElements[i]!` and `keys[i]!` are
+exactly the ciphertext and derived hop keys `kemEncap` produced at hop `i` — the fact
+`kemEncap_kemDecap_of_honest` needs paired against `kemDecap` at `unwrapKEM`'s matching hop. -/
+private theorem createKEMHeader_loop1_content (kem : KEM) (kdfS : KDF) (path : Array PathHop)
+    (ephemeralSeeds : Array (Vector UInt8 32)) (nrHops : Nat)
+    (final : Array ByteArray × Array HopKeys)
+    (hfinal : forIn (List.range' 0 nrHops) (#[], #[])
+        (fun i (a : Array ByteArray × Array HopKeys) =>
+          (match kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) with
+            | .error e => throw e
+            | .ok (ct, ss) =>
+              pure (ForInStep.yield (a.1.push ct, a.2.push (deriveHopKeysG kdfS ss)))
+            : Except String (ForInStep (Array ByteArray × Array HopKeys)))) = Except.ok final)
+    (i : Nat) (hi : i < nrHops) :
+    ∃ ct ss, kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) = Except.ok (ct, ss) ∧
+      final.1[i]! = ct ∧ final.2[i]! = deriveHopKeysG kdfS ss := by
+  have hnd : ∀ (b : Nat) (a a' : Array ByteArray × Array HopKeys), b ∈ List.range' 0 nrHops →
+      (fun i (a : Array ByteArray × Array HopKeys) =>
+        (match kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) with
+          | .error e => throw e
+          | .ok (ct, ss) =>
+            pure (ForInStep.yield (a.1.push ct, a.2.push (deriveHopKeysG kdfS ss)))
+          : Except String (ForInStep (Array ByteArray × Array HopKeys)))) b a
+        ≠ Except.ok (ForInStep.done a') := by
+    intro b a a' _hb hcontra
+    dsimp only at hcontra
+    split at hcontra <;> simp_all [pure, Except.pure]
+  obtain ⟨s, hs0, hsl, hstep⟩ := CryptWalker.Sphinx.Common.List.forIn_exists_trace
+    (List.range' 0 nrHops) _ hnd (#[], #[]) final hfinal
+  have hlen : (List.range' 0 nrHops).length = nrHops := by simp
+  have hsl' : s nrHops = final := by rw [← hlen]; exact hsl
+  have hstep' : ∀ j, j < nrHops →
+      (match kemEncap kem (path[j]!).publicKey (ephemeralSeeds[j]!) with
+        | .error e => throw e
+        | .ok (ct, ss) =>
+          pure (ForInStep.yield ((s j).1.push ct, (s j).2.push (deriveHopKeysG kdfS ss)))
+        : Except String (ForInStep (Array ByteArray × Array HopKeys)))
+        = Except.ok (ForInStep.yield (s (j + 1))) := by
+    intro j hj
+    have := hstep j (by rw [hlen]; exact hj)
+    simpa only [List.getElem_range', Nat.one_mul, Nat.zero_add] using this
+  have hsize : ∀ j (hj : j ≤ nrHops), (s j).1.size = j ∧ (s j).2.size = j := by
+    intro j hj
+    induction j with
+    | zero => simp [hs0]
+    | succ j ih =>
+      obtain ⟨ih1, ih2⟩ := ih (by omega)
+      have hstepj := hstep' j (by omega)
+      split at hstepj
+      · simp only [reduceCtorEq] at hstepj
+      · next ct ss hct =>
+        simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
+        rw [← hstepj]
+        simp [ih1, ih2]
+  have hstable1 := Array.getElem!_stable_of_pushes (fun j => (s j).1) nrHops
+    (fun j hj => by
+      have hstepj := hstep' j hj
+      split at hstepj
+      · simp only [reduceCtorEq] at hstepj
+      · next ct ss hct =>
+        simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
+        exact ⟨ct, (congrArg Prod.fst hstepj).symm⟩)
+    (fun j hj => (hsize j hj).1)
+  have hstable2 := Array.getElem!_stable_of_pushes (fun j => (s j).2) nrHops
+    (fun j hj => by
+      have hstepj := hstep' j hj
+      split at hstepj
+      · simp only [reduceCtorEq] at hstepj
+      · next ct ss hct =>
+        simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
+        exact ⟨deriveHopKeysG kdfS ss, (congrArg Prod.snd hstepj).symm⟩)
+    (fun j hj => (hsize j hj).2)
+  have h1 : final.1[i]! = (s (i + 1)).1[i]! := by
+    rw [← hsl']; exact hstable1 i nrHops hi (le_refl _)
+  have h2 : final.2[i]! = (s (i + 1)).2[i]! := by
+    rw [← hsl']; exact hstable2 i nrHops hi (le_refl _)
+  have hstepi := hstep' i hi
+  have hpi1 : (s i).1.size = i := (hsize i (by omega)).1
+  have hpi2 : (s i).2.size = i := (hsize i (by omega)).2
+  split at hstepi
+  · simp only [reduceCtorEq] at hstepi
+  · next ct ss hct =>
+    simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepi
+    refine ⟨ct, ss, hct, ?_, ?_⟩
+    · rw [h1, ← congrArg Prod.fst hstepi, getElem!_push_eq' _ _ _ hpi1.symm]
+    · rw [h2, ← congrArg Prod.snd hstepi, getElem!_push_eq' _ _ _ hpi2.symm]
+
 /-- **`createKEMHeader`'s second loop, at the content level**: `riKeyStream[i]!` and `riPadding[i]!`
 spelled out exactly, the latter in terms of `riPadding[i-1]!` (already fixed by an earlier
 iteration) rather than unwound all the way back to hop `0` — precisely the one-step relationship
