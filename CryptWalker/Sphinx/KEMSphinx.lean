@@ -1423,6 +1423,89 @@ theorem newKEMPacket_size (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (k
     simp only [byteArray_mk_size, Array.size_replicate]
     omega
 
+/-- **The packet arriving at hop `k`** (`0 ≤ k < nrHops`), assembled from `createKEMHeader`'s
+`kemElements`/`riPadding`/loop3 trace `s` and `newKEMPacket`'s payload trace `t` — writing
+`R(i) := (s (nrHops - i)).1`, `M(i) := (s (nrHops - i)).2`, `P(i) := riPadding[i]!` and
+`payloadAt(i) := t (nrHops - i)` (matching this file's hand-derivation module doc), `hopPacket
+kemElements riPadding s t nrHops k = v0AD ++ kemElements[k]! ++ (R(k) ++ P(k-1)) ++ M(k) ++
+payloadAt(k)`, with `P(-1) := empty`. At `k = 0` this is exactly `wrapKEM`'s own output
+(`createKEMHeader_unfold`/`newKEMPacket_unfold`'s `hdr ++ t sprpKeys.size`, since `R(0) = (s
+nrHops).1`/`M(0) = (s nrHops).2` need no padding term and `sprpKeys.size = nrHops`); at `k =
+nrHops-1` it's the packet the terminal hop receives. -/
+private def hopPacket (kemElements riPadding : Array ByteArray) (s : Nat → ByteArray × ByteArray)
+    (t : Nat → ByteArray) (nrHops k : Nat) : ByteArray :=
+  v0AD ++ kemElements[k]! ++ ((s (nrHops - k)).1 ++ (if k > 0 then riPadding[k - 1]! else ByteArray.empty))
+    ++ (s (nrHops - k)).2 ++ t (nrHops - k)
+
+/-- **`hopPacket`'s size**: exactly `geom.packetLength`, for every `k < nrHops` — the routing-info
+slot (`R(k) ++ P(k-1)`) is always exactly `geom.routingInfoLength` bytes regardless of `k` (`R`
+shrinks by one `perHop` per hop exactly as `P` grows by one), matching the classical Sphinx
+invariant that the wire format never changes size as a packet is forwarded. -/
+private theorem hopPacket_size (kem : KEM) (macS : MAC) (geom : Geometry) (path : Array PathHop)
+    (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
+    (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+    (nrHops : Nat) (s : Nat → ByteArray × ByteArray) (t : Nat → ByteArray)
+    (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (hs0 : s 0 = (if geom.nrHops > nrHops then
+        (⟨Array.replicate ((geom.nrHops - nrHops) * geom.perHopRoutingInfoLength) 0⟩ : ByteArray)
+      else ByteArray.empty, ByteArray.empty))
+    (hstep : ∀ j (hj : j < nrHops), ∃ riFragment,
+        kemRiFragment kem geom path kemElements (s j).2 nrHops (nrHops - 1 - j) = Except.ok riFragment ∧
+        (s (j + 1)).1 = xorBytes (riFragment ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+          (v0AD ++ kemElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+            ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty))))
+    (hknsize : kemElements.size = nrHops)
+    (hksize : ∀ j (hj : j < kemElements.size), (kemElements[j]'hj).size = kem.ciphertextSize)
+    (hpadsize : ∀ i (hi : i < nrHops), riPadding[i]!.size = (i + 1) * geom.perHopRoutingInfoLength)
+    (htsize : ∀ j (hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
+    (ht0size : (t 0).size = geom.payloadTagLength + geom.forwardPayloadLength)
+    (hsprp : sprpKeys.size = nrHops) (hgen : nrHops ≤ geom.nrHops) (k : Nat) (hk : k < nrHops) :
+    (hopPacket kemElements riPadding s t nrHops k).size = geom.packetLength := by
+  obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
+  have hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by omega
+  have hs0size : (s 0).1.size = (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength := by
+    rw [hs0]
+    split
+    · simp
+    · next hc =>
+      simp only [byteArray_empty_size]
+      have hz : geom.nrHops - nrHops = 0 := by omega
+      rw [hz, Nat.zero_mul]
+  have hssize := createKEMHeader_s_size kem macS geom path keys kemElements riKeyStream riPadding
+    nrHops s hperhop hnnh hknsize hksize hstep
+  have hR : (s (nrHops - k)).1.size
+      = (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength + (nrHops - k) * geom.perHopRoutingInfoLength :=
+    hs0size ▸ (hssize (nrHops - k) (by omega)).1
+  have hM : (s (nrHops - k)).2.size = macS.tagSize := (hssize (nrHops - k) (by omega)).2 (by omega)
+  have hcts : kemElements[k]!.size = kem.ciphertextSize := by
+    rw [getElem!_pos kemElements k (by omega)]; exact hksize k (by omega)
+  have hv0 : v0AD.size = 2 := rfl
+  have hcombine : (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
+      + nrHops * geom.perHopRoutingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops := by
+    rw [← Nat.add_mul, Nat.sub_add_cancel hgen, Nat.mul_comm]
+  have hnrHmul : (nrHops - k) * geom.perHopRoutingInfoLength + k * geom.perHopRoutingInfoLength
+      = nrHops * geom.perHopRoutingInfoLength := by
+    rw [← Nat.add_mul]; congr 1; omega
+  have hadL : adLength = 2 := rfl
+  have hmacL : macLength = 32 := rfl
+  unfold hopPacket
+  simp only [ByteArray.size_append]
+  rw [hcts, hM, hmactag, htsize (nrHops - k) (by omega), ht0size, hv0, hR]
+  simp only [hheader, hpacket, hrouting, hadL, hmacL] at *
+  split
+  · next hk0 =>
+    rw [hpadsize (k - 1) (by omega)]
+    have : (k - 1 + 1) = k := by omega
+    rw [this]
+    omega
+  · next hk0 =>
+    simp only [byteArray_empty_size]
+    have hkeq0 : k = 0 := by omega
+    rw [hkeq0] at hnrHmul ⊢
+    simp only [Nat.sub_zero, Nat.zero_mul, Nat.add_zero] at hnrHmul ⊢
+    omega
+
 open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
 
 /-- **`wrapKEM`**: `Sphinx.Interface.wrap` for `KEMSphinxScheme` — `newKEMPacket`, drawing one
