@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import CryptWalker.Sphinx.Crypto.AEZ
 import Mathlib.Logic.Function.Iterate
 import Mathlib.Tactic.Set
-import Std.Tactic.BVDecide
+import Mathlib.Tactic.IntervalCases
 
 namespace CryptWalker.Sphinx.Crypto.AEZ
 
@@ -485,7 +485,10 @@ def PrefixEqB (n : Nat) (mask : UInt8) (a b : Block) : Prop :=
   PrefixEq n a b ∧ a[n]! &&& mask = b[n]! &&& mask
 
 private theorem xor_and_distrib (a b m : UInt8) : (a ^^^ b) &&& m = (a &&& m) ^^^ (b &&& m) := by
-  bv_decide
+  apply UInt8.toBitVec_inj.1
+  ext i h
+  simp
+  cases a.toBitVec[i] <;> cases b.toBitVec[i] <;> cases m.toBitVec[i] <;> simp
 
 theorem PrefixEqB.xor16_congrLeft {n : Nat} (hn : n ≤ 15) {mask : UInt8} {a a' : Block}
     (h : PrefixEqB n mask a a') (b : Block) : PrefixEqB n mask (xor16 a b) (xor16 a' b) := by
@@ -924,17 +927,37 @@ theorem aezTiny_roundtrip_even (e : EState) (delta : Block) (inArr : ByteArray)
 For odd-length input, `G_real`'s mask is `0xf0`: `mkBuf`'s output at the boundary position `ih2`
 depends on that byte's *upper nibble*, and `aezTiny`'s odd-length merge/demerge packs adjacent
 bytes' nibbles together. All of it reduces to a handful of general, free-variable `UInt8` bit
-identities, discharged by `bv_decide` (an off-the-shelf bitvector decision procedure — these are
-not properties special to this codebase, just facts about 8-bit shifts/masks). -/
+identities — facts about 8-bit shifts/masks, not properties special to this codebase. Each is
+proved by `UInt8.toBitVec_inj` (bridging to the underlying `BitVec 8`) followed by `ext` (bit-level
+extensionality) and, where the bit position matters, `interval_cases i` (only 8 values) — a fully
+kernel-checked case split, unlike `bv_decide`, which in this toolchain compiles the check to native
+code and imports the result via a `._native.bv_decide.ax_*` axiom rather than a checked proof. -/
 
-private theorem shl4_shr4 (x : UInt8) : (x <<< 4) >>> 4 = x &&& 0x0f := by bv_decide
-private theorem shr4_shl4 (x : UInt8) : (x >>> 4) <<< 4 = x &&& 0xf0 := by bv_decide
-private theorem shr4_shr4 (x : UInt8) : (x >>> 4) >>> 4 = 0 := by bv_decide
-private theorem shl4_shl4 (x : UInt8) : (x <<< 4) <<< 4 = 0 := by bv_decide
-private theorem nibble_recombine (x : UInt8) : (x &&& 0x0f) ||| (x &&& 0xf0) = x := by bv_decide
+private theorem shl4_shr4 (x : UInt8) : (x <<< 4) >>> 4 = x &&& 0x0f := by
+  apply UInt8.toBitVec_inj.1; ext i h; interval_cases i <;> simp
+private theorem shr4_shl4 (x : UInt8) : (x >>> 4) <<< 4 = x &&& 0xf0 := by
+  apply UInt8.toBitVec_inj.1; ext i h; interval_cases i <;> simp
+private theorem shr4_shr4 (x : UInt8) : (x >>> 4) >>> 4 = 0 := by
+  apply UInt8.toBitVec_inj.1; ext i h; simp
+private theorem shl4_shl4 (x : UInt8) : (x <<< 4) <<< 4 = 0 := by
+  apply UInt8.toBitVec_inj.1; ext i h; simp
+private theorem and_f0_shl4 (x : UInt8) : (x &&& 0xf0) <<< 4 = 0 := by
+  apply UInt8.toBitVec_inj.1; ext i h; interval_cases i <;> simp
+private theorem and_0f_shr4 (x : UInt8) : (x &&& 0x0f) >>> 4 = 0 := by
+  apply UInt8.toBitVec_inj.1; ext i h; interval_cases i <;> simp
+private theorem shr4_and_f0_zero (x : UInt8) : (x >>> 4) &&& 0xf0 = 0 := by
+  apply UInt8.toBitVec_inj.1; ext i h; interval_cases i <;> simp
+private theorem nibble_recombine (x : UInt8) : (x &&& 0x0f) ||| (x &&& 0xf0) = x := by
+  apply UInt8.toBitVec_inj.1; ext i h; interval_cases i <;> simp
 private theorem or_and_distrib (a b m : UInt8) : (a ||| b) &&& m = (a &&& m) ||| (b &&& m) := by
-  bv_decide
-private theorem shr4_and_f0 (x : UInt8) : x >>> 4 = (x &&& 0xf0) >>> 4 := by bv_decide
+  apply UInt8.toBitVec_inj.1
+  ext i h
+  simp
+  cases a.toBitVec[i] <;> cases b.toBitVec[i] <;> cases m.toBitVec[i] <;> simp
+private theorem shr4_and_f0 (x : UInt8) : x >>> 4 = (x &&& 0xf0) >>> 4 := by
+  apply UInt8.toBitVec_inj.1; ext i h; interval_cases i <;> simp
+private theorem and_and_self (x m : UInt8) : (x &&& m) &&& m = x &&& m := by
+  apply UInt8.toBitVec_inj.1; ext i h; simp
 
 /-- Two `Block`s that agree at every index `< 16` are equal. The `Array UInt8` analogue of
 `byteArray_ext_get!`, needed once `mkBuf`'s congruence proofs must bridge from "agrees pointwise"
@@ -1223,24 +1246,27 @@ theorem initLR_odd_raw (inArr : ByteArray) (hodd : inArr.size % 2 = 1) (hlt : in
 Each of `initLR`'s repack formula (`initLR_odd_raw`) and `mergeOdd`'s own construction
 (`mergeOdd_get_left`/`_mid`/`_upper`) is separately a "shift some nibbles together" step; composing
 decrypt's extraction with encrypt's merge cancels the double shift down to the identities below,
-each a free-variable `UInt8` fact discharged by `bv_decide` directly (no need to trace the
-cancellation symbolically). -/
+each a free-variable `UInt8` fact — closed by rewriting with the bit-level lemmas from the section
+above (`UInt8.shiftLeft_or`/`shiftRight_or` from the standard library handle "shift distributes
+over `|||`"; the rest are the shift/mask cancellations proved just above), never by `bv_decide`. -/
 
 private theorem nibble_id_A (L0 L1 Rmm : UInt8) :
     ((((L0 >>> 4) ||| (Rmm &&& 0xf0)) <<< 4) ||| (((L1 >>> 4) ||| (L0 <<< 4)) >>> 4)) = L0 := by
-  bv_decide
+  simp [UInt8.shiftLeft_or, UInt8.shiftRight_or, shr4_shl4, and_f0_shl4, shr4_shr4, shl4_shr4,
+    nibble_recombine, UInt8.or_comm]
 
 private theorem nibble_id_B (Lkm1 Lk Lkp1 : UInt8) :
     ((((Lk >>> 4) ||| (Lkm1 <<< 4)) <<< 4) ||| (((Lkp1 >>> 4) ||| (Lk <<< 4)) >>> 4)) = Lk := by
-  bv_decide
+  simp [UInt8.shiftLeft_or, UInt8.shiftRight_or, shr4_shl4, shl4_shl4, shr4_shr4, shl4_shr4,
+    nibble_recombine, UInt8.or_comm]
 
 private theorem nibble_id_C (Lmm Lmm1 : UInt8) :
     (((Lmm >>> 4) ||| (Lmm1 <<< 4)) <<< 4) &&& 0xf0 = Lmm &&& 0xf0 := by
-  bv_decide
+  simp [UInt8.shiftLeft_or, shr4_shl4, shl4_shl4, and_and_self]
 
 private theorem nibble_id_D (L0 Rmm : UInt8) :
     (((L0 >>> 4) ||| (Rmm &&& 0xf0)) &&& 0xf0) = Rmm &&& 0xf0 := by
-  bv_decide
+  simp [or_and_distrib, and_and_self, shr4_and_f0_zero]
 
 /-- **The odd-length analogue of `initLR_mergeEven`**: decrypt's `initLR`, fed the ciphertext
 `mergeOdd inBytes L R`, recovers `(R, L)` up to `PrefixEqB (inBytes / 2) 0xf0` (not full equality:
@@ -1276,5 +1302,133 @@ theorem initLR_mergeOdd (inBytes : Nat) (hodd : inBytes % 2 = 1) (h16 : 16 ≤ i
       exact nibble_id_B (L[k - 1]!) (L[k]!) (L[k + 1]!)
   · rw [hRmm, hCdef, mergeOdd_get_upper inBytes hodd L R (inBytes / 2) (by omega) (by omega)]
     exact nibble_id_C (L[inBytes / 2]!) (L[inBytes / 2 - 1]!)
+
+/-- `initLR`'s `L`/`R` components always come out as 16-byte blocks, for an odd-length input too
+(the odd branch's extra repack loop and final `.set!` never change the array's size either). -/
+theorem initLR_size_odd (inArr : ByteArray) (hodd : inArr.size % 2 = 1) :
+    (initLR inArr).1.size = 16 ∧ (initLR inArr).2.1.size = 16 := by
+  unfold initLR
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Id.run, pure, bind]
+  have hodd' : (inArr.size % 2 == 1) = true := by simp [hodd]
+  simp only [hodd', if_true, forIn_set!_size, Array.size_replicate, zero16, Array.size_set!]
+  exact ⟨trivial, trivial⟩
+
+private theorem nibble_id_E (x y : UInt8) :
+    (((x <<< 4) ||| (y >>> 4)) >>> 4) ||| (x &&& (0xf0 : UInt8)) = x := by
+  simp [UInt8.shiftRight_or, shl4_shr4, shr4_shr4, nibble_recombine, UInt8.or_comm]
+
+private theorem nibble_id_F (x y z : UInt8) :
+    ((y <<< 4 ||| z >>> 4) >>> 4) ||| ((x <<< 4 ||| y >>> 4) <<< 4) = y := by
+  simp [UInt8.shiftLeft_or, UInt8.shiftRight_or, shr4_shl4, shl4_shl4, shr4_shr4, shl4_shr4,
+    nibble_recombine, UInt8.or_comm]
+
+private theorem nibble_id_G (a w x : UInt8) (hbnd : a &&& (0xf0 : UInt8) = (x <<< 4) &&& (0xf0 : UInt8)) :
+    (a >>> 4) ||| (((w <<< 4) ||| (x >>> 4)) <<< 4) = x := by
+  have ha : a >>> 4 = (x <<< 4) >>> 4 := by rw [shr4_and_f0, hbnd, ← shr4_and_f0]
+  rw [ha]
+  simp [UInt8.shiftLeft_or, UInt8.shiftRight_or, shr4_shl4, shl4_shl4, shr4_shr4, shl4_shr4,
+    nibble_recombine]
+
+/-- **The full `aezTiny` round-trip, for odd-length inputs of at least 16 bytes**: the odd-length
+analogue of `aezTiny_roundtrip_even`, following exactly the same composition (`aezTiny_eq_mergeOdd`,
+`aezTinyLR_fwd_eq`/`_bwd_eq`, `initLR_mergeOdd`, `ladderBwdN_prefix_of_swapB`), plus the nibble
+cancellation (`nibble_id_E`/`_F`/`_G`) needed to translate the final `PrefixEqB`-level agreement
+back into exact byte equality with `inArr` through `mergeOdd`'s nibble-packed construction. -/
+theorem aezTiny_roundtrip_odd (e : EState) (delta : Block) (inArr : ByteArray)
+    (hodd : inArr.size % 2 = 1) (h16 : 16 ≤ inArr.size) (hlt : inArr.size < 32) :
+    aezTiny e delta (aezTiny e delta inArr 0) 1 = inArr := by
+  have hparams : aezTinyParams inArr.size = (6, 8) := aezTinyParams_ge16 inArr.size h16
+  have half_eq : (inArr.size + 1) / 2 = inArr.size / 2 + 1 := by omega
+  -- Encrypt: `aezTiny ... 0 = mergeOdd ... (aezTinyLR ... 0 ...)`.
+  have hnotweak0 : ¬(inArr.size < 16 ∧ (0 : Nat) == 0) := by rintro ⟨h1, -⟩; omega
+  have henc := aezTiny_eq_mergeOdd e delta inArr 0 hodd hnotweak0
+  simp only [hparams] at henc
+  set L0 := (initLR inArr).1 with hL0def
+  set R0 := (initLR inArr).2.1 with hR0def
+  obtain ⟨hL0, hR0, hRmm, hmp0⟩ := initLR_odd_raw inArr hodd hlt
+  have hinit0 : initLR inArr = (L0, R0, 0xf0, 0x08) := by rw [← hmp0]
+  have hfwd := aezTinyLR_fwd_eq e delta inArr 8 6 L0 R0 0xf0 0x08 hinit0
+  rw [half_eq] at hfwd
+  set L1 := (ladderFwdN (FofG (G_real e delta (inArr.size / 2 + 1) (inArr.size / 2) 6 0xf0 0x08))
+      (8 / 2) (L0, R0)).1 with hL1def
+  set R1 := (ladderFwdN (FofG (G_real e delta (inArr.size / 2 + 1) (inArr.size / 2) 6 0xf0 0x08))
+      (8 / 2) (L0, R0)).2 with hR1def
+  rw [show (aezTinyLR e delta inArr 0 8 6).1 = L1 from by rw [hfwd],
+    show (aezTinyLR e delta inArr 0 8 6).2 = R1 from by rw [hfwd]] at henc
+  -- Decrypt: `aezTiny ... 1 = mergeOdd ... (aezTinyLR ... 1 ...)`, on the ciphertext.
+  set C := mergeOdd inArr.size L1 R1 with hCdef
+  have hCsize : C.size = inArr.size := mergeOdd_size inArr.size L1 R1
+  have hnotweak1 : ¬(C.size < 16 ∧ (1 : Nat) == 0) := by simp
+  have hdec := aezTiny_eq_mergeOdd e delta C 1 (by rw [hCsize]; exact hodd) hnotweak1
+  simp only [hCsize, hparams] at hdec
+  -- Identify decrypt's `initLR C` extraction and feed it to `aezTinyLR_bwd_eq`.
+  obtain ⟨hCswap1, hCswap2, hCmp⟩ := initLR_mergeOdd inArr.size hodd h16 hlt L1 R1
+  rw [← hCdef] at hCswap1 hCswap2 hCmp
+  set L0' := (initLR C).1 with hL0'def
+  set R0' := (initLR C).2.1 with hR0'def
+  have hinit1 : initLR C = (L0', R0', 0xf0, 0x08) := by rw [← hCmp]
+  have hbwd := aezTinyLR_bwd_eq e delta C 8 6 (by decide) L0' R0' 0xf0 0x08 hinit1
+  rw [hCsize, half_eq] at hbwd
+  have htweaknoop : tinyTweakedL0 e delta C L0' = L0' := by
+    unfold tinyTweakedL0
+    rw [hCsize, if_neg (show ¬ inArr.size < 16 from by omega)]
+    simp [Id.run, pure]
+  rw [htweaknoop] at hbwd
+  obtain ⟨hL0size, hR0size⟩ := initLR_size_odd inArr hodd
+  rw [← hL0def] at hL0size
+  rw [← hR0def] at hR0size
+  have hswap := ladderBwdN_prefix_of_swapB
+    (FofG (G_real e delta (inArr.size / 2 + 1) (inArr.size / 2) 6 0xf0 0x08)) (inArr.size / 2)
+    (by omega) 0xf0
+    (fun j X X' h => by
+      simp only [FofG]
+      exact G_real_congrB e delta (inArr.size / 2) 6 (by omega) 0xf0 0x08 (j : Int) X X' h)
+    (8 / 2) L0 R0 L0' R0' hL0size hR0size hCswap1 hCswap2
+  set L2 := (aezTinyLR e delta C 1 8 6).1 with hL2def
+  set R2 := (aezTinyLR e delta C 1 8 6).2 with hR2def
+  have hL2eq : L2 = (ladderBwdN (FofG (G_real e delta (inArr.size / 2 + 1) (inArr.size / 2) 6 0xf0
+      0x08)) (8 / 2) (L0', R0')).1 := by rw [hL2def, hbwd]
+  have hR2eq : R2 = (ladderBwdN (FofG (G_real e delta (inArr.size / 2 + 1) (inArr.size / 2) 6 0xf0
+      0x08)) (8 / 2) (L0', R0')).2 := by rw [hR2def, hbwd]
+  have hL2R0 : PrefixEqB (inArr.size / 2) 0xf0 L2 R0 := hL2eq ▸ hswap.1
+  have hR2L0 : PrefixEqB (inArr.size / 2) 0xf0 R2 L0 := hR2eq ▸ hswap.2
+  obtain ⟨hL2R0pre, hL2R0bnd⟩ := hL2R0
+  obtain ⟨hR2L0pre, hR2L0bnd⟩ := hR2L0
+  rw [henc, hdec]
+  apply byteArray_ext_get!
+  · rw [mergeOdd_size]
+  · intro p hp
+    rw [mergeOdd_size] at hp
+    rcases Nat.lt_trichotomy p (inArr.size / 2) with hcase | hcase | hcase
+    · exact (mergeOdd_get_left inArr.size hodd L2 R2 p hcase).trans
+        ((hR2L0pre p hcase).trans (hL0 p (by omega)))
+    · subst hcase
+      rw [mergeOdd_get_mid inArr.size hodd L2 R2, hL2R0pre 0 (by omega), hR2L0bnd,
+        hR0 0 (by omega), hL0 (inArr.size / 2) (by omega)]
+      exact nibble_id_E (inArr.get! (inArr.size / 2)) (inArr.get! (inArr.size / 2 + 1))
+    · have hk : 1 ≤ p - inArr.size / 2 ∧ p - inArr.size / 2 ≤ inArr.size / 2 := by omega
+      have hrw : p = inArr.size / 2 + (p - inArr.size / 2) := by omega
+      rw [hrw, mergeOdd_get_upper inArr.size hodd L2 R2 (p - inArr.size / 2) hk.1 hk.2]
+      rcases Nat.lt_or_ge (p - inArr.size / 2) (inArr.size / 2) with hlt' | hge'
+      · rw [hL2R0pre (p - inArr.size / 2) hlt',
+          hL2R0pre (p - inArr.size / 2 - 1) (by omega),
+          hR0 (p - inArr.size / 2) hlt', hR0 (p - inArr.size / 2 - 1) (by omega),
+          show inArr.size / 2 + (p - inArr.size / 2 - 1) + 1
+            = inArr.size / 2 + (p - inArr.size / 2) from by omega,
+          show inArr.size / 2 + (p - inArr.size / 2 - 1)
+            = inArr.size / 2 + (p - inArr.size / 2) - 1 from by omega]
+        exact nibble_id_F (inArr.get! (inArr.size / 2 + (p - inArr.size / 2) - 1))
+          (inArr.get! (inArr.size / 2 + (p - inArr.size / 2)))
+          (inArr.get! (inArr.size / 2 + (p - inArr.size / 2) + 1))
+      · have hpeq : p - inArr.size / 2 = inArr.size / 2 := by omega
+        rw [hpeq, hL2R0pre (inArr.size / 2 - 1) (by omega), hR0 (inArr.size / 2 - 1) (by omega),
+          show inArr.size / 2 + (inArr.size / 2 - 1) + 1 = inArr.size / 2 + inArr.size / 2
+            from by omega,
+          show inArr.size / 2 + (inArr.size / 2 - 1) = inArr.size / 2 + inArr.size / 2 - 1
+            from by omega]
+        exact nibble_id_G (L2[inArr.size / 2]!)
+          (inArr.get! (inArr.size / 2 + inArr.size / 2 - 1))
+          (inArr.get! (inArr.size / 2 + inArr.size / 2))
+          (hL2R0bnd.trans (congrArg (· &&& (0xf0 : UInt8)) hRmm))
 
 end CryptWalker.Sphinx.Crypto.AEZ
