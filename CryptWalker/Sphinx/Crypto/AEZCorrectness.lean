@@ -281,4 +281,103 @@ theorem aezTinyLR_fwd_eq (e : EState) (delta : Block) (inArr : ByteArray) (round
           (fun a => by obtain ⟨L, R, J⟩ := a; exact loopBodyStep_fwd_eq ..),
           realFwdStep_iterate_eq]
 
+/-- `aezTinyLR`'s `d ≠ 0` pre-loop tweak: for an input under 16 bytes, XOR a correction byte into
+`L[0]`, computed from `inArr`'s raw bytes, before the main loop starts (with `j` at `rounds - 1`,
+descending). Literally the same code as `aezTinyLR`'s own `if inBytes < 16 then ...` block inside
+its `if d ≠ 0 then ...`. -/
+def tinyTweakedL0 (e : EState) (delta : Block) (inArr : ByteArray) (L0 : Block) : Block := Id.run do
+  let inBytes := inArr.size
+  let mut L := L0
+  if inBytes < 16 then
+    let mut buf : Block := zero16
+    for k in [0:inBytes] do buf := buf.set! k (inArr.get! k)
+    buf := buf.set! 0 (buf[0]! ||| 0x80)
+    buf := xor16 delta buf
+    let tmp := aes4 e zero16 e.I1 (e.L[3]!) buf
+    L := L.set! 0 (L[0]! ^^^ (tmp[0]! &&& 0x80))
+  return L
+
+/-- **`aezTinyLR`'s round-trip building block, backward direction**: a `d ≠ 0` call (specialized
+to `d = 1`, `aezTiny`'s decrypt argument) is exactly `rounds/2` abstract backward-ladder steps
+(`ladderBwdN`) for `G_real`, starting from `initLR`'s prefix with the pre-loop tweak applied to
+`L`. Mirrors `aezTinyLR_fwd_eq` exactly, via `loopBodyStep_bwd_eq`/`realBwdStep_iterate_eq`
+instead of the forward versions; needs `rounds` even (true of every `aezTinyParams` result) so
+that the loop's starting counter `rounds - 1` lines up with `realBwdStep_iterate_eq`'s expected
+`2 * (rounds / 2) - 1`. -/
+theorem aezTinyLR_bwd_eq (e : EState) (delta : Block) (inArr : ByteArray) (rounds i0 : Nat)
+    (heven : rounds % 2 = 0) (L0 R0 : Block) (mask pad : UInt8)
+    (hinit : initLR inArr = (L0, R0, mask, pad)) :
+    aezTinyLR e delta inArr 1 rounds i0
+      = ladderBwdN (FofG (G_real e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 mask pad))
+          (rounds / 2) (tinyTweakedL0 e delta inArr L0, R0) := by
+  unfold initLR at hinit
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', List.forIn_pure_yield_eq_foldl, pure_bind] at hinit
+  simp only [Id.run, pure] at hinit
+  unfold aezTinyLR tinyTweakedL0
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', List.forIn_pure_yield_eq_foldl, pure_bind]
+  simp only [Id.run, pure]
+  have hs0 : ∀ mask pad : UInt8, ∀ L R : Block,
+      ((loopBodyStep e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 mask pad (-1))^[rounds / 2]
+          (L, R, (rounds : Int) - 1)).1
+        = (ladderBwdN (FofG (G_real e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 mask pad))
+            (rounds / 2) (L, R)).1
+      ∧ ((loopBodyStep e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 mask pad (-1))^[rounds / 2]
+          (L, R, (rounds : Int) - 1)).2.1
+        = (ladderBwdN (FofG (G_real e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 mask pad))
+            (rounds / 2) (L, R)).2 := by
+    intro mask pad L R
+    rw [Function.iterate_congr_of_forall _
+        (realBwdStep (G_real e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 mask pad))
+        (fun a => by obtain ⟨L, R, J⟩ := a; exact loopBodyStep_bwd_eq ..),
+      realBwdStep_iterate_eq (hs0 := by omega)]
+    exact ⟨rfl, rfl⟩
+  by_cases hodd : (inArr.size % 2 == 1) = true
+  · simp only [hodd, if_true] at hinit ⊢
+    simp only [Prod.mk.injEq] at hinit
+    obtain ⟨hL0, hR0, hmask, hpad⟩ := hinit
+    subst hL0; subst hR0; subst hmask; subst hpad
+    by_cases htiny : inArr.size < 16
+    · simp only [htiny, if_true] at *
+      refine (List.foldl_eq_iterate_of_forall_pair _ _
+          (loopBodyStep e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 240 8 (-1)) ?_ _).trans ?_
+      · intro a b _
+        obtain ⟨L, R, J⟩ := a
+        simp only [loopBodyStep, mkBuf, mod256_renorm, Std.Legacy.Range.forIn_eq_forIn_range',
+          Id.run, pure, bind]
+      · rw [List.length_range', Std.Legacy.Range.size, Nat.sub_zero, Nat.add_sub_cancel, Nat.div_one]
+        exact Prod.ext (hs0 240 8 _ _).1 (hs0 240 8 _ _).2
+    · simp only [htiny, if_false] at *
+      refine (List.foldl_eq_iterate_of_forall_pair _ _
+          (loopBodyStep e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 240 8 (-1)) ?_ _).trans ?_
+      · intro a b _
+        obtain ⟨L, R, J⟩ := a
+        simp only [loopBodyStep, mkBuf, mod256_renorm, Std.Legacy.Range.forIn_eq_forIn_range',
+          Id.run, pure, bind]
+      · rw [List.length_range', Std.Legacy.Range.size, Nat.sub_zero, Nat.add_sub_cancel, Nat.div_one]
+        exact Prod.ext (hs0 240 8 _ _).1 (hs0 240 8 _ _).2
+  · have hodd' : (inArr.size % 2 == 1) = false := by simpa using hodd
+    simp only [hodd', Bool.false_eq_true, if_false] at hinit ⊢
+    simp only [Prod.mk.injEq] at hinit
+    obtain ⟨hL0, hR0, hmask, hpad⟩ := hinit
+    subst hL0; subst hR0; subst hmask; subst hpad
+    by_cases htiny : inArr.size < 16
+    · simp only [htiny, if_true] at *
+      refine (List.foldl_eq_iterate_of_forall_pair _ _
+          (loopBodyStep e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 0 0x80 (-1)) ?_ _).trans ?_
+      · intro a b _
+        obtain ⟨L, R, J⟩ := a
+        simp only [loopBodyStep, mkBuf, mod256_renorm, Std.Legacy.Range.forIn_eq_forIn_range',
+          Id.run, pure, bind]
+      · rw [List.length_range', Std.Legacy.Range.size, Nat.sub_zero, Nat.add_sub_cancel, Nat.div_one]
+        exact Prod.ext (hs0 0 0x80 _ _).1 (hs0 0 0x80 _ _).2
+    · simp only [htiny, if_false] at *
+      refine (List.foldl_eq_iterate_of_forall_pair _ _
+          (loopBodyStep e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 0 0x80 (-1)) ?_ _).trans ?_
+      · intro a b _
+        obtain ⟨L, R, J⟩ := a
+        simp only [loopBodyStep, mkBuf, mod256_renorm, Std.Legacy.Range.forIn_eq_forIn_range',
+          Id.run, pure, bind]
+      · rw [List.length_range', Std.Legacy.Range.size, Nat.sub_zero, Nat.add_sub_cancel, Nat.div_one]
+        exact Prod.ext (hs0 0 0x80 _ _).1 (hs0 0 0x80 _ _).2
+
 end CryptWalker.Sphinx.Crypto.AEZ
