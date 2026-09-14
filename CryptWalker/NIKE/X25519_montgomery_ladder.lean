@@ -199,6 +199,7 @@ def LadderScheme : NIKE where
 
   derive_safe        := derivePub_safe
   decode_encode_priv := fun _ => rfl
+  decodePrivateKey_total := fun v => ⟨⟨v⟩, rfl⟩
   decode_encode_pub  := fun _ => rfl
   encode_decode_pub  := fun _ _ h => congrArg PublicKey.data (Option.some.inj h) ▸ rfl
   commutes           := fun sk₁ sk₂ => congrArg SharedSecret.mk (curve25519_commutes sk₁ sk₂)

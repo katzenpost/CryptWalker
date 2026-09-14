@@ -274,6 +274,18 @@ def combineKEM : KEM where
   stateFromSeed := fun seed => (k₁.stateFromSeed seed, k₂.stateFromSeed seed)
   derivePublicKey := fun sk => (k₁.derivePublicKey sk.1, k₂.derivePublicKey sk.2)
 
+  -- Both components' own `honestRoundTrip` witnesses, combined exactly as `generate`'s embedded
+  -- proof below combines `k₁.generate`/`k₂.generate`'s — `combinedRoundTrip` already proves this
+  -- shape generically, so no new argument is needed here.
+  honestRoundTrip := fun sk =>
+    combinedRoundTrip F k₁ k₂ (k₁.derivePublicKey sk.1) (k₂.derivePublicKey sk.2) sk.1 sk.2
+      (k₁.honestRoundTrip sk.1) (k₂.honestRoundTrip sk.2)
+
+  decodePrivateKey_total := fun v => by
+    obtain ⟨a, ha⟩ := k₁.decodePrivateKey_total (splitL v)
+    obtain ⟨b, hb⟩ := k₂.decodePrivateKey_total (splitR v)
+    exact ⟨(a, b), by simp [ha, hb]⟩
+
   generate := do
     let ⟨pk₁, sk₁, h₁⟩ ← liftFst k₁ k₂ k₁.generate
     let ⟨pk₂, sk₂, h₂⟩ ← liftSnd k₁ k₂ k₂.generate

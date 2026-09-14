@@ -37,6 +37,14 @@ structure NIKE where
   decode_encode_priv : ∀ sk, decodePrivateKey (encodePrivateKey sk) = some sk
   decode_encode_pub  : ∀ pk, decodePublicKey  (encodePublicKey  pk) = some pk
 
+  /-- `decodePrivateKey` never fails on a well-formed-width byte string. Rules out a pathological
+  instance where some private-key-sized byte strings fail to decode (falling back to raw bytes as
+  a stand-in "public key," per `NIKESphinx.nikeSelfPublicKeyBytes`'s documented fallback) while
+  still satisfying every other law here — free for both concrete instances this project builds
+  (`decodePrivateKey := fun v => some ⟨v⟩`). `KEM.Adapter.kemOfNike` reuses this directly for its
+  own `KEM.decodePrivateKey_total`. -/
+  decodePrivateKey_total : ∀ v, ∃ sk, decodePrivateKey v = some sk
+
   -- Encodings are canonical: no two byte strings decode to the same key.
   encode_decode_pub : ∀ v pk, decodePublicKey v = some pk → encodePublicKey pk = v
 

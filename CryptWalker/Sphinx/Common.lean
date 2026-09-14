@@ -30,6 +30,19 @@ NIKE/KEM-generic caller needs, since a scheme's own `publicKeySize`/`privateKeyS
 `sharedSecretSize`/`ciphertextSize` aren't necessarily 32. -/
 def toVecN (n : Nat) (a : ByteArray) : Vector UInt8 n := Vector.ofFn fun i : Fin n => a.get! i.val
 
+/-- `toVecN` undoes `ofVector`: reinterpreting an already-fixed-width vector's own bytes at that
+same width recovers it exactly. Bridges an encode/decode round trip (`decodePrivateKey
+(encodePrivateKey sk) = some sk`-shaped, e.g. `KEM.decode_encode_priv`) stated over `Vector UInt8
+n` into one stated over the raw `ByteArray` a caller like `KEMSphinx.kemSelfPublicKeyBytes`
+actually has in hand. -/
+@[simp] theorem toVecN_ofVector {n : Nat} (v : Vector UInt8 n) : toVecN n (ofVector v) = v := by
+  apply Vector.ext
+  intro i hi
+  simp only [toVecN, Vector.getElem_ofFn]
+  show (ofVector v).get! i = v[i]
+  show v.toArray[i]! = v[i]
+  simp [getElem!_pos, hi]
+
 def xorBytes (a b : ByteArray) : ByteArray := ⟨a.data.mapIdx fun i x => x ^^^ b.data.getD i 0⟩
 
 @[simp] theorem size_xorBytes (a b : ByteArray) : (xorBytes a b).size = a.size := by

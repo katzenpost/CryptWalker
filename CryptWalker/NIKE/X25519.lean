@@ -518,6 +518,7 @@ def Scheme : NIKE where
   derive_safe        := fun sk =>
     liftX_isSome_of_exists (exists_onCurve_xCoord (scalarOf sk • G))
   decode_encode_priv := fun _ => rfl
+  decodePrivateKey_total := fun v => ⟨⟨v⟩, rfl⟩
   decode_encode_pub  := fun x => by
     show decodeFieldChecked (encodeFieldChecked x) = some x
     unfold decodeFieldChecked encodeFieldChecked

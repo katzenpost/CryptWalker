@@ -58,6 +58,23 @@ structure KEM where
   a private key alone rather than generating a fresh pair. -/
   derivePublicKey : PrivateKey → PublicKey
 
+  /-- **The `generate`-independent round-trip law**: `generate`'s embedded proof above only
+  covers whichever `(pk, sk)` pair `generate` itself happens to draw — it says nothing about an
+  arbitrary `sk` paired with its own `derivePublicKey sk`, which is exactly the shape a caller
+  holding just a private key (Sphinx's `wrap`, given a path of already-known public keys) actually
+  needs. `KEM.Adapter.roundTrip` already proves exactly this, for the one concrete `KEM` this
+  project builds directly, so wiring it here costs no new axiom. -/
+  honestRoundTrip : ∀ sk, ∀ s c k s', encap (derivePublicKey sk) s = .ok (c, k) s' →
+    ∀ t, ∃ t', decap sk c t = .ok k t'
+
+  /-- `decodePrivateKey` never fails on a well-formed-width byte string — every one of the
+  `privateKeySize`-byte inputs it's ever called on decodes to *something*. Rules out a pathological
+  instance where a caller's raw private-key bytes fail to decode (falling back to those raw bytes
+  as a stand-in "public key," per `KEMSphinx.kemSelfPublicKeyBytes`'s documented fallback) while
+  still satisfying every other law here — free for every `KEM` this project constructs (`kemOfNike`
+  always succeeds: `decodePrivateKey := fun v => some ⟨v⟩`). -/
+  decodePrivateKey_total : ∀ b, ∃ sk, decodePrivateKey b = some sk
+
   decode_encode_pub  : ∀ pk, decodePublicKey  (encodePublicKey  pk) = some pk
   decode_encode_priv : ∀ sk, decodePrivateKey (encodePrivateKey sk) = some sk
   decode_encode_ct   : ∀ c,  decodeCiphertext (encodeCiphertext c)  = some c
@@ -90,6 +107,8 @@ instance : Inhabited KEM := ⟨{
   generate := pure ⟨(), (), fun _ _ _ _ _ t => ⟨t, rfl⟩⟩
   stateFromSeed := fun _ => ()
   derivePublicKey := fun _ => ()
+  honestRoundTrip := fun _ _ _ _ _ _ t => ⟨t, rfl⟩
+  decodePrivateKey_total := fun _ => ⟨(), rfl⟩
 
   decode_encode_pub  := fun _ => rfl
   decode_encode_priv := fun _ => rfl

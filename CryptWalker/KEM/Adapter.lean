@@ -180,6 +180,8 @@ def kemOfNike : KEM where
   decap := decapM F nike
   stateFromSeed := fun seed => initWith (fun _ => seed)
   derivePublicKey := nike.derivePublicKey
+  honestRoundTrip := roundTrip F nike
+  decodePrivateKey_total := nike.decodePrivateKey_total
 
   -- Inhabitance only: a constant stream, hence degenerate (every keypair and
   -- every ephemeral would coincide). Honest runs start from `initWith`.
