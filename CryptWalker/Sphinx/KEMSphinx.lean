@@ -751,6 +751,57 @@ private theorem createKEMHeader_loop2_content (streamS : StreamCipher) (geom : G
     · dsimp only
       rw [if_neg hi0, h2, ← congrArg Prod.snd hstepi, getElem!_push_eq' _ _ _ hpi2.symm]
 
+/-- **`riPadding[i]!`'s byte size**: exactly `(i+1) * perHopRoutingInfoLength` — one `perHop` for
+every hop cascaded through so far, by induction on `createKEMHeader_loop2_content`'s own recursive
+value formula. Needed for `hopPacket`'s overall size, since `riPadding[k-1]!` is one of its
+components. -/
+private theorem createKEMHeader_loop2_padsize (streamS : StreamCipher) (geom : Geometry)
+    (keys : Array HopKeys) (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
+    (hfinal : forIn (List.range' 0 nrHops) (#[], #[])
+        (fun i (st : Array ByteArray × Array ByteArray) =>
+          (do
+            let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+              (ofVector (keys[i]!).headerEncryptionIV)
+              (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+            let ksLen := (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+              - (i + 1) * geom.perHopRoutingInfoLength
+            let mut thisPad := ks.extract ksLen (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+            if i > 0 then
+              let prevPad := st.2[i - 1]!
+              thisPad := xorBytes (thisPad.extract 0 prevPad.size) prevPad
+                ++ thisPad.extract prevPad.size thisPad.size
+            pure (ForInStep.yield (st.1.push (ks.extract 0 ksLen), st.2.push thisPad)) :
+              Except String (ForInStep (Array ByteArray × Array ByteArray)))) = Except.ok final)
+    (hle : ∀ i (hi : i < nrHops),
+        (i + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength + geom.perHopRoutingInfoLength) :
+    ∀ i (hi : i < nrHops), final.2[i]!.size = (i + 1) * geom.perHopRoutingInfoLength := by
+  intro i hi
+  induction i with
+  | zero =>
+    obtain ⟨-, hval⟩ := createKEMHeader_loop2_content streamS geom keys nrHops final hfinal 0 hi
+    rw [hval]
+    dsimp only
+    rw [if_neg (by omega), ByteArray.size_extract, streamS.keystream_size]
+    omega
+  | succ i ih =>
+    obtain ⟨-, hval⟩ := createKEMHeader_loop2_content streamS geom keys nrHops final hfinal (i + 1) hi
+    rw [hval]
+    dsimp only
+    rw [if_pos (by omega : i + 1 > 0)]
+    have hihsize := ih (by omega)
+    have hthis0size : ((streamS.keystream (ofVector (keys[i + 1]!).headerEncryption)
+        (ofVector (keys[i + 1]!).headerEncryptionIV)
+        (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract
+        (geom.routingInfoLength + geom.perHopRoutingInfoLength
+          - (i + 1 + 1) * geom.perHopRoutingInfoLength)
+        (geom.routingInfoLength + geom.perHopRoutingInfoLength)).size
+        = (i + 1 + 1) * geom.perHopRoutingInfoLength := by
+      rw [ByteArray.size_extract, streamS.keystream_size]
+      have := hle (i + 1) hi
+      omega
+    simp only [ByteArray.size_append, size_xorBytes, ByteArray.size_extract, Nat.add_sub_cancel] at *
+    omega
+
 /-- **`createKEMHeader`'s second loop, at the content level**: `riKeyStream[i]!` and `riPadding[i]!`
 spelled out exactly, the latter in terms of `riPadding[i-1]!` (already fixed by an earlier
 iteration) rather than unwound all the way back to hop `0` — precisely the one-step relationship
