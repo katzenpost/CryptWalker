@@ -272,6 +272,23 @@ def aezTinyParams (inBytes : Nat) : Nat × Nat :=
   else if inBytes < 16 then (7, 10)
   else (6, 8)
 
+/-- The buffer construction shared by `aezTinyLR`'s `buf1` and `buf2`: copy `X`'s first `half`
+bytes in, fold `mask`/`pad` into position `ih2` (`inBytes / 2`), XOR in `delta`, then XOR the
+counter byte into the last position. `buf1` is `mkBuf ... R ctr1`; `buf2` is `mkBuf ... L' ctr2`
+for the freshly-updated `L'` — literally the same code, differing only in which block and which
+counter they're given. Factored out under its own name (not just inlined twice) so that
+`buf1[ih2]!`/`buf1[15]!` reading back into `buf1`'s own construction doesn't re-expand the whole
+thing at every read site — the same "term-duplication blowup" fix already used for `aezTinyLR`
+itself and for `KEMSphinx.lean`'s `kemRiFragment`. -/
+def mkBuf (half ih2 : Nat) (mask pad : UInt8) (delta : Block) (X : Block) (ctr : UInt8) : Block :=
+  Id.run do
+    let mut buf : Block := zero16
+    for k in [0:half] do buf := buf.set! k (X[k]!)
+    buf := buf.set! ih2 ((buf[ih2]! &&& mask) ||| pad)
+    buf := xor16 buf delta
+    buf := buf.set! 15 (buf[15]! ^^^ ctr)
+    return buf
+
 /-- `aezTiny`'s Feistel-round computation, producing the pair `(L, R)` the merge step below
 consumes. Pulled out under its own name for exactly one reason: `aezTiny`'s size-preservation
 proof only needs to know `(aezTinyLR ..).1.size = 16 ∧ (aezTinyLR ..).2.size = 16` (proved once,
@@ -311,19 +328,12 @@ def aezTinyLR (e : EState) (delta : Block) (inArr : ByteArray) (d rounds i0 : Na
     j := (rounds : Int) - 1
     step := -1
   for _ in [0:rounds / 2] do
-    let mut buf1 : Block := zero16
-    for k in [0:half] do buf1 := buf1.set! k (R[k]!)
-    buf1 := buf1.set! (inBytes / 2) ((buf1[inBytes / 2]! &&& mask) ||| pad)
-    buf1 := xor16 buf1 delta
-    buf1 := buf1.set! 15 (buf1[15]! ^^^ UInt8.ofNat (j % 256).toNat)
+    let buf1 := mkBuf half (inBytes / 2) mask pad delta R (UInt8.ofNat (j % 256).toNat)
     let tmp1 := aes4 e zero16 e.I1 (e.L[i0]!) buf1
     L := xor16 L tmp1
 
-    let mut buf2 : Block := zero16
-    for k in [0:half] do buf2 := buf2.set! k (L[k]!)
-    buf2 := buf2.set! (inBytes / 2) ((buf2[inBytes / 2]! &&& mask) ||| pad)
-    buf2 := xor16 buf2 delta
-    buf2 := buf2.set! 15 (buf2[15]! ^^^ UInt8.ofNat (((j + step) % 256 + 256) % 256).toNat)
+    let buf2 := mkBuf half (inBytes / 2) mask pad delta L
+      (UInt8.ofNat (((j + step) % 256 + 256) % 256).toNat)
     let tmp2 := aes4 e zero16 e.I1 (e.L[i0]!) buf2
     R := xor16 R tmp2
 

@@ -109,6 +109,20 @@ private theorem List.foldl_eq_iterate_of_forall {α β} (l : List β) (f : α �
       Function.iterate_succ_apply]
     exact ih (fun a b hb => h a b (List.mem_cons_of_mem hd hb)) (g init)
 
+/-- `List.foldl_eq_iterate_of_forall`, specialized to produce the `(·.1, ·.2.1)`-projected pair
+`aezTinyLR`'s own `Id.run do ... return (L, R)` actually needs — stated this way (rather than
+projecting the plain version's conclusion afterward with `congrArg`/`Prod.ext`) so that using it
+via `refine (... ?_ _).trans ?_` unifies directly against a goal already in this projected shape,
+the same way the plain version does against an unprojected one: wrapping the *already proven*
+fact in an extra projection here is instant, whereas asking the *elaborator* to bridge the two
+shapes at the call site (via `congrArg`/`Prod.ext`) reliably timed out, confirmed for several
+different phrasings of that bridge. -/
+private theorem List.foldl_eq_iterate_of_forall_pair {β} (l : List β)
+    (f : Block × Block × Int → β → Block × Block × Int) (g : Block × Block × Int → Block × Block × Int)
+    (h : ∀ a b, b ∈ l → f a b = g a) (init : Block × Block × Int) :
+    ((l.foldl f init).1, (l.foldl f init).2.1) = ((g^[l.length] init).1, (g^[l.length] init).2.1) := by
+  rw [List.foldl_eq_iterate_of_forall l f g h init]
+
 /-- Two functions that agree everywhere produce the same iterate. -/
 private theorem Function.iterate_congr_of_forall {α} (f g : α → α) (h : ∀ a, f a = g a) :
     ∀ (n : Nat) (init : α), f^[n] init = g^[n] init
@@ -118,21 +132,11 @@ private theorem Function.iterate_congr_of_forall {α} (f g : α → α) (h : ∀
       rw [h init]
       exact Function.iterate_congr_of_forall f g h n (g init)
 
-/-! ## Instantiating the round function to `aezTinyLR`'s actual computation -/
+/-! ## Instantiating the round function to `aezTinyLR`'s actual computation
 
-/-- The buffer construction shared by `aezTinyLR`'s `buf1` and `buf2`: copy `X`'s first `half`
-bytes in, fold `mask`/`pad` into position `ih2` (`inBytes / 2`), XOR in `delta`, then XOR the
-counter byte into the last position. `buf1` is `mkBuf ... R ctr1`; `buf2` is `mkBuf ... L' ctr2`
-for the freshly-updated `L'` — literally the same code, differing only in which block and which
-counter they're given. -/
-def mkBuf (half ih2 : Nat) (mask pad : UInt8) (delta : Block) (X : Block) (ctr : UInt8) : Block :=
-  Id.run do
-    let mut buf : Block := zero16
-    for k in [0:half] do buf := buf.set! k (X[k]!)
-    buf := buf.set! ih2 ((buf[ih2]! &&& mask) ||| pad)
-    buf := xor16 buf delta
-    buf := buf.set! 15 (buf[15]! ^^^ ctr)
-    return buf
+`mkBuf` (`aezTinyLR`'s `buf1`/`buf2` construction, factored out under its own name) now lives in
+`AEZ.lean` itself — `aezTinyLR`'s own source calls it directly, rather than inlining buf1/buf2's
+construction twice, which is what made the whole-loop theorem below tractable at all. -/
 
 /-- `aezTinyLR`'s `buf2` construction XORs in a doubly-`% 256`-renormalized counter byte
 (matching the reference Go, whose `%` can return negative for a negative dividend); Lean's `Int`
@@ -218,28 +222,63 @@ theorem loopBodyStep_bwd_eq (e : EState) (delta : Block) (half ih2 i0 : Nat) (ma
     Id.run, pure, bind, Prod.mk.injEq]
   refine ⟨trivial, trivial, by omega⟩
 
-/-! ## Remaining work: `aezTinyLR`'s loop as a whole
-
-`loopBodyStep_fwd_eq`/`loopBodyStep_bwd_eq` above establish, for a *single* iteration, that
-`aezTinyLR`'s real code computes exactly one abstract ladder step. Chaining that across `rounds/2`
-iterations to reach a genuine `aezTinyLR e delta inArr 0 rounds i0 = ladderFwdN ...`-style theorem
-turns out to need more than `List.foldl_eq_iterate_of_forall`/`Function.iterate_congr_of_forall`
-can deliver by themselves: `aezTinyLR`'s *own* unfolded loop body — before ever comparing it to
-anything — already re-expands `buf1`'s full construction on every one of the several places
-`buf1[ih2]!`/`buf1[15]!` reads back into it (the same "term-duplication blowup" this file's
-`mkBuf`/`loopBodyStep` extraction was meant to avoid, but which `aezTinyLR`'s *actual source* still
-has, since it was never rewritten to call `mkBuf`). Every attempt to state "`aezTinyLR`'s loop body
-equals `loopBodyStep`" as a single equation over the whole iterated value — via `congrArg`,
-`Function.iterate_congr_of_forall`, or a direct `show`/defeq assertion — times out at `whnf` even
-at 20x the default heartbeat budget (confirmed: not merely slow, genuinely intractable this way),
-exactly matching this project's established "term-duplication blowup" failure mode
-(`AEZ.lean`'s `aezTinyLR`/KEMSphinx's `kemRiFragment`, both documented there).
-
-The fix those two precedents used — extracting the duplicating computation into its own named
-`def` — is exactly what `mkBuf` already is; what's missing is rewriting `aezTinyLR`'s *own source*
-in `AEZ.lean` to actually call it, instead of inlining buf1/buf2's construction. That is a real,
-behavior-preserving *executable-code* change to an already-stable file, needing re-verification
-against the full vector/self-test suite the same way the `kemRiFragment` extraction did — a bigger
-step than anything else in this file, deliberately not taken without confirming it first. -/
+/-- **`aezTinyLR`'s round-trip building block, forward direction**: a `d = 0` call is exactly
+`rounds/2` abstract forward-ladder steps (`ladderFwdN`) for `G_real`, starting from the prefix
+`initLR` extracts from `inArr`. Proved by converting the real `for` loop to a `List.foldl`
+(the usual `Std.Legacy.Range.forIn_eq_forIn_range'`/`List.forIn_pure_yield_eq_foldl` conversion),
+recognizing it as `List.foldl_const`-shaped (the loop ignores its own index, only threading state),
+converting to `Function.iterate`, and matching that pointwise against `loopBodyStep`'s own iterate
+via `Function.iterate_congr_of_forall` — then `loopBodyStep_fwd_eq` and `realFwdStep_iterate_eq`
+finish it. This only became tractable once `aezTinyLR`'s own source called `mkBuf` (see `AEZ.lean`)
+instead of inlining `buf1`/`buf2`'s construction twice: comparing the *inlined* form pointwise
+still re-expands it on every `buf1[ih2]!`/`buf1[15]!` read-back, which times out even at 20x the
+default heartbeat budget — the named call makes each comparison touch exactly one copy. -/
+theorem aezTinyLR_fwd_eq (e : EState) (delta : Block) (inArr : ByteArray) (rounds i0 : Nat)
+    (L0 R0 : Block) (mask pad : UInt8) (hinit : initLR inArr = (L0, R0, mask, pad)) :
+    aezTinyLR e delta inArr 0 rounds i0
+      = ladderFwdN (FofG (G_real e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 mask pad))
+          (rounds / 2) (L0, R0) := by
+  unfold initLR at hinit
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', List.forIn_pure_yield_eq_foldl, pure_bind] at hinit
+  simp only [Id.run, pure] at hinit
+  unfold aezTinyLR
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', List.forIn_pure_yield_eq_foldl, pure_bind]
+  simp only [Id.run, pure]
+  by_cases hodd : (inArr.size % 2 == 1) = true
+  · simp only [hodd, if_true] at hinit ⊢
+    simp only [Prod.mk.injEq] at hinit
+    obtain ⟨hL0, hR0, hmask, hpad⟩ := hinit
+    subst hL0; subst hR0; subst hmask; subst hpad
+    split
+    · omega
+    · refine (List.foldl_eq_iterate_of_forall_pair _ _
+          (loopBodyStep e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 240 8 1) ?_ _).trans ?_
+      · intro a b _
+        obtain ⟨L, R, J⟩ := a
+        simp only [loopBodyStep, mkBuf, mod256_renorm, Std.Legacy.Range.forIn_eq_forIn_range',
+          Id.run, pure, bind]
+      · rw [List.length_range', Std.Legacy.Range.size, Nat.sub_zero, Nat.add_sub_cancel, Nat.div_one,
+          Function.iterate_congr_of_forall _
+          (realFwdStep (G_real e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 240 8))
+          (fun a => by obtain ⟨L, R, J⟩ := a; exact loopBodyStep_fwd_eq ..),
+          realFwdStep_iterate_eq]
+  · have hodd' : (inArr.size % 2 == 1) = false := by simpa using hodd
+    simp only [hodd', Bool.false_eq_true, if_false] at hinit ⊢
+    simp only [Prod.mk.injEq] at hinit
+    obtain ⟨hL0, hR0, hmask, hpad⟩ := hinit
+    subst hL0; subst hR0; subst hmask; subst hpad
+    split
+    · omega
+    · refine (List.foldl_eq_iterate_of_forall_pair _ _
+          (loopBodyStep e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 0 0x80 1) ?_ _).trans ?_
+      · intro a b _
+        obtain ⟨L, R, J⟩ := a
+        simp only [loopBodyStep, mkBuf, mod256_renorm, Std.Legacy.Range.forIn_eq_forIn_range',
+          Id.run, pure, bind]
+      · rw [List.length_range', Std.Legacy.Range.size, Nat.sub_zero, Nat.add_sub_cancel, Nat.div_one,
+          Function.iterate_congr_of_forall _
+          (realFwdStep (G_real e delta ((inArr.size + 1) / 2) (inArr.size / 2) i0 0 0x80))
+          (fun a => by obtain ⟨L, R, J⟩ := a; exact loopBodyStep_fwd_eq ..),
+          realFwdStep_iterate_eq]
 
 end CryptWalker.Sphinx.Crypto.AEZ
