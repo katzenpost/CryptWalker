@@ -1042,4 +1042,134 @@ theorem G_real_congrB (e : EState) (delta : Block) (ih2 i0 : Nat) (hih2 : ih2 < 
   obtain ⟨hpre, hb⟩ := h
   rw [mkBuf_congr_boundary ih2 hih2 mask pad delta X X' hpre hb]
 
+/-! ## `aezTiny`'s merge/demerge: the odd-length case -/
+
+/-- `aezTiny`'s merge step for odd-length input, with no final tweak: bytes `< inBytes / 2` are a
+plain copy of `R`; byte `inBytes / 2` and bytes `> inBytes / 2` are built by shifting adjacent
+bytes' nibbles together, packing `half = inBytes / 2 + 1` bytes of `L` (plus a borrowed upper
+nibble from `R`) into `half` output bytes. Literally `aezTiny`'s own construction, skipping the
+`d = 0 ∧ inBytes < 16` output tweak. -/
+def mergeOdd (inBytes : Nat) (L R : Block) : ByteArray := Id.run do
+  let mut buf : Array UInt8 := Array.replicate inBytes 0
+  for k in [0:inBytes / 2] do buf := buf.set! k (R[k]!)
+  for k in [0:(inBytes + 1) / 2] do buf := buf.set! (inBytes / 2 + k) (L[k]!)
+  let orig := buf
+  for k in [inBytes / 2 + 1 : inBytes] do
+    buf := buf.set! k ((orig[k]! >>> 4) ||| (orig[k - 1]! <<< 4))
+  buf := buf.set! (inBytes / 2) ((L[0]! >>> 4) ||| (R[inBytes / 2]! &&& 0xf0))
+  return ⟨buf⟩
+
+theorem aezTiny_eq_mergeOdd (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat)
+    (hodd : inArr.size % 2 = 1) (hnotweak : ¬(inArr.size < 16 ∧ d == 0)) :
+    aezTiny e delta inArr d
+      = mergeOdd inArr.size
+          (aezTinyLR e delta inArr d (aezTinyParams inArr.size).2 (aezTinyParams inArr.size).1).1
+          (aezTinyLR e delta inArr d (aezTinyParams inArr.size).2 (aezTinyParams inArr.size).1).2 := by
+  unfold aezTiny mergeOdd
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Id.run, pure, bind]
+  have hodd' : (inArr.size % 2 == 1) = true := by simp [hodd]
+  simp only [hodd', if_true]
+  have hnotweak2 : inArr.size ≥ 16 ∨ d ≠ 0 := by
+    rcases Nat.lt_or_ge inArr.size 16 with h | h
+    · right; intro hd; exact hnotweak ⟨h, by simp [hd]⟩
+    · left; exact h
+  have hnotweak' : (decide (inArr.size < 16) && d == 0) = false := by
+    rcases hnotweak2 with h | h
+    · simp [Nat.not_lt.mpr h]
+    · simp [h]
+  simp only [hnotweak', Bool.false_eq_true, if_false]
+
+theorem mergeOdd_size (inBytes : Nat) (L R : Block) : (mergeOdd inBytes L R).size = inBytes := by
+  unfold mergeOdd
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Id.run, pure, bind, forIn_set!_size,
+    Array.size_replicate, byteArray_mk_size, Array.size_set!]
+
+/-- Like `forIn_range_set!_get_lt0`, but for a `List.range'` starting anywhere (`s`, not just `0`)
+and with the loop body indexing directly by the range value (no separate offset addition) —
+matches `aezTiny`'s `for k in [inBytes/2+1 : inBytes] do ...` shape directly. -/
+private theorem forIn_range'_set!_get_in (s n sz : Nat) (g : Nat → UInt8) (init : Array UInt8)
+    (hsize : init.size = sz) (hbound : s + n ≤ sz) :
+    ∀ k, s ≤ k → k < s + n →
+      (forIn (List.range' s n) init (fun i acc => ForInStep.yield (acc.set! i (g i))) :
+        Id (Array UInt8)).run[k]! = g k := by
+  induction n generalizing init with
+  | zero => intro k hk1 hk2; omega
+  | succ n ih =>
+    intro k hk1 hk2
+    rw [List.range'_1_concat, forIn_append]
+    simp only [List.forIn_cons, List.forIn_nil, bind, pure, Id.run, Nat.zero_add]
+    by_cases hk3 : k = s + n
+    · subst hk3
+      rw [Array.getElem!_set!_self _ _ _ (by rw [forIn_set!_size]; omega)]
+    · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk3)]
+      exact ih init hsize (by omega) k hk1 (by omega)
+
+/-- The complement of `forIn_range'_set!_get_in`: positions outside `[s, s + n)` are untouched. -/
+private theorem forIn_range'_set!_get_out (s n : Nat) (g : Nat → UInt8) (init : Array UInt8)
+    (k : Nat) (hk : k < s ∨ s + n ≤ k) :
+    (forIn (List.range' s n) init (fun i acc => ForInStep.yield (acc.set! i (g i))) :
+      Id (Array UInt8)).run[k]! = init[k]! := by
+  induction n generalizing init with
+  | zero => simp
+  | succ n ih =>
+    rw [List.range'_1_concat, forIn_append]
+    simp only [List.forIn_cons, List.forIn_nil, bind, pure, Id.run, Nat.zero_add]
+    rw [Array.getElem!_set!_ne _ _ _ _ (by omega)]
+    exact ih init (by omega)
+
+theorem mergeOdd_get_left (inBytes : Nat) (hodd : inBytes % 2 = 1) (L R : Block) (k : Nat)
+    (hk : k < inBytes / 2) : (mergeOdd inBytes L R).get! k = R[k]! := by
+  show (mergeOdd inBytes L R).data[k]! = R[k]!
+  unfold mergeOdd
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, Id.run, pure, bind]
+  rw [Array.getElem!_set!_ne _ _ _ _ (by omega)]
+  refine Eq.trans ?_ (forIn_range_set!_get_lt0 (inBytes / 2) inBytes (fun i => R[i]!)
+    (Array.replicate inBytes 0) (by simp) (by omega) k hk)
+  refine (forIn_range'_set!_get_out (inBytes / 2 + 1) (inBytes - (inBytes / 2 + 1)) _ _ k
+    (Or.inl (by omega))).trans ?_
+  exact forIn_range_set!_get_unaffected ((inBytes + 1) / 2) (inBytes / 2) (fun i => L[i]!)
+    (forIn (List.range' 0 (inBytes / 2)) (Array.replicate inBytes 0)
+      (fun i acc => ForInStep.yield (acc.set! i R[i]!)) : Id (Array UInt8)) k hk
+
+/-- The boundary byte: combines `L`'s first byte's upper nibble with `R`'s own boundary byte's
+upper nibble (already masked to `0xf0` by the round function, but re-masked here regardless). -/
+theorem mergeOdd_get_mid (inBytes : Nat) (hodd : inBytes % 2 = 1) (L R : Block) :
+    (mergeOdd inBytes L R).get! (inBytes / 2) = (L[0]! >>> 4) ||| (R[inBytes / 2]! &&& 0xf0) := by
+  show (mergeOdd inBytes L R).data[inBytes / 2]! = (L[0]! >>> 4) ||| (R[inBytes / 2]! &&& 0xf0)
+  unfold mergeOdd
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, Id.run, pure, bind]
+  exact Array.getElem!_set!_self _ _ _
+    (by simp only [forIn_set!_size, Array.size_replicate]; omega)
+
+/-- Bytes above the boundary: adjacent bytes of `L`, nibble-shifted together. Phrased with the
+position as `inBytes / 2 + k` directly (matching `forIn_range_set!_get_lt`'s own `idxOffset + k`
+shape), rather than requiring the caller to reconstruct `k` from a general position: this is the
+same trick `mergeEven_get_right` already uses, and it's what lets the proof avoid ever needing an
+`omega`-driven re-indexing bridge under a `GetElem`/`Id.run` mismatch. -/
+theorem mergeOdd_get_upper (inBytes : Nat) (hodd : inBytes % 2 = 1) (L R : Block) (k : Nat)
+    (hk1 : 1 ≤ k) (hk2 : k ≤ inBytes / 2) :
+    (mergeOdd inBytes L R).get! (inBytes / 2 + k) = (L[k]! >>> 4) ||| (L[k - 1]! <<< 4) := by
+  show (mergeOdd inBytes L R).data[inBytes / 2 + k]! = (L[k]! >>> 4) ||| (L[k - 1]! <<< 4)
+  unfold mergeOdd
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, Id.run, pure, bind]
+  rw [Array.getElem!_set!_ne _ _ _ _ (by omega)]
+  refine (forIn_range'_set!_get_in (inBytes / 2 + 1) (inBytes - (inBytes / 2 + 1)) inBytes _ _
+      (by simp only [forIn_set!_size, Array.size_replicate]) (by omega) (inBytes / 2 + k)
+      (by omega) (by omega)).trans ?_
+  rw [show inBytes / 2 + k - 1 = inBytes / 2 + (k - 1) from by omega]
+  exact (congrArg (· >>> (4 : UInt8))
+      (forIn_range_set!_get_lt ((inBytes + 1) / 2) (inBytes / 2) inBytes (fun i => L[i]!)
+        (forIn (List.range' 0 (inBytes / 2)) (Array.replicate inBytes 0)
+          (fun i acc => ForInStep.yield (acc.set! i R[i]!)) : Id (Array UInt8))
+        (by simp only [forIn_set!_size, Array.size_replicate]) (by omega) k (by omega))) ▸
+    (congrArg (· <<< (4 : UInt8))
+      (forIn_range_set!_get_lt ((inBytes + 1) / 2) (inBytes / 2) inBytes (fun i => L[i]!)
+        (forIn (List.range' 0 (inBytes / 2)) (Array.replicate inBytes 0)
+          (fun i acc => ForInStep.yield (acc.set! i R[i]!)) : Id (Array UInt8))
+        (by simp only [forIn_set!_size, Array.size_replicate]) (by omega) (k - 1) (by omega))) ▸
+    rfl
+
 end CryptWalker.Sphinx.Crypto.AEZ
