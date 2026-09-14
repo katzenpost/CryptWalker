@@ -920,6 +920,36 @@ private theorem createKEMHeader_loop3_trace (kem : KEM) (macS : MAC) (geom : Geo
     (congrArg Prod.snd hstepj).symm
   exact ⟨riFragment, hriFragment, h1, by rw [h2, ← h1]⟩
 
+/-- **Sizes along the loop3 trace**: `(s j).1` grows by exactly one `perHopRoutingInfoLength` per
+step (each `riFragment` is exactly that wide, by `kemRiFragment_size`), and `(s j).2` — once at
+least one step has run — is always exactly `macS.tagSize` wide, by the type of `macS.mac` alone. -/
+private theorem createKEMHeader_s_size (kem : KEM) (macS : MAC) (geom : Geometry)
+    (path : Array PathHop) (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
+    (nrHops : Nat) (s : Nat → ByteArray × ByteArray)
+    (hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength) (hknsize : kemElements.size = nrHops)
+    (hksize : ∀ j (hj : j < kemElements.size), (kemElements[j]'hj).size = kem.ciphertextSize)
+    (hstep : ∀ j (hj : j < nrHops), ∃ riFragment,
+        kemRiFragment kem geom path kemElements (s j).2 nrHops (nrHops - 1 - j) = Except.ok riFragment ∧
+        (s (j + 1)).1 = xorBytes (riFragment ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+          (v0AD ++ kemElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+            ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty)))) :
+    ∀ j (hj : j ≤ nrHops), (s j).1.size = (s 0).1.size + j * geom.perHopRoutingInfoLength ∧
+      (0 < j → (s j).2.size = macS.tagSize) := by
+  intro j hj
+  induction j with
+  | zero => simp
+  | succ j ih =>
+    obtain ⟨ih1, -⟩ := ih (by omega)
+    obtain ⟨riFragment, hriFragment, h1, h2⟩ := hstep j (by omega)
+    have hrfsize : riFragment.size = geom.perHopRoutingInfoLength :=
+      kemRiFragment_size kem geom path kemElements (s j).2 nrHops (nrHops - 1 - j) (by omega)
+        hperhop hnnh hknsize hksize riFragment hriFragment
+    refine ⟨?_, fun _ => ?_⟩
+    · rw [h1, size_xorBytes, ByteArray.size_append, hrfsize, ih1]; ring
+    · rw [h2]; exact Util.Bytes.size_ofVector _
+
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 4000 in
 /-- **`createKEMHeader`, fully unfolded to content.** Packages `createKEMHeader_loop1_content`/
@@ -1253,6 +1283,20 @@ private theorem newKEMPacket_payload_content (cipher : WideBlockCipher) (sprpKey
   unfold payloadEncryptStep at hstepk
   rw [show sprpKeys.size - 1 - (sprpKeys.size - k - 1) = k from by omega] at hstepk
   rw [hstepk, show sprpKeys.size - (k + 1) = sprpKeys.size - k - 1 from by omega]
+
+/-- The payload trace never changes size — `cipher.encrypt` preserves length at every step. -/
+private theorem newKEMPacket_payload_size_trace (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+    (t : Nat → ByteArray)
+    (hstep : ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j) :
+    ∀ j (hj : j ≤ sprpKeys.size), (t j).size = (t 0).size := by
+  intro j hj
+  induction j with
+  | zero => rfl
+  | succ j ih =>
+    rw [hstep j (by omega)]
+    unfold payloadEncryptStep
+    rw [cipher.encrypt_size]
+    exact ih (by omega)
 
 /-- **`newKEMPacket`, fully unfolded to content.** As `createKEMHeader_unfold`: packages
 `createKEMHeader`'s own success, and the payload-encryption trace (`newKEMPacket_payload_trace`),
