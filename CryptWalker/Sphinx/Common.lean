@@ -291,6 +291,32 @@ theorem List.foldl_exists_trace {α β : Type} (l : List β) (g : α → β → 
         show s (j' + 1) = g (s j') ((hd :: tl)[j' + 1]'hj)
         exact hstep j' hj'
 
+/-- Pushing onto an array never disturbs an existing index. -/
+theorem Array.getElem!_push_stable {α : Type} [Inhabited α] (a : Array α) (x : α) (i : Nat)
+    (h : i < a.size) : (a.push x)[i]! = a[i]! := by
+  rw [getElem!_pos (a.push x) i (by rw [Array.size_push]; omega), getElem!_pos a i h,
+    Array.getElem_push_lt h]
+
+/-- **Array-index stability across a chain of pushes**: for a `Nat`-indexed sequence of arrays
+each obtained from the last by pushing one element (`t (i+1)`'s size tracking `i+1`, as
+`List.foldl_exists_trace`/`List.forIn_exists_trace`'s own traces do when the step is `Array.push`),
+index `i`'s value is already fixed the moment it's first written — every later snapshot agrees
+with `t (i+1)`, the first one big enough to contain it. Exactly what's needed to read
+`riKeyStream[i]!`/`riPadding[i]!` off the loop's *final* array from a one-step fact proved about
+the trace at step `i+1`. -/
+theorem Array.getElem!_stable_of_pushes {α : Type} [Inhabited α] (t : Nat → Array α) (n : Nat)
+    (hpush : ∀ j, j < n → ∃ x, t (j + 1) = (t j).push x) (hsize : ∀ j, j ≤ n → (t j).size = j) :
+    ∀ i m, i < m → m ≤ n → (t m)[i]! = (t (i + 1))[i]! := by
+  intro i m him hmn
+  induction m with
+  | zero => omega
+  | succ m ih =>
+    rcases Nat.lt_or_ge i m with h | h
+    · obtain ⟨x, hx⟩ := hpush m (by omega)
+      rw [hx, Array.getElem!_push_stable _ _ _ (by rw [hsize m (by omega)]; omega), ih h (by omega)]
+    · have hie : i = m := by omega
+      rw [hie]
+
 def mac (key : Vector UInt8 32) (msg : ByteArray) : Vector UInt8 32 := hmacSha256 (ofVector key) msg
 
 def zeroPadTo (n : Nat) (b : ByteArray) : ByteArray :=
