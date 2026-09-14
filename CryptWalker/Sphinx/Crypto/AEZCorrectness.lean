@@ -1172,4 +1172,109 @@ theorem mergeOdd_get_upper (inBytes : Nat) (hodd : inBytes % 2 = 1) (L R : Block
         (by simp only [forIn_set!_size, Array.size_replicate]) (by omega) (k - 1) (by omega))) ▸
     rfl
 
+/-- `initLR`'s odd-length branch, characterized generically (independent of `mergeOdd`): `L`'s
+extraction is always a plain copy (never repacked); `R`'s extraction repacks the raw bytes
+`inArr.get! (inBytes / 2 + ·)` via the same nibble-shift formula `mergeOdd`'s own construction
+mirrors, and the mask/pad settle at `(0xf0, 0x08)`. -/
+theorem initLR_odd_raw (inArr : ByteArray) (hodd : inArr.size % 2 = 1) (hlt : inArr.size < 32) :
+    (∀ k, k < (inArr.size + 1) / 2 → (initLR inArr).1[k]! = inArr.get! k) ∧
+    (∀ k, k < inArr.size / 2 → (initLR inArr).2.1[k]!
+      = ((inArr.get! (inArr.size / 2 + k) <<< 4) ||| (inArr.get! (inArr.size / 2 + k + 1) >>> 4))) ∧
+    (initLR inArr).2.1[inArr.size / 2]! = inArr.get! (inArr.size / 2 + inArr.size / 2) <<< 4 ∧
+    (initLR inArr).2.2 = (0xf0, 0x08) := by
+  unfold initLR
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, Id.run, pure, bind]
+  have hodd' : (inArr.size % 2 == 1) = true := by simp [hodd]
+  simp only [hodd', if_true]
+  set rawR : Array UInt8 := (forIn (List.range' 0 ((inArr.size + 1) / 2)) zero16
+      (fun i acc => ForInStep.yield (acc.set! i (inArr.get! (inArr.size / 2 + i)))) :
+      Id (Array UInt8)) with hrawRdef
+  have hrawRsize : rawR.size = 16 := by
+    rw [hrawRdef]
+    exact (forIn_set!_size (List.range' 0 ((inArr.size + 1) / 2)) id
+      (fun i => inArr.get! (inArr.size / 2 + i)) zero16).trans (by simp [zero16])
+  have horigR : ∀ j, j < (inArr.size + 1) / 2 → rawR[j]! = inArr.get! (inArr.size / 2 + j) := by
+    intro j hj
+    rw [hrawRdef]
+    exact forIn_range_set!_get_lt0 ((inArr.size + 1) / 2) 16
+      (fun i => inArr.get! (inArr.size / 2 + i)) zero16 (by simp [zero16]) (by omega) j hj
+  refine ⟨?_, ?_, ?_, trivial⟩
+  · intro k hk
+    exact forIn_range_set!_get_lt0 ((inArr.size + 1) / 2) 16 (fun i => inArr.get! i) zero16
+      (by simp [zero16]) (by omega) k hk
+  · intro k hk
+    rw [Array.getElem!_set!_ne _ _ _ _ (by omega)]
+    have h1 := forIn_range_set!_get_lt0 (inArr.size / 2) 16
+      (fun i => (rawR[i]! <<< 4) ||| (rawR[i + 1]! >>> 4)) rawR hrawRsize (by omega) k hk
+    rw [horigR k (by omega), horigR (k + 1) (by omega),
+      show inArr.size / 2 + (k + 1) = inArr.size / 2 + k + 1 from by omega] at h1
+    exact h1
+  · have hrepacksize : (forIn (List.range' 0 (inArr.size / 2)) rawR
+        (fun k acc => ForInStep.yield (acc.set! k (rawR[k]! <<< 4 ||| rawR[k + 1]! >>> 4))) :
+        Id (Array UInt8)).size = 16 :=
+      (forIn_set!_size (List.range' 0 (inArr.size / 2)) id
+        (fun i => (rawR[i]! <<< 4) ||| (rawR[i + 1]! >>> 4)) rawR).trans hrawRsize
+    rw [Array.getElem!_set!_self _ _ _ (by rw [hrepacksize]; omega)]
+    exact congrArg (· <<< (4 : UInt8)) (horigR (inArr.size / 2) (by omega))
+
+/-! ## `initLR_mergeOdd`: composing the nibble algebra
+
+Each of `initLR`'s repack formula (`initLR_odd_raw`) and `mergeOdd`'s own construction
+(`mergeOdd_get_left`/`_mid`/`_upper`) is separately a "shift some nibbles together" step; composing
+decrypt's extraction with encrypt's merge cancels the double shift down to the identities below,
+each a free-variable `UInt8` fact discharged by `bv_decide` directly (no need to trace the
+cancellation symbolically). -/
+
+private theorem nibble_id_A (L0 L1 Rmm : UInt8) :
+    ((((L0 >>> 4) ||| (Rmm &&& 0xf0)) <<< 4) ||| (((L1 >>> 4) ||| (L0 <<< 4)) >>> 4)) = L0 := by
+  bv_decide
+
+private theorem nibble_id_B (Lkm1 Lk Lkp1 : UInt8) :
+    ((((Lk >>> 4) ||| (Lkm1 <<< 4)) <<< 4) ||| (((Lkp1 >>> 4) ||| (Lk <<< 4)) >>> 4)) = Lk := by
+  bv_decide
+
+private theorem nibble_id_C (Lmm Lmm1 : UInt8) :
+    (((Lmm >>> 4) ||| (Lmm1 <<< 4)) <<< 4) &&& 0xf0 = Lmm &&& 0xf0 := by
+  bv_decide
+
+private theorem nibble_id_D (L0 Rmm : UInt8) :
+    (((L0 >>> 4) ||| (Rmm &&& 0xf0)) &&& 0xf0) = Rmm &&& 0xf0 := by
+  bv_decide
+
+/-- **The odd-length analogue of `initLR_mergeEven`**: decrypt's `initLR`, fed the ciphertext
+`mergeOdd inBytes L R`, recovers `(R, L)` up to `PrefixEqB (inBytes / 2) 0xf0` (not full equality:
+only that much survives the nibble round-trip cleanly), and the mask/pad recover exactly to
+`(0xf0, 0x08)`. -/
+theorem initLR_mergeOdd (inBytes : Nat) (hodd : inBytes % 2 = 1) (h16 : 16 ≤ inBytes)
+    (hlt : inBytes < 32) (L R : Block) :
+    PrefixEqB (inBytes / 2) 0xf0 (initLR (mergeOdd inBytes L R)).1 R ∧
+    PrefixEqB (inBytes / 2) 0xf0 (initLR (mergeOdd inBytes L R)).2.1 L ∧
+    (initLR (mergeOdd inBytes L R)).2.2 = (0xf0, 0x08) := by
+  set C := mergeOdd inBytes L R with hCdef
+  have hCsize : C.size = inBytes := mergeOdd_size inBytes L R
+  obtain ⟨hL0, hR0, hRmm, hmp⟩ := initLR_odd_raw C (by rw [hCsize]; exact hodd)
+    (by rw [hCsize]; exact hlt)
+  rw [hCsize] at hL0 hR0 hRmm
+  refine ⟨⟨?_, ?_⟩, ⟨?_, ?_⟩, hmp⟩
+  · intro k hk
+    rw [hL0 k (by omega), hCdef]
+    exact mergeOdd_get_left inBytes hodd L R k hk
+  · rw [hL0 (inBytes / 2) (by omega), hCdef, mergeOdd_get_mid inBytes hodd L R]
+    exact nibble_id_D (L[0]!) (R[inBytes / 2]!)
+  · intro k hk
+    rcases Nat.eq_zero_or_pos k with hk0 | hk0
+    · subst hk0
+      rw [hR0 0 hk, hCdef, show inBytes / 2 + 0 = inBytes / 2 from by omega,
+        show inBytes / 2 + 0 + 1 = inBytes / 2 + 1 from by omega,
+        mergeOdd_get_mid inBytes hodd L R,
+        mergeOdd_get_upper inBytes hodd L R 1 (by omega) (by omega)]
+      exact nibble_id_A (L[0]!) (L[1]!) (R[inBytes / 2]!)
+    · rw [hR0 k hk, hCdef, mergeOdd_get_upper inBytes hodd L R k hk0 (by omega),
+        show inBytes / 2 + k + 1 = inBytes / 2 + (k + 1) from by omega,
+        mergeOdd_get_upper inBytes hodd L R (k + 1) (by omega) (by omega)]
+      exact nibble_id_B (L[k - 1]!) (L[k]!) (L[k + 1]!)
+  · rw [hRmm, hCdef, mergeOdd_get_upper inBytes hodd L R (inBytes / 2) (by omega) (by omega)]
+    exact nibble_id_C (L[inBytes / 2]!) (L[inBytes / 2 - 1]!)
+
 end CryptWalker.Sphinx.Crypto.AEZ
