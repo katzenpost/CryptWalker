@@ -930,6 +930,43 @@ def newKEMPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF
     b := cipher.encrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
+/-- `newKEMPacket`'s payload loop's one-step accumulator update — never fails, so (as with
+`loop2Step`) its `forIn` collapses to a bare `List.foldl` under `List.forIn_pure_yield_eq_foldl`. -/
+private def payloadEncryptStep (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+    (b : ByteArray) (iRev : Nat) : ByteArray :=
+  let k := sprpKeys[sprpKeys.size - 1 - iRev]!
+  cipher.encrypt k.key.toArray (ofVector k.iv) b
+
+/-- **The full trace of `newKEMPacket`'s payload-encryption loop.** -/
+private theorem newKEMPacket_payload_trace (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+    (init : ByteArray) :
+    ∃ t : Nat → ByteArray, t 0 = init ∧
+      t sprpKeys.size = (List.range' 0 sprpKeys.size).foldl (payloadEncryptStep cipher sprpKeys) init ∧
+      ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j := by
+  obtain ⟨t, ht0, htl, hstep⟩ := CryptWalker.Sphinx.Common.List.foldl_exists_trace
+    (List.range' 0 sprpKeys.size) (payloadEncryptStep cipher sprpKeys) init
+  refine ⟨t, ht0, by simpa using htl, ?_⟩
+  intro j hj
+  have hj' : j < (List.range' 0 sprpKeys.size).length := by simpa using hj
+  simpa using hstep j hj'
+
+/-- **The payload-layering invariant, at the content level**: writing `payloadAt k := t
+(sprpKeys.size - k)` for the trace above (so `payloadAt 0` is the fully sender-encrypted payload —
+what ends up in the packet — and `payloadAt sprpKeys.size` is the all-zero-tag-prefixed plaintext),
+hop `k` recovers `payloadAt (k+1)` from `payloadAt k` by decrypting with exactly *its own*
+`sprpKeys[k]!` — the SPRP-layering fact `unwrapKEM`'s payload decryption at each hop needs. -/
+private theorem newKEMPacket_payload_content (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+    (t : Nat → ByteArray)
+    (hstep : ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j)
+    (k : Nat) (hk : k < sprpKeys.size) :
+    t (sprpKeys.size - k) = cipher.encrypt (sprpKeys[k]!).key.toArray (ofVector (sprpKeys[k]!).iv)
+      (t (sprpKeys.size - (k + 1))) := by
+  have hstepk := hstep (sprpKeys.size - k - 1) (by omega)
+  rw [show sprpKeys.size - k - 1 + 1 = sprpKeys.size - k from by omega] at hstepk
+  unfold payloadEncryptStep at hstepk
+  rw [show sprpKeys.size - 1 - (sprpKeys.size - k - 1) = k from by omega] at hstepk
+  rw [hstepk, show sprpKeys.size - (k + 1) = sprpKeys.size - k - 1 from by omega]
+
 /-- As `NIKESphinx.newNIKEPacket_size`. Generic in `cipher` too: `cipher.encrypt_size` replaces
 `AEZ.sprpEncrypt_size` directly, no extra hypothesis needed (length preservation never depended on
 `cipher.keySize`/`ivSize`, since `encrypt`'s type doesn't mention them). -/
