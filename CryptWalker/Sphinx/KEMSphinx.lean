@@ -922,6 +922,158 @@ private theorem createKEMHeader_loop3_trace (kem : KEM) (macS : MAC) (geom : Geo
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 4000 in
+/-- **`createKEMHeader`, fully unfolded to content.** Packages `createKEMHeader_loop1_content`/
+`createKEMHeader_loop2_content`/`createKEMHeader_loop3_trace` (plus the header/`sprpKeys` assembly
+itself) behind one hypothesis, in the exact shape a successful `createKEMHeader` call actually
+unfolds to — no `List.forIn_pure_yield_eq_foldl`/`ite_pure_yield` collapsing, so `loop3`'s own
+per-step fact references `riKeyStream`/`riPadding` as plain array parameters, matching
+`createKEMHeader_loop3_trace` directly. The single entry point the multi-hop completeness proof
+builds on. -/
+private theorem createKEMHeader_unfold (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+    (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray)
+    (path : Array PathHop) (hdr : ByteArray) (sprpKeys : Array SPRPKey)
+    (h : createKEMHeader kem macS kdfS streamS geom ephemeralSeeds filler path = .ok (hdr, sprpKeys)) :
+    path.size ≠ 0 ∧ path.size ≤ geom.nrHops ∧ ephemeralSeeds.size = path.size ∧
+    (geom.nrHops > path.size → filler.size = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength) ∧
+    ∃ (kemElements : Array ByteArray) (keys : Array HopKeys)
+      (riKeyStream riPadding : Array ByteArray) (s : Nat → ByteArray × ByteArray),
+      kemElements.size = path.size ∧ keys.size = path.size ∧
+      riKeyStream.size = path.size ∧ riPadding.size = path.size ∧
+      (∀ i (hi : i < path.size), ∃ ct ss,
+        kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) = Except.ok (ct, ss) ∧
+        kemElements[i]! = ct ∧ keys[i]! = deriveHopKeysG kdfS ss) ∧
+      (∀ i (hi : i < path.size),
+        riKeyStream[i]! = (streamS.keystream (ofVector (keys[i]!).headerEncryption)
+            (ofVector (keys[i]!).headerEncryptionIV)
+            (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
+          ((geom.routingInfoLength + geom.perHopRoutingInfoLength)
+            - (i + 1) * geom.perHopRoutingInfoLength) ∧
+        riPadding[i]! =
+          (let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
+           let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+             (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
+           let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
+           let thisPad0 := ks.extract ksLen totalRiLen
+           if i > 0 then
+             xorBytes (thisPad0.extract 0 riPadding[i - 1]!.size) riPadding[i - 1]!
+               ++ thisPad0.extract riPadding[i - 1]!.size thisPad0.size
+           else thisPad0)) ∧
+      s 0 = (if geom.nrHops > path.size then filler else ByteArray.empty, ByteArray.empty) ∧
+      (∀ j (hj : j < path.size), ∃ riFragment,
+        kemRiFragment kem geom path kemElements (s j).2 path.size (path.size - 1 - j)
+            = Except.ok riFragment ∧
+        (s (j + 1)).1 = xorBytes (riFragment ++ (s j).1) (riKeyStream[path.size - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[path.size - 1 - j]!).headerMAC)
+          (v0AD ++ kemElements[path.size - 1 - j]! ++ (s (j + 1)).1
+            ++ (if path.size - 1 - j > 0 then riPadding[path.size - 1 - j - 1]! else ByteArray.empty)))) ∧
+      hdr = v0AD ++ kemElements[0]! ++ (s path.size).1 ++ (s path.size).2 ∧
+      sprpKeys = Array.ofFn (fun i : Fin path.size =>
+        { key := keys[i.val]!.payloadEncryption, iv := keys[i.val]!.headerEncryptionIV }) := by
+  unfold createKEMHeader at h
+  dsimp only at h
+  split at h
+  case isTrue =>
+    have h' : (Except.error "sphinx: invalid path" :
+        Except String (ByteArray × Array SPRPKey)) = Except.ok (hdr, sprpKeys) := h
+    injection h'
+  case isFalse =>
+    split at h
+    case isTrue =>
+      have h' : (Except.error "sphinx: wrong number of ephemeral seeds" :
+          Except String (ByteArray × Array SPRPKey)) = Except.ok (hdr, sprpKeys) := h
+      injection h'
+    case isFalse =>
+      split at h
+      case isTrue =>
+        have h' : (Except.error "sphinx: invalid filler length" :
+            Except String (ByteArray × Array SPRPKey)) = Except.ok (hdr, sprpKeys) := h
+        injection h'
+      case isFalse =>
+        rename_i h1 h1b h2
+        simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+          Nat.add_sub_cancel, Nat.div_one] at h
+        obtain ⟨loop1Final, hLoop1, h⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+        obtain ⟨loop2Final, hLoop2, h⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+        obtain ⟨loop3Final, hLoop3, h⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+        obtain ⟨s, hs0, hsl, hstep⟩ := createKEMHeader_loop3_trace kem macS geom path loop1Final.2
+          loop1Final.1 loop2Final.1 loop2Final.2 path.size _ loop3Final hLoop3
+        simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at h1
+        have hpos : path.size ≠ 0 := h1.1
+        have hgen : path.size ≤ geom.nrHops := by omega
+        have heseeds : ephemeralSeeds.size = path.size := by
+          by_contra hc; exact h1b hc
+        have hfsize : geom.nrHops > path.size → filler.size = (geom.nrHops - path.size)
+            * geom.perHopRoutingInfoLength := by
+          intro hgt
+          simp only [Bool.and_eq_true, decide_eq_true_eq, not_and, not_not] at h2
+          exact h2 hgt
+        refine ⟨hpos, hgen, heseeds, hfsize, loop1Final.1, loop1Final.2, loop2Final.1, loop2Final.2,
+          s, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+        · have := CryptWalker.Sphinx.Common.List.forIn_add_of_forall_mem (List.range' 0 path.size) _
+            (fun (a : Array ByteArray × Array HopKeys) => a.1.size) 1
+            (fun a a' i hi hgb => by
+              split at hgb
+              · injection hgb
+              · next ct ss hct =>
+                simp only [pure, Except.pure, Except.ok.injEq] at hgb
+                injection hgb with hgb
+                rw [← hgb]; simp [Array.size_push])
+            (fun a a' i hi hgb => by
+              split at hgb
+              · injection hgb
+              · injection hgb with hgb; injection hgb)
+            (#[], #[]) loop1Final hLoop1
+          simpa [List.length_range'] using this
+        · have hkeysize := CryptWalker.Sphinx.Common.List.forIn_add_of_forall_mem
+            (List.range' 0 path.size) _
+            (fun (a : Array ByteArray × Array HopKeys) => a.2.size) 1
+            (fun a a' i hi hgb => by
+              split at hgb
+              · injection hgb
+              · next ct ss hct =>
+                simp only [pure, Except.pure, Except.ok.injEq] at hgb
+                injection hgb with hgb
+                rw [← hgb]; simp [Array.size_push])
+            (fun a a' i hi hgb => by
+              split at hgb
+              · injection hgb
+              · injection hgb with hgb; injection hgb)
+            (#[], #[]) loop1Final hLoop1
+          simpa [List.length_range'] using hkeysize
+        · have := CryptWalker.Sphinx.Common.List.forIn_add_of_forall_mem (List.range' 0 path.size) _
+            (fun (a : Array ByteArray × Array ByteArray) => a.1.size) 1
+            (fun a a' i hi hgb => by
+              split at hgb <;>
+                · simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hgb
+                  rw [← hgb]; simp)
+            (fun a a' i hi hgb => by
+              split at hgb <;> · simp_all [pure, Except.pure])
+            (#[], #[]) loop2Final hLoop2
+          simpa [List.length_range'] using this
+        · have := CryptWalker.Sphinx.Common.List.forIn_add_of_forall_mem (List.range' 0 path.size) _
+            (fun (a : Array ByteArray × Array ByteArray) => a.2.size) 1
+            (fun a a' i hi hgb => by
+              split at hgb <;>
+                · simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hgb
+                  rw [← hgb]; simp)
+            (fun a a' i hi hgb => by
+              split at hgb <;> · simp_all [pure, Except.pure])
+            (#[], #[]) loop2Final hLoop2
+          simpa [List.length_range'] using this
+        · exact createKEMHeader_loop1_content kem kdfS path ephemeralSeeds path.size loop1Final
+            hLoop1
+        · exact createKEMHeader_loop2_content streamS geom loop1Final.2 path.size loop2Final hLoop2
+        · exact hs0
+        · exact hstep
+        · injection h with h
+          have hhdreq := congrArg Prod.fst h
+          simp only at hhdreq
+          rw [← hhdreq, hsl]
+        · injection h with h
+          have hkeys := congrArg Prod.snd h
+          simp only at hkeys
+          rw [← hkeys]
+
 /-- As `NIKESphinx.createHeader_hdr_size`. Generic in `macS`/`kdfS`/`streamS`: the one extra
 hypothesis this needs beyond `geom.ValidForKEM kem` is `hmactag`, tying `macS`'s output width to
 `Geometry`'s own fixed `macLength` constant — the one place a MAC's width is actually baked into
