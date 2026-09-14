@@ -616,6 +616,141 @@ private theorem createKEMHeader_loop1_content (kem : KEM) (kdfS : KDF) (path : A
     · rw [h1, ← congrArg Prod.fst hstepi, getElem!_push_eq' _ _ _ hpi1.symm]
     · rw [h2, ← congrArg Prod.snd hstepi, getElem!_push_eq' _ _ _ hpi2.symm]
 
+/-- **`createKEMHeader`'s second loop, at the content level — kept in its native `forIn`/`Except`
+shape.** As `loop2_content`, but proved directly against the loop's own `forIn` (via
+`List.forIn_exists_trace`) instead of the `List.foldl` form `List.forIn_pure_yield_eq_foldl` would
+collapse it to. The two are propositionally the same loop, but the *assembled* completeness proof
+never applies that collapsing simp lemma to begin with (only `createKEMHeader_hdr_size` does) — so
+the hypothesis it actually gets from unfolding `createKEMHeader` names loop2's result as a
+freestanding `Array ByteArray × Array ByteArray` (`loop2Final`, referenced directly by loop3's own
+step), never an inlined `List.foldl` term to match against `loop2Step`. This is the version that
+composes with that hypothesis shape. -/
+private theorem createKEMHeader_loop2_content (streamS : StreamCipher) (geom : Geometry)
+    (keys : Array HopKeys) (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
+    (hfinal : forIn (List.range' 0 nrHops) (#[], #[])
+        (fun i (st : Array ByteArray × Array ByteArray) =>
+          (do
+            let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+              (ofVector (keys[i]!).headerEncryptionIV)
+              (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+            let ksLen := (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+              - (i + 1) * geom.perHopRoutingInfoLength
+            let mut thisPad := ks.extract ksLen (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+            if i > 0 then
+              let prevPad := st.2[i - 1]!
+              thisPad := xorBytes (thisPad.extract 0 prevPad.size) prevPad
+                ++ thisPad.extract prevPad.size thisPad.size
+            pure (ForInStep.yield (st.1.push (ks.extract 0 ksLen), st.2.push thisPad)) :
+              Except String (ForInStep (Array ByteArray × Array ByteArray)))) = Except.ok final)
+    (i : Nat) (hi : i < nrHops) :
+    final.1[i]! = (streamS.keystream (ofVector (keys[i]!).headerEncryption)
+        (ofVector (keys[i]!).headerEncryptionIV)
+        (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
+      ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength)
+    ∧ final.2[i]! =
+      (let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
+       let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+         (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
+       let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
+       let thisPad0 := ks.extract ksLen totalRiLen
+       if i > 0 then
+         xorBytes (thisPad0.extract 0 final.2[i - 1]!.size) final.2[i - 1]!
+           ++ thisPad0.extract final.2[i - 1]!.size thisPad0.size
+       else thisPad0) := by
+  have hnd : ∀ (b : Nat) (a a' : Array ByteArray × Array ByteArray), b ∈ List.range' 0 nrHops →
+      (fun i (st : Array ByteArray × Array ByteArray) =>
+        (do
+          let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+            (ofVector (keys[i]!).headerEncryptionIV)
+            (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+          let ksLen := (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+            - (i + 1) * geom.perHopRoutingInfoLength
+          let mut thisPad := ks.extract ksLen (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+          if i > 0 then
+            let prevPad := st.2[i - 1]!
+            thisPad := xorBytes (thisPad.extract 0 prevPad.size) prevPad
+              ++ thisPad.extract prevPad.size thisPad.size
+          pure (ForInStep.yield (st.1.push (ks.extract 0 ksLen), st.2.push thisPad)) :
+            Except String (ForInStep (Array ByteArray × Array ByteArray)))) b a
+        ≠ Except.ok (ForInStep.done a') := by
+    intro b a a' _hb hcontra
+    dsimp only at hcontra
+    split at hcontra <;> simp_all [pure, Except.pure]
+  obtain ⟨s, hs0, hsl, hstep⟩ := CryptWalker.Sphinx.Common.List.forIn_exists_trace
+    (List.range' 0 nrHops) _ hnd (#[], #[]) final hfinal
+  have hlen : (List.range' 0 nrHops).length = nrHops := by simp
+  have hsl' : s nrHops = final := by rw [← hlen]; exact hsl
+  have hstep' : ∀ j, j < nrHops →
+      (do
+        let ks := streamS.keystream (ofVector (keys[j]!).headerEncryption)
+          (ofVector (keys[j]!).headerEncryptionIV)
+          (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+        let ksLen := (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+          - (j + 1) * geom.perHopRoutingInfoLength
+        let mut thisPad := ks.extract ksLen (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+        if j > 0 then
+          let prevPad := (s j).2[j - 1]!
+          thisPad := xorBytes (thisPad.extract 0 prevPad.size) prevPad
+            ++ thisPad.extract prevPad.size thisPad.size
+        pure (ForInStep.yield ((s j).1.push (ks.extract 0 ksLen), (s j).2.push thisPad)) :
+          Except String (ForInStep (Array ByteArray × Array ByteArray)))
+        = Except.ok (ForInStep.yield (s (j + 1))) := by
+    intro j hj
+    have := hstep j (by rw [hlen]; exact hj)
+    simpa only [List.getElem_range', Nat.one_mul, Nat.zero_add] using this
+  have hsize : ∀ j (hj : j ≤ nrHops), (s j).1.size = j ∧ (s j).2.size = j := by
+    intro j hj
+    induction j with
+    | zero => simp [hs0]
+    | succ j ih =>
+      obtain ⟨ih1, ih2⟩ := ih (by omega)
+      have hstepj := hstep' j (by omega)
+      dsimp only at hstepj
+      split at hstepj <;>
+        · simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
+          rw [← hstepj]; simp [ih1, ih2]
+  have hstable1 := Array.getElem!_stable_of_pushes (fun j => (s j).1) nrHops
+    (fun j hj => by
+      have hstepj := hstep' j hj
+      dsimp only at hstepj
+      split at hstepj <;>
+        · simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
+          exact ⟨_, (congrArg Prod.fst hstepj).symm⟩)
+    (fun j hj => (hsize j hj).1)
+  have hstable2 := Array.getElem!_stable_of_pushes (fun j => (s j).2) nrHops
+    (fun j hj => by
+      have hstepj := hstep' j hj
+      dsimp only at hstepj
+      split at hstepj <;>
+        · simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
+          exact ⟨_, (congrArg Prod.snd hstepj).symm⟩)
+    (fun j hj => (hsize j hj).2)
+  have h1 : final.1[i]! = (s (i + 1)).1[i]! := by
+    rw [← hsl']; exact hstable1 i nrHops hi (le_refl _)
+  have h2 : final.2[i]! = (s (i + 1)).2[i]! := by
+    rw [← hsl']; exact hstable2 i nrHops hi (le_refl _)
+  have hpi1 : (s i).1.size = i := (hsize i (by omega)).1
+  have hpi2 : (s i).2.size = i := (hsize i (by omega)).2
+  have hstepi := hstep' i hi
+  dsimp only at hstepi
+  split at hstepi
+  · next hi0 =>
+    simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepi
+    have hfp : final.2[i - 1]! = (s i).2[i - 1]! := by
+      rw [← hsl']
+      have := hstable2 (i - 1) nrHops (by omega) (by omega)
+      rwa [show i - 1 + 1 = i from by omega] at this
+    refine ⟨?_, ?_⟩
+    · rw [h1, ← congrArg Prod.fst hstepi, getElem!_push_eq' _ _ _ hpi1.symm]
+    · dsimp only
+      rw [if_pos hi0, h2, ← congrArg Prod.snd hstepi, getElem!_push_eq' _ _ _ hpi2.symm, ← hfp]
+  · next hi0 =>
+    simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepi
+    refine ⟨?_, ?_⟩
+    · rw [h1, ← congrArg Prod.fst hstepi, getElem!_push_eq' _ _ _ hpi1.symm]
+    · dsimp only
+      rw [if_neg hi0, h2, ← congrArg Prod.snd hstepi, getElem!_push_eq' _ _ _ hpi2.symm]
+
 /-- **`createKEMHeader`'s second loop, at the content level**: `riKeyStream[i]!` and `riPadding[i]!`
 spelled out exactly, the latter in terms of `riPadding[i-1]!` (already fixed by an earlier
 iteration) rather than unwound all the way back to hop `0` — precisely the one-step relationship
