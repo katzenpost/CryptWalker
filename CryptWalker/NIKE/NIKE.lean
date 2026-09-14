@@ -44,6 +44,29 @@ structure NIKE where
     groupAction sk₁ (derivePublicKey sk₂) (derive_safe sk₂)
       = groupAction sk₂ (derivePublicKey sk₁) (derive_safe sk₁)
 
+  -- Re-blinding chain: what makes Sphinx's iterated group-element blinding telescope, generic
+  -- over any Diffie-Hellman-style NIKE.
+
+  /-- Reinterpret a shared secret as a public key: the operation Sphinx's blinding chain performs
+  at each hop after the first (re-decoding an already-blinded group element's bytes). Not
+  meaningful for a non-DH NIKE, but nothing here requires a scheme registered as `NIKE` to support
+  Sphinx's blinding chain in the first place — a scheme that never needs it may implement this
+  however it likes, so long as it satisfies the two laws below. -/
+  reinterpret : SharedSecret → PublicKey
+
+  /-- Acting on a safe public key with `groupAction`, then reinterpreting the result, stays safe —
+  what lets the chain apply a *further* group action to it. -/
+  reinterpret_safe : ∀ sk pk (h : Safe pk), Safe (reinterpret (groupAction sk pk h))
+
+  /-- **The Diffie-Hellman identity, generalized to a re-blinded chain**: acting with a further
+  private key on a *reinterpreted* shared secret gives the same result regardless of which of two
+  private keys was applied first. `commutes` above only covers a single hop (two honestly-derived
+  public keys); this is what `createHeader`'s *iterated* blinding chain needs beyond that, once
+  later hops act on a previously-blinded (not freshly-derived) element. -/
+  groupAction_comm : ∀ sk₁ sk₂ pk (h : Safe pk),
+    groupAction sk₁ (reinterpret (groupAction sk₂ pk h)) (reinterpret_safe sk₂ pk h)
+      = groupAction sk₂ (reinterpret (groupAction sk₁ pk h)) (reinterpret_safe sk₁ pk h)
+
 attribute [instance] NIKE.decSafe
 
 

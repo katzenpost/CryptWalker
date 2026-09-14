@@ -464,6 +464,34 @@ lemma groupActionX_commutes (sk₁ sk₂ : PrivateKey)
     _ = xCoord (scalarOf sk₂ • toPoint (xCoord (scalarOf sk₁ • G)) h₁) :=
         (xCoord_smul_congr _ e₁).symm
 
+/-- `groupActionX`'s output is always safe: it's an actual curve point's x-coordinate by
+construction (`toPoint`/`scalarOf sk • ·` never leave the curve), regardless of whether the input
+`x` came from an honestly-derived public key or a previously-blinded group element. This is what
+lets Sphinx's blinding chain apply *another* group action to the result. -/
+lemma groupActionX_safe (sk : PrivateKey) (x : ZMod p) (h : SafeX x) : SafeX (groupActionX sk x h) :=
+  liftX_isSome_of_exists (exists_onCurve_xCoord (scalarOf sk • toPoint x h))
+
+/-- **The Diffie-Hellman identity, generalized to a re-blinded chain**: `groupActionX_commutes`
+above is the special case `x := derivePublicKeyX sk₂`; this is what `createHeader`'s *iterated*
+blinding chain needs beyond that, once later hops act on a previously-blinded (not freshly
+re-derived) element — the exact same proof, since it never actually used that `x` was derived,
+only that `toPoint x h` is *some* point sharing `x`'s x-coordinate. -/
+lemma groupActionX_comm (sk₁ sk₂ : PrivateKey) (x : ZMod p) (h : SafeX x) :
+    groupActionX sk₁ (groupActionX sk₂ x h) (groupActionX_safe sk₂ x h)
+      = groupActionX sk₂ (groupActionX sk₁ x h) (groupActionX_safe sk₁ x h) := by
+  unfold groupActionX
+  have e₂ : xCoord (toPoint (xCoord (scalarOf sk₂ • toPoint x h)) (groupActionX_safe sk₂ x h))
+      = xCoord (scalarOf sk₂ • toPoint x h) :=
+    xCoord_toPoint _ (groupActionX_safe sk₂ x h)
+  have e₁ : xCoord (toPoint (xCoord (scalarOf sk₁ • toPoint x h)) (groupActionX_safe sk₁ x h))
+      = xCoord (scalarOf sk₁ • toPoint x h) :=
+    xCoord_toPoint _ (groupActionX_safe sk₁ x h)
+  calc xCoord (scalarOf sk₁ • toPoint (xCoord (scalarOf sk₂ • toPoint x h)) (groupActionX_safe sk₂ x h))
+      = xCoord (scalarOf sk₁ • (scalarOf sk₂ • toPoint x h)) := xCoord_smul_congr _ e₂
+    _ = xCoord (scalarOf sk₂ • (scalarOf sk₁ • toPoint x h)) := congrArg xCoord (dh_commutes _ _ _)
+    _ = xCoord (scalarOf sk₂ • toPoint (xCoord (scalarOf sk₁ • toPoint x h)) (groupActionX_safe sk₁ x h)) :=
+        (xCoord_smul_congr _ e₁).symm
+
 def Scheme : NIKE where
   PrivateKey   := PrivateKey
   PublicKey    := ZMod p
@@ -506,6 +534,9 @@ def Scheme : NIKE where
       exact heq
     · simp at h
   commutes           := fun sk₁ sk₂ => groupActionX_commutes sk₁ sk₂ _ _
+  reinterpret        := id
+  reinterpret_safe   := groupActionX_safe
+  groupAction_comm   := groupActionX_comm
 
 /-- A u-coordinate as 32 little-endian bytes. -/
 def uBytes (P : Point) : Vector UInt8 32 := encodeFieldChecked (xCoord P)

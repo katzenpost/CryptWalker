@@ -151,6 +151,27 @@ axiom derivePub_safe : ∀ sk : PrivateKey, SafePub (derivePub sk)
 axiom curve25519_commutes : ∀ sk₁ sk₂ : PrivateKey,
   curve25519 sk₁.data (derivePub sk₂).data = curve25519 sk₂.data (derivePub sk₁).data
 
+/-- `groupAction`'s output is always safe (never one of the 8 small-order points), regardless of
+whether the input `pk` itself was safe — matching X25519's standard scalar-clamping guarantee
+(`clampScalar` forces every private key to a multiple of the curve's cofactor 8, which annihilates
+any small-order component of the input point). What lets Sphinx's blinding chain apply *another*
+group action to a previously-blinded (not freshly-derived) group element; the analogous fact for
+`X25519.Scheme`'s group-theoretic construction (`groupActionX_safe`) is a real proof from the
+point's type staying on-curve, not an axiom — this one rests on the ladder's own clamping
+discipline instead, at the same trust level as `derivePub_safe`/`curve25519_commutes` above. -/
+axiom curve25519_safe : ∀ (sk : PrivateKey) (pk : PublicKey),
+  SafePub (⟨curve25519 sk.data pk.data⟩ : PublicKey)
+
+/-- **The Diffie-Hellman identity, generalized to a re-blinded chain**: `curve25519_commutes`
+above only covers two honestly-derived public keys; `createHeader`'s *iterated* blinding chain
+needs this more general form once later hops act on a previously-blinded (not freshly-derived)
+group element. Same trust tier as `curve25519_commutes`, just stated for an arbitrary point
+rather than one restricted to `derivePub`'s image — true of the underlying scalar multiplication
+regardless (it's the standard multi-party/iterated Diffie-Hellman property), just not what the
+narrower field above happens to state. -/
+axiom curve25519_comm_gen : ∀ (sk₁ sk₂ : PrivateKey) (pk : Vector UInt8 keySize),
+  curve25519 sk₁.data (curve25519 sk₂.data pk) = curve25519 sk₂.data (curve25519 sk₁.data pk)
+
 def SchemeName := "X25519-ladder"
 
 def LadderScheme : NIKE where
@@ -181,5 +202,8 @@ def LadderScheme : NIKE where
   decode_encode_pub  := fun _ => rfl
   encode_decode_pub  := fun _ _ h => congrArg PublicKey.data (Option.some.inj h) ▸ rfl
   commutes           := fun sk₁ sk₂ => congrArg SharedSecret.mk (curve25519_commutes sk₁ sk₂)
+  reinterpret        := fun ss => ⟨ss.data⟩
+  reinterpret_safe   := fun sk pk _ => curve25519_safe sk pk
+  groupAction_comm   := fun sk₁ sk₂ pk _ => congrArg SharedSecret.mk (curve25519_comm_gen sk₁ sk₂ pk.data)
 
 end CryptWalker.NIKE.X25519_montgomery_ladder
