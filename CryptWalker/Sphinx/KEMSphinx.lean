@@ -102,7 +102,15 @@ private def kemRiFragment (kem : KEM) (geom : Geometry) (path : Array PathHop)
     Except String ByteArray := do
   let isTerminal := i == nrHops - 1
   let hop := path[i]!
-  let budget := if isTerminal then geom.perHopRoutingInfoLength
+  -- Both branches reserve `kem.ciphertextSize` bytes: a non-terminal hop's fragment tail is
+  -- overwritten with the next hop's embedded ciphertext below, and *every* hop's fragment —
+  -- terminal or not — is exactly what `unwrapKEM` receives as `cmdBuf` after it unconditionally
+  -- carves the trailing `kem.ciphertextSize` bytes off as `nextCiphertext`, since the receiver
+  -- can't know in advance whether a given hop is the last one. Giving the terminal branch the
+  -- *full* `perHopRoutingInfoLength` budget here (as NIKE-Sphinx does, which has no ciphertext
+  -- tail to reserve) would let `wrapKEM` accept commands `unwrapKEM` then truncates/misparses —
+  -- breaking completeness for a path no caller-visible check rules out.
+  let budget := if isTerminal then geom.perHopRoutingInfoLength - kem.ciphertextSize
     else geom.perHopRoutingInfoLength - geom.nextNodeHopLength - kem.ciphertextSize
   let mut riFragment ← commandsToBytes budget hop.commands
   if !isTerminal then
@@ -249,9 +257,11 @@ private theorem kemRiFragment_size (kem : KEM) (geom : Geometry) (path : Array P
     simp only [hcond] at hriFragment0
     simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
       Bool.false_eq_true, reduceIte] at h hriFragment0
-    have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength := commandsToBytes_size_le hriFragment0
+    have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength - kem.ciphertextSize :=
+      commandsToBytes_size_le hriFragment0
+    have hle0' : riFragment0.size ≤ geom.perHopRoutingInfoLength := by omega
     simp only [pure, Except.pure, Except.ok.injEq] at h
-    rw [← h, zeroPadTo_size hle0]
+    rw [← h, zeroPadTo_size hle0']
   · have hcond : (i == nrHops - 1) = false := by simp [hterm]
     have hcond' : (!(i == nrHops - 1)) = true := by simp [hterm]
     simp only [hcond'] at h
