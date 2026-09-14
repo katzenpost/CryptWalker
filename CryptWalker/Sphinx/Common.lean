@@ -244,19 +244,19 @@ theorem zeroPadTo_size {n : Nat} {b : ByteArray} (h : b.size ≤ n) : (zeroPadTo
   · simp only [ByteArray.size_append, byteArray_mk_size, Array.size_replicate]
     omega
 
-private theorem replicate_extract (k j : Nat) (h : j ≤ k) :
-    (⟨Array.replicate k (0 : UInt8)⟩ : ByteArray).extract 0 j = ⟨Array.replicate j 0⟩ := by
+theorem replicate_extract (k lo hi : Nat) (h : hi ≤ k) :
+    (⟨Array.replicate k (0 : UInt8)⟩ : ByteArray).extract lo hi = ⟨Array.replicate (hi - lo) 0⟩ := by
   apply ByteArray.ext_getElem
   · simp [ByteArray.size_extract]; omega
   · intro i h1 h2
-    have hik : i < (Array.replicate k (0 : UInt8)).size := by
+    have hik : lo + i < (Array.replicate k (0 : UInt8)).size := by
       rw [Array.size_replicate]
-      have : i < j := by simpa using h2
+      simp [ByteArray.size_extract] at h1
       omega
-    have hij : i < (Array.replicate j (0 : UInt8)).size := by
+    have hij : i < (Array.replicate (hi - lo) (0 : UInt8)).size := by
       rw [Array.size_replicate]; simpa using h2
-    simp only [ByteArray.getElem_extract, Nat.zero_add]
-    show (Array.replicate k (0:UInt8))[i]'hik = (Array.replicate j (0:UInt8))[i]'hij
+    simp only [ByteArray.getElem_extract]
+    show (Array.replicate k (0:UInt8))[lo + i]'hik = (Array.replicate (hi - lo) (0:UInt8))[i]'hij
     rw [Array.getElem_replicate, Array.getElem_replicate]
 
 /-- Padding to a wider target and then taking a prefix that still reaches or exceeds the original
@@ -274,7 +274,8 @@ theorem zeroPadTo_extract_prefix {n m : Nat} (b : ByteArray) (h1 : b.size ≤ m)
     · have heqm : b.size = m := by omega
       rw [if_neg hbn, if_pos hbm, ← heqm, extract_append_of_le b _ (le_refl b.size),
         ByteArray.extract_zero_size]
-    · rw [if_neg hbn, if_neg hbm, extract_append_le b _ h1, replicate_extract _ _ (by omega)]
+    · rw [if_neg hbn, if_neg hbm, extract_append_le b _ h1, replicate_extract _ _ _ (by omega)]
+      simp
 
 /-- Go's "leave spare room for one" check: `budget` is what's left of `perHopRoutingInfoLength`
 for the caller's *own* commands once whatever `createHeader`/`createKEMHeader` appends
@@ -297,6 +298,31 @@ theorem commandsToBytes_size_le {budget : Nat} {cmds : List RoutingCommand} {b :
       injection h with h
       rw [← h]
       omega
+
+/-- Appending one more command to an already-successful `commandsToBytes` call, under a large
+enough budget, still succeeds — with the obvious serialized content. What lets `createKEMHeader`'s
+embedded `NextNodeHop` command (appended after a non-terminal hop's own `commandsToBytes` call
+already succeeded) be re-characterized as a *single* `commandsToBytes` call over the extended
+command list, matching what `parseAll_commandsToBytes` expects. -/
+theorem commandsToBytes_append_singleton {budget budget' : Nat} {cmds : List RoutingCommand}
+    {b : ByteArray} (hcb : commandsToBytes budget' cmds = .ok b) (c : RoutingCommand)
+    (hbudget : b.size + c.toBytes.size ≤ budget) :
+    commandsToBytes budget (cmds ++ [c]) = .ok (b ++ c.toBytes) := by
+  have hbeq : b = cmds.foldl (fun acc c => acc ++ c.toBytes) ByteArray.empty := by
+    unfold commandsToBytes at hcb
+    dsimp only at hcb
+    split at hcb
+    · injection hcb
+    · injection hcb with hcb; exact hcb.symm
+  unfold commandsToBytes
+  dsimp only
+  have hfold : (cmds ++ [c]).foldl (fun acc c => acc ++ c.toBytes) ByteArray.empty
+      = b ++ c.toBytes := by
+    rw [List.foldl_append, List.foldl_cons, List.foldl_nil, ← hbeq]
+  rw [hfold]
+  have hle : ¬ (b ++ c.toBytes).size > budget := by
+    rw [ByteArray.size_append]; omega
+  simp only [hle, if_false, Bool.false_eq_true, pure, Except.pure]
 
 /-- **`parseAll` undoes `commandsToBytes`/`zeroPadTo`** — the exact shape `KEMSphinx`/
 `NIKESphinx`'s completeness proofs need: real commands serialized under a budget, then zero-padded

@@ -92,6 +92,21 @@ theorem extract_append_le (a b : ByteArray) {m : Nat} (h : a.size ≤ m) :
       rw [ByteArray.getElem_append_right hge, ByteArray.getElem_append_right hge]
       simp only [ByteArray.getElem_extract, Nat.zero_add]
 
+/-- Extracting a range that lies entirely in the right half of a concatenation only sees that
+half, at the correspondingly shifted offsets. -/
+theorem extract_append_of_ge (a b : ByteArray) {lo hi : Nat} (h : a.size ≤ lo) :
+    (a ++ b).extract lo hi = b.extract (lo - a.size) (hi - a.size) := by
+  apply ByteArray.ext_getElem
+  · simp only [ByteArray.size_extract, ByteArray.size_append]
+    omega
+  · intro i h1 h2
+    simp only [ByteArray.size_extract] at h2
+    have hlt : lo - a.size + i < b.size := by omega
+    have hlt2 : a.size ≤ lo + i := by omega
+    simp only [ByteArray.getElem_extract, ByteArray.getElem_append_right hlt2]
+    congr 1
+    omega
+
 /-- Splitting at any point and rejoining is the identity. -/
 theorem append_extract (b : ByteArray) (n : Nat) (h : n ≤ b.size) :
     b.extract 0 n ++ b.extract n b.size = b := by
