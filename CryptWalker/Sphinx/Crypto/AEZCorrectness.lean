@@ -6,6 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import CryptWalker.Sphinx.Crypto.AEZ
 import Mathlib.Logic.Function.Iterate
 import Mathlib.Tactic.Set
+import Std.Tactic.BVDecide
 
 namespace CryptWalker.Sphinx.Crypto.AEZ
 
@@ -468,8 +469,91 @@ theorem ladderBwdN_prefix_of_swap (F : Nat → Block → Block) (half : Nat) (hh
       = (ladderFwdN F n (L, R)).swap from rfl,
     ladderBwdN_ladderFwdN_swap F n L R hL hR] at hcongr
 
-/-- If two step functions agree pointwise on every element of `l` (for every accumulator), folding
-either gives the same result. -/
+/-! ## Odd-length locality: agreement needs a boundary nibble too
+
+For an odd-length input, `G_real`'s mask is `0xf0` (not `0`), so `mkBuf`'s output at the boundary
+position `ih2 = inBytes / 2` depends on its input's *upper nibble* there, not just on the bytes
+strictly below it. `PrefixEq` alone (agreement below `n`) is no longer enough to make `G_real`
+congruent — the extra fact needed is that the two inputs' masked bytes agree exactly *at* `n` too.
+`PrefixEqB` packages both; `ladderFwdN_congrB`/`ladderBwdN_congrB`/`ladderBwdN_prefix_of_swapB`
+mirror the plain versions exactly, and reuse the same exact round-trip
+(`ladderBwdN_ladderFwdN_swap`) underneath, since that fact never depended on locality at all. -/
+
+/-- Two blocks agree on their first `n` bytes, and their `n`-th bytes agree after masking with
+`mask`. -/
+def PrefixEqB (n : Nat) (mask : UInt8) (a b : Block) : Prop :=
+  PrefixEq n a b ∧ a[n]! &&& mask = b[n]! &&& mask
+
+private theorem xor_and_distrib (a b m : UInt8) : (a ^^^ b) &&& m = (a &&& m) ^^^ (b &&& m) := by
+  bv_decide
+
+theorem PrefixEqB.xor16_congrLeft {n : Nat} (hn : n ≤ 15) {mask : UInt8} {a a' : Block}
+    (h : PrefixEqB n mask a a') (b : Block) : PrefixEqB n mask (xor16 a b) (xor16 a' b) := by
+  obtain ⟨hpre, hb⟩ := h
+  refine ⟨PrefixEq.xor16_congrLeft (by omega) hpre b, ?_⟩
+  rw [xor16_get! (by omega), xor16_get! (by omega), xor_and_distrib, xor_and_distrib, hb]
+
+/-- The `PrefixEqB` analogue of `ladderFwdN_congr`. -/
+theorem ladderFwdN_congrB (F : Nat → Block → Block) (n : Nat) (hn : n ≤ 15) (mask : UInt8)
+    (hF : ∀ j X X', PrefixEqB n mask X X' → F j X = F j X') (rounds : Nat) :
+    ∀ L R L' R' : Block, PrefixEqB n mask L L' → PrefixEqB n mask R R' →
+      PrefixEqB n mask (ladderFwdN F rounds (L, R)).1 (ladderFwdN F rounds (L', R')).1 ∧
+      PrefixEqB n mask (ladderFwdN F rounds (L, R)).2 (ladderFwdN F rounds (L', R')).2 := by
+  induction rounds with
+  | zero => intro L R L' R' hL hR; exact ⟨hL, hR⟩
+  | succ rounds ih =>
+    intro L R L' R' hL hR
+    obtain ⟨ihL, ihR⟩ := ih L R L' R' hL hR
+    show PrefixEqB n mask (ladderFwdStep F rounds (ladderFwdN F rounds (L, R))).1
+                        (ladderFwdStep F rounds (ladderFwdN F rounds (L', R'))).1 ∧
+         PrefixEqB n mask (ladderFwdStep F rounds (ladderFwdN F rounds (L, R))).2
+                        (ladderFwdStep F rounds (ladderFwdN F rounds (L', R'))).2
+    simp only [ladderFwdStep]
+    have hR2k := hF (2 * rounds) _ _ ihR
+    have hL' : PrefixEqB n mask
+        (xor16 (ladderFwdN F rounds (L, R)).1 (F (2 * rounds) (ladderFwdN F rounds (L, R)).2))
+        (xor16 (ladderFwdN F rounds (L', R')).1 (F (2 * rounds) (ladderFwdN F rounds (L', R')).2)) := by
+      rw [hR2k]; exact PrefixEqB.xor16_congrLeft hn ihL _
+    refine ⟨hL', ?_⟩
+    rw [hF (2 * rounds + 1) _ _ hL']
+    exact PrefixEqB.xor16_congrLeft hn ihR _
+
+/-- The `PrefixEqB` analogue of `ladderBwdN_congr`. -/
+theorem ladderBwdN_congrB (F : Nat → Block → Block) (n : Nat) (hn : n ≤ 15) (mask : UInt8)
+    (hF : ∀ j X X', PrefixEqB n mask X X' → F j X = F j X') (rounds : Nat) :
+    ∀ L R L' R' : Block, PrefixEqB n mask L L' → PrefixEqB n mask R R' →
+      PrefixEqB n mask (ladderBwdN F rounds (L, R)).1 (ladderBwdN F rounds (L', R')).1 ∧
+      PrefixEqB n mask (ladderBwdN F rounds (L, R)).2 (ladderBwdN F rounds (L', R')).2 := by
+  induction rounds with
+  | zero => intro L R L' R' hL hR; exact ⟨hL, hR⟩
+  | succ rounds ih =>
+    intro L R L' R' hL hR
+    show PrefixEqB n mask (ladderBwdN F rounds (ladderBwdStep F (2 * rounds + 1) (L, R))).1
+                        (ladderBwdN F rounds (ladderBwdStep F (2 * rounds + 1) (L', R'))).1 ∧
+         PrefixEqB n mask (ladderBwdN F rounds (ladderBwdStep F (2 * rounds + 1) (L, R))).2
+                        (ladderBwdN F rounds (ladderBwdStep F (2 * rounds + 1) (L', R'))).2
+    apply ih
+    · rw [hF (2 * rounds + 1) _ _ hR]
+      exact PrefixEqB.xor16_congrLeft hn hL _
+    · have hL' : PrefixEqB n mask (xor16 L (F (2 * rounds + 1) R)) (xor16 L' (F (2 * rounds + 1) R')) := by
+        rw [hF (2 * rounds + 1) _ _ hR]; exact PrefixEqB.xor16_congrLeft hn hL _
+      rw [hF (2 * rounds + 1 - 1) _ _ hL']
+      exact PrefixEqB.xor16_congrLeft hn hR _
+
+/-- The `PrefixEqB` analogue of `ladderBwdN_prefix_of_swap`. -/
+theorem ladderBwdN_prefix_of_swapB (F : Nat → Block → Block) (n : Nat) (hn : n ≤ 15) (mask : UInt8)
+    (hF : ∀ j X X', PrefixEqB n mask X X' → F j X = F j X') (rounds : Nat) (L R L' R' : Block)
+    (hL : L.size = 16) (hR : R.size = 16)
+    (hL' : PrefixEqB n mask L' (ladderFwdN F rounds (L, R)).2)
+    (hR' : PrefixEqB n mask R' (ladderFwdN F rounds (L, R)).1) :
+    PrefixEqB n mask (ladderBwdN F rounds (L', R')).1 R ∧
+    PrefixEqB n mask (ladderBwdN F rounds (L', R')).2 L := by
+  have hcongr := ladderBwdN_congrB F n hn mask hF rounds L' R'
+    (ladderFwdN F rounds (L, R)).2 (ladderFwdN F rounds (L, R)).1 hL' hR'
+  rwa [show ((ladderFwdN F rounds (L, R)).2, (ladderFwdN F rounds (L, R)).1)
+      = (ladderFwdN F rounds (L, R)).swap from rfl,
+    ladderBwdN_ladderFwdN_swap F rounds L R hL hR] at hcongr
+
 private theorem List.foldl_congr {α β} (l : List β) (f g : α → β → α)
     (h : ∀ a k, k ∈ l → f a k = g a k) (init : α) : l.foldl f init = l.foldl g init := by
   induction l generalizing init with
@@ -834,5 +918,128 @@ theorem aezTiny_roundtrip_even (e : EState) (delta : Block) (inArr : ByteArray)
       rw [hrw]
       exact (mergeEven_get_right inArr.size heven L2 R2 _ hk).trans
         ((hL2R0 _ hk).trans (hR0 _ hk))
+
+/-! ## Odd-length merge/demerge: bit-level groundwork
+
+For odd-length input, `G_real`'s mask is `0xf0`: `mkBuf`'s output at the boundary position `ih2`
+depends on that byte's *upper nibble*, and `aezTiny`'s odd-length merge/demerge packs adjacent
+bytes' nibbles together. All of it reduces to a handful of general, free-variable `UInt8` bit
+identities, discharged by `bv_decide` (an off-the-shelf bitvector decision procedure — these are
+not properties special to this codebase, just facts about 8-bit shifts/masks). -/
+
+private theorem shl4_shr4 (x : UInt8) : (x <<< 4) >>> 4 = x &&& 0x0f := by bv_decide
+private theorem shr4_shl4 (x : UInt8) : (x >>> 4) <<< 4 = x &&& 0xf0 := by bv_decide
+private theorem shr4_shr4 (x : UInt8) : (x >>> 4) >>> 4 = 0 := by bv_decide
+private theorem shl4_shl4 (x : UInt8) : (x <<< 4) <<< 4 = 0 := by bv_decide
+private theorem nibble_recombine (x : UInt8) : (x &&& 0x0f) ||| (x &&& 0xf0) = x := by bv_decide
+private theorem or_and_distrib (a b m : UInt8) : (a ||| b) &&& m = (a &&& m) ||| (b &&& m) := by
+  bv_decide
+private theorem shr4_and_f0 (x : UInt8) : x >>> 4 = (x &&& 0xf0) >>> 4 := by bv_decide
+
+/-- Two `Block`s that agree at every index `< 16` are equal. The `Array UInt8` analogue of
+`byteArray_ext_get!`, needed once `mkBuf`'s congruence proofs must bridge from "agrees pointwise"
+back to "is the same `Block`" before handing the result to the opaque `aes4` call. -/
+private theorem block_ext_get! {a b : Block} (hsa : a.size = 16) (hsb : b.size = 16)
+    (h : ∀ k, k < 16 → a[k]! = b[k]!) : a = b := by
+  apply Array.ext_getElem?
+  intro i
+  by_cases hi : i < 16
+  · rw [getElem?_pos a i (by omega), getElem?_pos b i (by omega)]
+    congr 1
+    rw [← getElem!_pos a i (by omega), ← getElem!_pos b i (by omega)]
+    exact h i hi
+  · rw [getElem?_neg a i (by omega), getElem?_neg b i (by omega)]
+
+/-- The complement of `forIn_range_set!_get_lt0`: a `forIn` loop over `[0, n)` leaves every index
+`≥ n` untouched. -/
+private theorem forIn_range_set!_get_ge (n : Nat) (f : Nat → UInt8) (init : Array UInt8)
+    (k0 : Nat) (hk0 : n ≤ k0) :
+    (forIn (List.range' 0 n) init (fun i acc => ForInStep.yield (acc.set! i (f i))) :
+      Id (Array UInt8)).run[k0]! = init[k0]! := by
+  induction n generalizing init with
+  | zero => simp
+  | succ n ih =>
+    rw [List.range'_1_concat, forIn_append]
+    simp only [List.forIn_cons, List.forIn_nil, bind, pure, Id.run, Nat.zero_add]
+    rw [Array.getElem!_set!_ne _ _ _ _ (by omega)]
+    exact ih init (by omega)
+
+/-- If two blocks agree below `ih2`, and agree at `ih2` itself once masked, `mkBuf` (with
+`half := ih2 + 1`, matching the odd-length case's own `half`/`ih2` relationship) gives the same
+output for both: the copy loop's only read of position `ih2` is immediately overwritten by
+`(·[ih2]! &&& mask) ||| pad`, erasing everything about the read-back value except its image under
+`&&& mask`; positions `< ih2` survive untouched into the final output, and positions `> ih2`
+(within the 16-byte block) are never touched by the copy loop at all (since `half = ih2 + 1`). -/
+theorem mkBuf_congr_boundary (ih2 : Nat) (hih2 : ih2 < 16) (mask pad : UInt8) (delta X X' : Block)
+    (hpre : PrefixEq ih2 X X') (hmask : X[ih2]! &&& mask = X'[ih2]! &&& mask) (ctr : UInt8) :
+    mkBuf (ih2 + 1) ih2 mask pad delta X ctr = mkBuf (ih2 + 1) ih2 mask pad delta X' ctr := by
+  have hcopy : ∀ (Y : Block) (k : Nat), k < 16 →
+      (forIn (List.range' 0 (ih2 + 1)) zero16
+        (fun i acc => ForInStep.yield (acc.set! i Y[i]!)) : Id Block).run[k]!
+        = if k < ih2 + 1 then Y[k]! else (0 : UInt8) := by
+    intro Y k hk
+    split
+    · next h =>
+        exact forIn_range_set!_get_lt0 (ih2 + 1) 16 (fun i => Y[i]!) zero16
+          (by simp [zero16]) (by omega) k h
+    · next h =>
+        rw [forIn_range_set!_get_ge (ih2 + 1) (fun i => Y[i]!) zero16 k (by omega),
+          getElem!_pos (zero16 : Block) k (by simp [zero16]; omega)]
+        simp [zero16]
+  have hcopysize : ∀ Y : Block, (forIn (List.range' 0 (ih2 + 1)) zero16
+      (fun i acc => ForInStep.yield (acc.set! i Y[i]!)) : Id Block).run.size = 16 :=
+    fun Y => (forIn_set!_size (List.range' 0 (ih2 + 1)) id (fun i => Y[i]!) zero16).trans
+      (by simp [zero16])
+  have hbuf1 : ∀ k, k < 16 →
+      (((forIn (List.range' 0 (ih2 + 1)) zero16
+          (fun i acc => ForInStep.yield (acc.set! i X[i]!)) : Id Block).run).set! ih2
+          ((((forIn (List.range' 0 (ih2 + 1)) zero16
+            (fun i acc => ForInStep.yield (acc.set! i X[i]!)) : Id Block).run)[ih2]! &&&
+            mask) ||| pad))[k]!
+        = (((forIn (List.range' 0 (ih2 + 1)) zero16
+          (fun i acc => ForInStep.yield (acc.set! i X'[i]!)) : Id Block).run).set! ih2
+          ((((forIn (List.range' 0 (ih2 + 1)) zero16
+            (fun i acc => ForInStep.yield (acc.set! i X'[i]!)) : Id Block).run)[ih2]! &&&
+            mask) ||| pad))[k]! := by
+    intro k hk
+    by_cases hkeq : k = ih2
+    · rw [hkeq,
+        Array.getElem!_set!_self _ _ _ (by rw [hcopysize]; omega),
+        Array.getElem!_set!_self _ _ _ (by rw [hcopysize]; omega),
+        hcopy X ih2 (by omega), hcopy X' ih2 (by omega), if_pos (by omega), if_pos (by omega),
+        hmask]
+    · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hkeq), Array.getElem!_set!_ne _ _ _ _ (Ne.symm hkeq),
+        hcopy X k hk, hcopy X' k hk]
+      split
+      · next h => exact hpre k (by omega)
+      · rfl
+  have hbuf1eq : (((forIn (List.range' 0 (ih2 + 1)) zero16
+        (fun i acc => ForInStep.yield (acc.set! i X[i]!)) : Id Block).run).set! ih2
+        ((((forIn (List.range' 0 (ih2 + 1)) zero16
+          (fun i acc => ForInStep.yield (acc.set! i X[i]!)) : Id Block).run)[ih2]! &&&
+          mask) ||| pad))
+      = (((forIn (List.range' 0 (ih2 + 1)) zero16
+        (fun i acc => ForInStep.yield (acc.set! i X'[i]!)) : Id Block).run).set! ih2
+        ((((forIn (List.range' 0 (ih2 + 1)) zero16
+          (fun i acc => ForInStep.yield (acc.set! i X'[i]!)) : Id Block).run)[ih2]! &&&
+          mask) ||| pad)) :=
+    block_ext_get! (by rw [Array.size_set!]; exact hcopysize X)
+      (by rw [Array.size_set!]; exact hcopysize X') hbuf1
+  unfold mkBuf
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, Id.run, pure, bind]
+  exact congrArg (fun b : Block => (xor16 b delta).set! 15 ((xor16 b delta)[15]! ^^^ ctr)) hbuf1eq
+
+/-- `G_real`'s congruence under `PrefixEqB`, the fact `mkBuf`'s `0xf0`-masked boundary needs: a
+plain `PrefixEq` on `X`/`X'` below `half`, as `G_real_congr` uses, is too strong to hold for the
+odd-length ciphertext/plaintext byte relationships this file establishes (only agreement up to
+`mask`, at the boundary, ever holds there) — but it's also more than `mkBuf` actually needs, since
+position `ih2` is immediately overwritten by the mask/pad step regardless of what was read back. -/
+theorem G_real_congrB (e : EState) (delta : Block) (ih2 i0 : Nat) (hih2 : ih2 < 16) (mask pad : UInt8)
+    (j : Int) (X X' : Block) (h : PrefixEqB ih2 mask X X') :
+    G_real e delta (ih2 + 1) ih2 i0 mask pad j X = G_real e delta (ih2 + 1) ih2 i0 mask pad j X' := by
+  unfold G_real
+  obtain ⟨hpre, hb⟩ := h
+  rw [mkBuf_congr_boundary ih2 hih2 mask pad delta X X' hpre hb]
 
 end CryptWalker.Sphinx.Crypto.AEZ
