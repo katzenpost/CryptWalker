@@ -36,7 +36,7 @@ open CryptWalker.Sphinx.Crypto.GenericKDF (KDF)
 open CryptWalker.Sphinx.Crypto.StreamCipher (StreamCipher)
 open CryptWalker.KEM.KEM (KEM)
 open CryptWalker.Hash.Sha512 (sha512_256)
-open CryptWalker.Util.Bytes (ofVector)
+open CryptWalker.Util.Bytes (ofVector extract_append_le extract_append_of_le extract_append_of_ge)
 
 /-! # KEM-Sphinx
 
@@ -337,6 +337,130 @@ private theorem kemRiFragment_size (kem : KEM) (geom : Geometry) (path : Array P
     simp only [pure, Except.pure, Except.ok.injEq] at h
     rw [← h, ByteArray.size_append, ByteArray.size_extract, zeroPadTo_size hle1perHop, hctsBang]
     omega
+
+private theorem zeroPadTo_eq_append (b : ByteArray) (n : Nat) (h : b.size ≤ n) :
+    zeroPadTo n b = b ++ ⟨Array.replicate (n - b.size) 0⟩ := by
+  unfold zeroPadTo
+  split
+  · next hge =>
+    have hz : n - b.size = 0 := by omega
+    rw [hz]
+    show b = b ++ ByteArray.empty
+    rw [ByteArray.append_empty]
+  · rfl
+
+/-- **`kemRiFragment`'s content, terminal-hop case**: the leading `perHop - ctSize` bytes parse
+back to exactly the hop's own commands, and the trailing `ctSize` bytes are all zero (the fixed
+tail every terminal fragment reserves, per `kemRiFragment`'s own doc comment — matching what
+`unwrapKEM` unconditionally carves off as `nextCiphertext`, whether or not the hop turns out to be
+terminal). -/
+theorem kemRiFragment_content_terminal (kem : KEM) (geom : Geometry) (path : Array PathHop)
+    (kemElements : Array ByteArray) (macBytes : ByteArray) (nrHops i : Nat) (hi : i < nrHops)
+    (hterm : i = nrHops - 1)
+    (hcle : kem.ciphertextSize ≤ geom.perHopRoutingInfoLength)
+    (hcmdnn : ∀ c ∈ (path[i]!).commands, c ≠ .null)
+    (riFragment : ByteArray)
+    (h : kemRiFragment kem geom path kemElements macBytes nrHops i = Except.ok riFragment) :
+    parseAll (riFragment.extract 0 (geom.perHopRoutingInfoLength - kem.ciphertextSize))
+        = .ok (path[i]!).commands ∧
+      riFragment.extract (geom.perHopRoutingInfoLength - kem.ciphertextSize)
+          geom.perHopRoutingInfoLength
+        = (⟨Array.replicate kem.ciphertextSize 0⟩ : ByteArray) := by
+  unfold kemRiFragment at h
+  dsimp only at h
+  obtain ⟨riFragment0, hriFragment0, h⟩ := Except.eq_ok_of_bind_eq_ok h
+  have hcond : (i == nrHops - 1) = true := by simp [hterm]
+  have hcond' : (!(i == nrHops - 1)) = false := by simp [hterm]
+  simp only [hcond'] at h
+  simp only [hcond] at hriFragment0
+  simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
+    Bool.false_eq_true, reduceIte] at h hriFragment0
+  simp only [pure, Except.pure, Except.ok.injEq] at h
+  have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength - kem.ciphertextSize :=
+    commandsToBytes_size_le hriFragment0
+  have hle0' : riFragment0.size ≤ geom.perHopRoutingInfoLength := by omega
+  rw [← h, zeroPadTo_eq_append riFragment0 geom.perHopRoutingInfoLength hle0']
+  constructor
+  · rw [extract_append_le riFragment0 _ hle0, replicate_extract _ _ _ (by omega : _ ≤
+      geom.perHopRoutingInfoLength - riFragment0.size), Nat.sub_zero,
+      ← zeroPadTo_eq_append riFragment0 (geom.perHopRoutingInfoLength - kem.ciphertextSize) hle0]
+    exact parseAll_commandsToBytes (geom.perHopRoutingInfoLength - kem.ciphertextSize)
+      (geom.perHopRoutingInfoLength - kem.ciphertextSize) (path[i]!).commands hcmdnn riFragment0
+      hriFragment0 hle0
+  · rw [extract_append_of_ge riFragment0 _ hle0]
+    have heq : (geom.perHopRoutingInfoLength - riFragment0.size)
+        - (geom.perHopRoutingInfoLength - kem.ciphertextSize - riFragment0.size)
+        = kem.ciphertextSize := by omega
+    rw [replicate_extract _ _ _ (le_refl (geom.perHopRoutingInfoLength - riFragment0.size)), heq]
+
+/-- **`kemRiFragment`'s content, non-terminal-hop case**: the leading `perHop - ctSize` bytes
+parse back to the hop's own commands followed by the embedded `NextNodeHop` command (carrying the
+*previous* iteration's MAC — `macBytes`, as passed into `kemRiFragment` — and the next hop's ID),
+and the trailing `ctSize` bytes are the next hop's own embedded KEM ciphertext. -/
+theorem kemRiFragment_content_nonterminal (kem : KEM) (geom : Geometry) (path : Array PathHop)
+    (kemElements : Array ByteArray) (macBytes : ByteArray) (nrHops i : Nat) (hi : i < nrHops)
+    (hterm : i ≠ nrHops - 1)
+    (hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (hknsize : kemElements.size = nrHops)
+    (hksize : ∀ j (hj : j < kemElements.size), (kemElements[j]'hj).size = kem.ciphertextSize)
+    (hcmdnn : ∀ c ∈ (path[i]!).commands, c ≠ .null)
+    (riFragment : ByteArray)
+    (h : kemRiFragment kem geom path kemElements macBytes nrHops i = Except.ok riFragment) :
+    parseAll (riFragment.extract 0 (geom.perHopRoutingInfoLength - kem.ciphertextSize))
+        = .ok ((path[i]!).commands
+          ++ [RoutingCommand.nextNodeHop (path[i + 1]!).id (toVec32 macBytes)]) ∧
+      riFragment.extract (geom.perHopRoutingInfoLength - kem.ciphertextSize)
+          geom.perHopRoutingInfoLength
+        = kemElements[i + 1]! := by
+  unfold kemRiFragment at h
+  dsimp only at h
+  obtain ⟨riFragment0, hriFragment0, h⟩ := Except.eq_ok_of_bind_eq_ok h
+  have hcond : (i == nrHops - 1) = false := by simp [hterm]
+  have hcond' : (!(i == nrHops - 1)) = true := by simp [hterm]
+  simp only [hcond'] at h
+  simp only [hcond] at hriFragment0
+  simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
+    Bool.false_eq_true, reduceIte] at h hriFragment0
+  simp only [pure, Except.pure, Except.ok.injEq] at h
+  have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength - geom.nextNodeHopLength
+      - kem.ciphertextSize := commandsToBytes_size_le hriFragment0
+  have hi1 : i + 1 < kemElements.size := by rw [hknsize]; omega
+  have hctsBang : kemElements[i + 1]!.size = kem.ciphertextSize := by
+    rw [getElem!_pos kemElements _ hi1]; exact hksize _ hi1
+  have hnn : (RoutingCommand.nextNodeHop (path[i + 1]!).id (toVec32 macBytes)).toBytes.size
+      = geom.nextNodeHopLength := by rw [RoutingCommand.nextNodeHop_toBytes_size, hnnh]
+  have hcb : commandsToBytes (geom.perHopRoutingInfoLength - kem.ciphertextSize)
+      ((path[i]!).commands ++ [RoutingCommand.nextNodeHop (path[i + 1]!).id (toVec32 macBytes)])
+      = .ok (riFragment0 ++ (RoutingCommand.nextNodeHop (path[i + 1]!).id (toVec32 macBytes)).toBytes) :=
+    commandsToBytes_append_singleton hriFragment0 _ (by rw [hnn]; omega)
+  have hle1 : (riFragment0 ++ (RoutingCommand.nextNodeHop (path[i + 1]!).id
+      (toVec32 macBytes)).toBytes).size ≤ geom.perHopRoutingInfoLength - kem.ciphertextSize := by
+    rw [ByteArray.size_append, hnn]; omega
+  have hle1' : (riFragment0 ++ (RoutingCommand.nextNodeHop (path[i + 1]!).id
+      (toVec32 macBytes)).toBytes).size ≤ geom.perHopRoutingInfoLength := by omega
+  -- `riFragment` (nonterminal branch) = `zeroPadTo (P-C) (riFragment0 ++ nnBytes) ++ kemElements[i+1]!`.
+  rw [← h, zeroPadTo_eq_append _ geom.perHopRoutingInfoLength hle1',
+    extract_append_le _ _ hle1, replicate_extract _ _ _ (by omega), Nat.sub_zero,
+    ← zeroPadTo_eq_append _ (geom.perHopRoutingInfoLength - kem.ciphertextSize) hle1]
+  have hzp : (zeroPadTo (geom.perHopRoutingInfoLength - kem.ciphertextSize)
+      (riFragment0 ++ (RoutingCommand.nextNodeHop (path[i + 1]!).id (toVec32 macBytes)).toBytes)).size
+      = geom.perHopRoutingInfoLength - kem.ciphertextSize := zeroPadTo_size hle1
+  constructor
+  · rw [extract_append_le _ _ (le_of_eq hzp), hzp, Nat.sub_self, ByteArray.extract_same,
+      ByteArray.append_empty]
+    exact parseAll_commandsToBytes _ _ _ (by
+      intro c hc
+      simp only [List.mem_append, List.mem_singleton] at hc
+      rcases hc with hc | hc
+      · exact hcmdnn c hc
+      · rw [hc]; intro hcon; injection hcon) _ hcb hle1
+  · rw [extract_append_of_ge _ _ (le_of_eq hzp), hzp]
+    have hsub : geom.perHopRoutingInfoLength
+        - (geom.perHopRoutingInfoLength - kem.ciphertextSize) = kem.ciphertextSize := by omega
+    rw [hsub, Nat.sub_self]
+    conv_rhs => rw [← ByteArray.extract_zero_size (b := kemElements[i+1]!)]
+    rw [hctsBang]
 
 private theorem createKEMHeader_loop3_step (kem : KEM) (macS : MAC) (geom : Geometry)
     (path : Array PathHop)
