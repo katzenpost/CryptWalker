@@ -266,6 +266,36 @@ theorem commandsToBytes_size_le {budget : Nat} {cmds : List RoutingCommand} {b :
       rw [← h]
       omega
 
+/-- **`parseAll` undoes `commandsToBytes`/`zeroPadTo`** — the exact shape `KEMSphinx`/
+`NIKESphinx`'s completeness proofs need: real commands serialized under a budget, then zero-padded
+out to `n` bytes (or left alone, if they already reached or exceeded `n`), parse back to exactly
+the same command list. Reduces to `Commands.parseAll_append_zeros`, which needs only that no
+command in `cmds` is itself `.null` (so no real command's own tag byte could be mistaken for the
+`0x00` terminator) — the terminator itself is never load-bearing for termination, since an
+exactly-exhausted buffer stops parsing just as cleanly. -/
+theorem parseAll_commandsToBytes (n budget : Nat) (cmds : List RoutingCommand)
+    (hn : ∀ c ∈ cmds, c ≠ .null) (b : ByteArray)
+    (hcb : commandsToBytes budget cmds = .ok b) (hble : b.size ≤ n) :
+    parseAll (zeroPadTo n b) = .ok cmds := by
+  have hbeq : b = cmds.foldl (fun acc c => acc ++ c.toBytes) ByteArray.empty := by
+    unfold commandsToBytes at hcb
+    dsimp only at hcb
+    split at hcb
+    · injection hcb
+    · injection hcb with hcb; exact hcb.symm
+  unfold zeroPadTo
+  split
+  · next hge =>
+    have := parseAll_append_zeros cmds hn ByteArray.empty (by simp)
+    rwa [ByteArray.append_empty, ← hbeq] at this
+  · next hlt =>
+    have hzeros : ((⟨Array.replicate (n - b.size) 0⟩ : ByteArray)).data.all (· == 0) := by
+      rw [Array.all_eq_true]
+      intro i hi
+      simp [Array.getElem_replicate]
+    have := parseAll_append_zeros cmds hn (⟨Array.replicate (n - b.size) 0⟩ : ByteArray) hzeros
+    rwa [← hbeq] at this
+
 /-- A `List.foldl` whose step preserves a `ByteArray`'s size leaves the fold's overall size
 unchanged — what `newNIKEPacket`/`newNIKESURB`'s (and their KEM counterparts') per-hop
 `sprpEncrypt`/`sprpDecrypt` fold need, since each is length-preserving
