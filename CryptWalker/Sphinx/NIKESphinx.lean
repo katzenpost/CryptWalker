@@ -944,6 +944,16 @@ def nikeSphinxCore (nike : NIKE) (geom : Geometry) : CryptWalker.Sphinx.Interfac
   Command := RoutingCommand
   geometry := geom
   stateI := ⟨CryptWalker.Sphinx.Interface.initWith (fun _ => Vector.replicate 32 0)⟩
+  -- The four primitives `wrap`/`unwrap` below actually call, named honestly on the `Sphinx`
+  -- interface even though `createHeader`/`unwrapNIKE`'s bodies still reach `AEZ`/`HMAC`/`KDF`/
+  -- `Stream` directly rather than through these values yet -- routing their calls through these
+  -- fields instead of the concrete functions is tracked separately (mirroring `KEMSphinx`'s
+  -- rewiring); declaring them here first keeps `NIKESphinxScheme` an honest `Sphinx` instance in
+  -- the meantime.
+  cipher := CryptWalker.Sphinx.Crypto.WideBlockCipher.aez
+  mac    := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+  kdf    := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+  stream := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
   derivePublicKey := nikeSelfPublicKeyBytes nike
   wrap := wrapNIKE nike geom
   unwrap := unwrapNIKE nike geom

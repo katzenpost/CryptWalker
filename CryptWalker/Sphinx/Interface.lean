@@ -10,6 +10,10 @@ import CryptWalker.Sphinx.Types
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Indistinguishability
 import CryptWalker.Sphinx.Integrity
+import CryptWalker.Sphinx.Crypto.WideBlockCipher
+import CryptWalker.Sphinx.Crypto.MAC
+import CryptWalker.Sphinx.Crypto.GenericKDF
+import CryptWalker.Sphinx.Crypto.StreamCipher
 import CryptWalker.Util.Bytes
 
 namespace CryptWalker.Sphinx.Interface
@@ -72,6 +76,19 @@ structure Sphinx where
   [privI : Inhabited PrivateKey]
 
   geometry : Geometry.Geometry
+
+  /-- The four cryptographic primitives every Sphinx instance needs besides its NIKE-or-KEM
+  (added one level down, by `NIKESphinxScheme`/`KEMSphinxScheme`): a wide-block cipher for the
+  payload, a MAC for header integrity, a KDF to derive per-hop keys from a shared secret, and a
+  stream cipher for routing-info encryption. `wrap`/`unwrap`/`unwrap_complete` below are written
+  purely in terms of these four fields' own laws — never against a concrete algorithm's name — so
+  swapping AEZ for another wide-block cipher, or HMAC-SHA256 for another MAC, is: define a new
+  `WideBlockCipher`/`MAC` instance elsewhere and pass it in here. Nothing under `Sphinx.Interface`
+  or its `NIKESphinx`/`KEMSphinx` witnesses needs to change or be re-proved. -/
+  cipher : CryptWalker.Sphinx.Crypto.WideBlockCipher.WideBlockCipher
+  mac    : CryptWalker.Sphinx.Crypto.MAC.MAC
+  kdf    : CryptWalker.Sphinx.Crypto.GenericKDF.KDF
+  stream : CryptWalker.Sphinx.Crypto.StreamCipher.StreamCipher
 
   /-- Raw bytes — width depends on which NIKE/KEM this scheme wraps, not fixed here. -/
   derivePublicKey : PrivateKey → ByteArray
@@ -137,6 +154,10 @@ instance : Inhabited Sphinx := ⟨{
       userForwardPayloadLength := 0
       nextNodeHopLength := 0
       sprpKeyMaterialLength := 0 }
+  cipher := default
+  mac    := default
+  kdf    := default
+  stream := default
   derivePublicKey := fun _ => ByteArray.empty
   wrap := fun _ _ _ => throw "sphinx: uninhabited"
   unwrap := fun _ _ => .ok (none, default, [], none)

@@ -693,6 +693,13 @@ def kemSphinxSchemeOf (kem : KEM) (geom : Geometry) : KEMSphinxScheme where
   Command := RoutingCommand
   geometry := geom
   stateI := ⟨CryptWalker.Sphinx.Interface.initWith (fun _ => Vector.replicate 32 0)⟩
+  -- As `NIKESphinx.nikeSphinxCore`: named honestly here even though `createKEMHeader`/
+  -- `unwrapKEM`'s bodies still call `AEZ`/`HMAC`/`KDF`/`Stream` directly rather than through
+  -- these fields -- rewiring those call sites is the next step.
+  cipher := CryptWalker.Sphinx.Crypto.WideBlockCipher.aez
+  mac    := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+  kdf    := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+  stream := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
   derivePublicKey := kemSelfPublicKeyBytes kem
   wrap := wrapKEM kem geom
   unwrap := unwrapKEM kem geom
