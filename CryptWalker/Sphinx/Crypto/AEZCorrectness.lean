@@ -380,4 +380,144 @@ theorem aezTinyLR_bwd_eq (e : EState) (delta : Block) (inArr : ByteArray) (round
       · rw [List.length_range', Std.Legacy.Range.size, Nat.sub_zero, Nat.add_sub_cancel, Nat.div_one]
         exact Prod.ext (hs0 0 0x80 _ _).1 (hs0 0 0x80 _ _).2
 
+/-! ## Locality: the ladder only needs to agree on a prefix
+
+`aezTiny`'s merge step only ever reads the first `half` bytes of the ladder's final `(L, R)` —
+everything from index `half` onward is discarded. So `aezTinyLR`'s decrypt call, fed the
+*merged* ciphertext, doesn't receive a block that's *fully* equal to the swap of what encrypt
+produced (only equal in the first `half` bytes — encrypt's own ladder rounds fill positions
+`≥ half` with Feistel-round output that never gets read again, and merge throws it away). Reusing
+`ladderBwdN_ladderFwdN_swap` as-is would need *full* equality; what actually holds, and is what
+matters, is agreement up to `half` — proved here as a "congruence" version of the same round-trip,
+generic over any round function that itself only depends on its input's first `half` bytes
+(true of `G_real`, via `mkBuf`'s own `for k in [0:half] do ...` loop, proved separately below). -/
+
+/-- Two blocks agree on their first `n` bytes. -/
+def PrefixEq (n : Nat) (a b : Block) : Prop := ∀ k, k < n → a[k]! = b[k]!
+
+theorem PrefixEq.xor16_congrLeft {n : Nat} (hn : n ≤ 16) {a a' : Block} (h : PrefixEq n a a')
+    (b : Block) : PrefixEq n (xor16 a b) (xor16 a' b) := by
+  intro k hk
+  rw [xor16_get! (by omega), xor16_get! (by omega), h k hk]
+
+/-- If `F` only depends on its input's first `half` bytes, so does `n` forward ladder steps: given
+`half`-equal starting pairs, the outputs are `half`-equal too (not necessarily fully equal — the
+tail can diverge, exactly as it does between `aezTinyLR`'s own run and a hypothetical run seeded
+from a fully-agreeing block). -/
+theorem ladderFwdN_congr (F : Nat → Block → Block) (half : Nat) (hhalf : half ≤ 16)
+    (hF : ∀ j X X', PrefixEq half X X' → F j X = F j X') (n : Nat) :
+    ∀ L R L' R' : Block, PrefixEq half L L' → PrefixEq half R R' →
+      PrefixEq half (ladderFwdN F n (L, R)).1 (ladderFwdN F n (L', R')).1 ∧
+      PrefixEq half (ladderFwdN F n (L, R)).2 (ladderFwdN F n (L', R')).2 := by
+  induction n with
+  | zero => intro L R L' R' hL hR; exact ⟨hL, hR⟩
+  | succ n ih =>
+    intro L R L' R' hL hR
+    obtain ⟨ihL, ihR⟩ := ih L R L' R' hL hR
+    show PrefixEq half (ladderFwdStep F n (ladderFwdN F n (L, R))).1
+                        (ladderFwdStep F n (ladderFwdN F n (L', R'))).1 ∧
+         PrefixEq half (ladderFwdStep F n (ladderFwdN F n (L, R))).2
+                        (ladderFwdStep F n (ladderFwdN F n (L', R'))).2
+    simp only [ladderFwdStep]
+    have hR2k := hF (2 * n) _ _ ihR
+    have hL' : PrefixEq half
+        (xor16 (ladderFwdN F n (L, R)).1 (F (2 * n) (ladderFwdN F n (L, R)).2))
+        (xor16 (ladderFwdN F n (L', R')).1 (F (2 * n) (ladderFwdN F n (L', R')).2)) := by
+      rw [hR2k]; exact PrefixEq.xor16_congrLeft hhalf ihL _
+    refine ⟨hL', ?_⟩
+    rw [hF (2 * n + 1) _ _ hL']
+    exact PrefixEq.xor16_congrLeft hhalf ihR _
+
+/-- The backward analogue of `ladderFwdN_congr`. -/
+theorem ladderBwdN_congr (F : Nat → Block → Block) (half : Nat) (hhalf : half ≤ 16)
+    (hF : ∀ j X X', PrefixEq half X X' → F j X = F j X') (n : Nat) :
+    ∀ L R L' R' : Block, PrefixEq half L L' → PrefixEq half R R' →
+      PrefixEq half (ladderBwdN F n (L, R)).1 (ladderBwdN F n (L', R')).1 ∧
+      PrefixEq half (ladderBwdN F n (L, R)).2 (ladderBwdN F n (L', R')).2 := by
+  induction n with
+  | zero => intro L R L' R' hL hR; exact ⟨hL, hR⟩
+  | succ n ih =>
+    intro L R L' R' hL hR
+    show PrefixEq half (ladderBwdN F n (ladderBwdStep F (2 * n + 1) (L, R))).1
+                        (ladderBwdN F n (ladderBwdStep F (2 * n + 1) (L', R'))).1 ∧
+         PrefixEq half (ladderBwdN F n (ladderBwdStep F (2 * n + 1) (L, R))).2
+                        (ladderBwdN F n (ladderBwdStep F (2 * n + 1) (L', R'))).2
+    apply ih
+    · rw [hF (2 * n + 1) _ _ hR]
+      exact PrefixEq.xor16_congrLeft hhalf hL _
+    · have hL' : PrefixEq half (xor16 L (F (2 * n + 1) R)) (xor16 L' (F (2 * n + 1) R')) := by
+        rw [hF (2 * n + 1) _ _ hR]; exact PrefixEq.xor16_congrLeft hhalf hL _
+      rw [hF (2 * n + 1 - 1) _ _ hL']
+      exact PrefixEq.xor16_congrLeft hhalf hR _
+
+/-- Combining `ladderBwdN_congr` with the exact (full-equality) round-trip
+`ladderBwdN_ladderFwdN_swap`: running the backward ladder on anything that's merely `half`-equal
+to the swap of a forward run's output still recovers the original pair, up to that same `half`
+prefix — exactly the fact `aezTiny`'s round-trip needs, since decrypt's input only ever agrees
+with encrypt's output that far. -/
+theorem ladderBwdN_prefix_of_swap (F : Nat → Block → Block) (half : Nat) (hhalf : half ≤ 16)
+    (hF : ∀ j X X', PrefixEq half X X' → F j X = F j X') (n : Nat) (L R L' R' : Block)
+    (hL : L.size = 16) (hR : R.size = 16)
+    (hL' : PrefixEq half L' (ladderFwdN F n (L, R)).2)
+    (hR' : PrefixEq half R' (ladderFwdN F n (L, R)).1) :
+    PrefixEq half (ladderBwdN F n (L', R')).1 R ∧ PrefixEq half (ladderBwdN F n (L', R')).2 L := by
+  have hcongr := ladderBwdN_congr F half hhalf hF n L' R'
+    (ladderFwdN F n (L, R)).2 (ladderFwdN F n (L, R)).1 hL' hR'
+  rwa [show ((ladderFwdN F n (L, R)).2, (ladderFwdN F n (L, R)).1)
+      = (ladderFwdN F n (L, R)).swap from rfl,
+    ladderBwdN_ladderFwdN_swap F n L R hL hR] at hcongr
+
+/-- If two step functions agree pointwise on every element of `l` (for every accumulator), folding
+either gives the same result. -/
+private theorem List.foldl_congr {α β} (l : List β) (f g : α → β → α)
+    (h : ∀ a k, k ∈ l → f a k = g a k) (init : α) : l.foldl f init = l.foldl g init := by
+  induction l generalizing init with
+  | nil => rfl
+  | cons hd tl ih =>
+    rw [List.foldl_cons, List.foldl_cons, h init hd (List.mem_cons_self ..)]
+    exact ih (fun a k hk => h a k (List.mem_cons_of_mem hd hk)) (g init hd)
+
+/-- Congruence for `forIn` over a `List`, `Id`-valued, with a step that only ever `.yield`s: two
+step functions that agree pointwise on every list element give the same result. Needed because
+`Id`-monad `for`-loops surface as bare `forIn ... (fun a b => ForInStep.yield ...)` terms (no
+`pure` wrapper for `simp` to key `List.forIn_pure_yield_eq_foldl` off), unlike the `Except`-monad
+loops elsewhere in this project. -/
+private theorem forIn_yield_congr {α β} (l : List α) (f g : α → β → β)
+    (h : ∀ a ∈ l, ∀ b, f a b = g a b) (init : β) :
+    (forIn l init (fun a b => ForInStep.yield (f a b)) : Id β) =
+    (forIn l init (fun a b => ForInStep.yield (g a b)) : Id β) := by
+  induction l generalizing init with
+  | nil => simp
+  | cons hd tl ih =>
+    simp only [List.forIn_cons, h hd (List.mem_cons_self ..) init, bind]
+    exact ih (fun a ha b => h a (List.mem_cons_of_mem hd ha) b) (g hd init)
+
+/-- `mkBuf`'s output only depends on its input's first `half` bytes — its own `for k in [0:half]
+do ...` loop is the only place it ever reads `X`. This is the fact that makes `aezTiny`'s
+round-trip only need `PrefixEq`, not full block equality, between what encrypt produces and what
+decrypt receives. -/
+theorem mkBuf_congr (half ih2 : Nat) (mask pad : UInt8) (delta : Block) (X X' : Block)
+    (h : PrefixEq half X X') (ctr : UInt8) :
+    mkBuf half ih2 mask pad delta X ctr = mkBuf half ih2 mask pad delta X' ctr := by
+  unfold mkBuf
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Id.run, pure, bind]
+  have hfold : (forIn (List.range' 0 [:half].size) zero16
+        (fun k acc => ForInStep.yield (acc.set! k X[k]!)) : Id Block)
+      = (forIn (List.range' 0 [:half].size) zero16
+        (fun k acc => ForInStep.yield (acc.set! k X'[k]!)) : Id Block) := by
+    refine forIn_yield_congr _ _ _ (fun k hk acc => ?_) _
+    have hk' : k < half := by simpa using hk
+    rw [h k hk']
+  rw [hfold]
+
+/-- `G_real`'s congruence, as a direct corollary of `mkBuf_congr`: `aes4` applied to equal `mkBuf`
+outputs gives equal results, and `mkBuf`'s inputs need only agree on the first `half` bytes. This
+is exactly the `hF` hypothesis `ladderFwdN_congr`/`ladderBwdN_congr`/`ladderBwdN_prefix_of_swap`
+need, instantiated to the real round function. -/
+theorem G_real_congr (e : EState) (delta : Block) (half ih2 i0 : Nat) (mask pad : UInt8)
+    (j : Int) (X X' : Block) (h : PrefixEq half X X') :
+    G_real e delta half ih2 i0 mask pad j X = G_real e delta half ih2 i0 mask pad j X' := by
+  unfold G_real
+  rw [mkBuf_congr half ih2 mask pad delta X X' h]
+
 end CryptWalker.Sphinx.Crypto.AEZ
