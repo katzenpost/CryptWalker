@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import CryptWalker.Sphinx.Crypto.AEZ
 import Mathlib.Logic.Function.Iterate
+import Mathlib.Tactic.Set
 
 namespace CryptWalker.Sphinx.Crypto.AEZ
 
@@ -519,5 +520,319 @@ theorem G_real_congr (e : EState) (delta : Block) (half ih2 i0 : Nat) (mask pad 
     G_real e delta half ih2 i0 mask pad j X = G_real e delta half ih2 i0 mask pad j X' := by
   unfold G_real
   rw [mkBuf_congr half ih2 mask pad delta X X' h]
+
+/-! ## `aezTiny`'s merge/demerge: the even-length case -/
+
+/-- `aezTiny`'s merge step for even-length input, with no final tweak: `buf[k] = R[k]` for
+`k < inBytes / 2`, `buf[inBytes / 2 + k] = L[k]` for `k < half` — literally `aezTiny`'s own
+construction, skipping the odd-length nibble-packing (`half = inBytes / 2` when even, so that
+branch is dead) and the `d = 0 ∧ inBytes < 16` output tweak. -/
+def mergeEven (inBytes : Nat) (L R : Block) : ByteArray := Id.run do
+  let half := (inBytes + 1) / 2
+  let mut buf : Array UInt8 := Array.replicate inBytes 0
+  for k in [0:inBytes / 2] do buf := buf.set! k (R[k]!)
+  for k in [0:half] do buf := buf.set! (inBytes / 2 + k) (L[k]!)
+  return ⟨buf⟩
+
+theorem aezTiny_eq_mergeEven (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat)
+    (heven : inArr.size % 2 = 0) (hnotweak : ¬(inArr.size < 16 ∧ d == 0)) :
+    aezTiny e delta inArr d
+      = mergeEven inArr.size
+          (aezTinyLR e delta inArr d (aezTinyParams inArr.size).2 (aezTinyParams inArr.size).1).1
+          (aezTinyLR e delta inArr d (aezTinyParams inArr.size).2 (aezTinyParams inArr.size).1).2 := by
+  unfold aezTiny mergeEven
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Id.run, pure, bind]
+  have heven' : (inArr.size % 2 == 1) = false := by simp [heven]
+  simp only [heven', Bool.false_eq_true, if_false]
+  have hnotweak2 : inArr.size ≥ 16 ∨ d ≠ 0 := by
+    rcases Nat.lt_or_ge inArr.size 16 with h | h
+    · right; intro hd; exact hnotweak ⟨h, by simp [hd]⟩
+    · left; exact h
+  have hnotweak' : (decide (inArr.size < 16) && d == 0) = false := by
+    rcases hnotweak2 with h | h
+    · simp [Nat.not_lt.mpr h]
+    · simp [h]
+  simp only [hnotweak', Bool.false_eq_true, if_false]
+
+/-- A `forIn` loop that only ever `.set!`s (never changes the array's size) preserves the starting
+size, regardless of how many times it runs. -/
+private theorem forIn_set!_size {α} (l : List Nat) (idx : Nat → Nat) (f : Nat → α)
+    (init : Array α) :
+    (forIn l init (fun k acc => ForInStep.yield (acc.set! (idx k) (f k))) : Id (Array α)).size
+      = init.size := by
+  induction l generalizing init with
+  | nil => simp [pure]
+  | cons hd tl ih => simp only [List.forIn_cons, bind, ih, Array.size_set!]
+
+@[simp] private theorem byteArray_mk_size (a : Array UInt8) : (⟨a⟩ : ByteArray).size = a.size := rfl
+
+theorem mergeEven_size (inBytes : Nat) (L R : Block) : (mergeEven inBytes L R).size = inBytes := by
+  unfold mergeEven
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Id.run, pure, bind, forIn_set!_size,
+    Array.size_replicate, byteArray_mk_size]
+
+/-- Decrypt's `initLR`, fed the ciphertext `mergeEven inBytes L R`, recovers `(R, L)` in the first
+`inBytes / 2` bytes (all that `mergeEven`'s own construction ever reads) — the concrete instance
+of the "half-agrees-with-swap" fact `ladderBwdN_prefix_of_swap` needs, matching the `L0`/`R0`
+built from `mergeEven`'s own construction: `initLR`'s `L`-extraction only ever reads `mergeEven`'s
+first `inBytes / 2` bytes (`R`'s own contribution), and its `R`-extraction only ever reads the
+next `inBytes / 2` (`L`'s own contribution). -/
+private theorem forIn_append {α β} (l1 l2 : List α) (init : β) (f : α → β → β) :
+    (forIn (l1 ++ l2) init (fun a b => ForInStep.yield (f a b)) : Id β)
+      = (forIn l2 (forIn l1 init (fun a b => ForInStep.yield (f a b)) : Id β)
+          (fun a b => ForInStep.yield (f a b)) : Id β) := by
+  induction l1 generalizing init with
+  | nil => simp [pure, Id.run]
+  | cons hd tl ih => simp only [List.cons_append, List.forIn_cons, bind, ih]
+
+/-- A `forIn` loop `.set!`ting `idxOffset + i` (for `i` ranging over `[0, n)`) writes exactly `f k`
+at position `idxOffset + k`, for every `k < n` in range — provided the array is big enough that
+`Array.set!` never falls back to a no-op. Generic over the array's own size `sz` (not fixed to a
+16-byte `Block`): `mergeEven`'s buffer is `inBytes`-sized instead. -/
+private theorem forIn_range_set!_get_lt (n idxOffset sz : Nat) (f : Nat → UInt8)
+    (init : Array UInt8) (hsize : init.size = sz) (hbound : idxOffset + n ≤ sz) :
+    ∀ k, k < n →
+      (forIn (List.range' 0 n) init
+          (fun i acc => ForInStep.yield (acc.set! (idxOffset + i) (f i))) :
+            Id (Array UInt8)).run[idxOffset + k]! = f k := by
+  induction n generalizing init with
+  | zero => intro k hk; omega
+  | succ n ih =>
+    intro k hk
+    rw [List.range'_1_concat, forIn_append]
+    simp only [List.forIn_cons, List.forIn_nil, bind, pure, Id.run, Nat.zero_add]
+    rcases Nat.lt_succ_iff_lt_or_eq.mp hk with hk' | hk'
+    · rw [Array.getElem!_set!_ne _ _ _ _ (by omega)]
+      exact ih init hsize (by omega) k hk'
+    · subst hk'
+      rw [Array.getElem!_set!_self]
+      rw [forIn_set!_size]
+      omega
+
+/-- The complement of `forIn_range_set!_get_lt`: such a loop leaves every index below `idxOffset`
+untouched. -/
+private theorem forIn_range_set!_get_unaffected (n idxOffset : Nat) (f : Nat → UInt8)
+    (init : Array UInt8) (k0 : Nat) (hk0 : k0 < idxOffset) :
+    (forIn (List.range' 0 n) init
+        (fun i acc => ForInStep.yield (acc.set! (idxOffset + i) (f i))) :
+          Id (Array UInt8)).run[k0]! = init[k0]! := by
+  induction n generalizing init with
+  | zero => simp
+  | succ n ih =>
+    rw [List.range'_1_concat, forIn_append]
+    simp only [List.forIn_cons, List.forIn_nil, bind, pure, Id.run, Nat.zero_add]
+    rw [Array.getElem!_set!_ne _ _ _ _ (by omega)]
+    exact ih init
+
+/-- `forIn_range_set!_get_lt`, specialized to `idxOffset = 0` (so the conclusion reads `f k`
+directly at position `k`, not `0 + k`). -/
+private theorem forIn_range_set!_get_lt0 (n sz : Nat) (f : Nat → UInt8) (init : Array UInt8)
+    (hsize : init.size = sz) (hbound : n ≤ sz) :
+    ∀ k, k < n →
+      (forIn (List.range' 0 n) init (fun i acc => ForInStep.yield (acc.set! i (f i))) :
+        Id (Array UInt8)).run[k]! = f k := by
+  intro k hk
+  simpa using forIn_range_set!_get_lt n 0 sz f init hsize (by omega) k hk
+
+theorem mergeEven_get_left (inBytes : Nat) (heven : inBytes % 2 = 0) (L R : Block) (k : Nat)
+    (hk : k < inBytes / 2) : (mergeEven inBytes L R).get! k = R[k]! := by
+  show (mergeEven inBytes L R).data[k]! = R[k]!
+  unfold mergeEven
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, Id.run, pure, bind]
+  have hhalf : (inBytes + 1) / 2 = inBytes / 2 := by omega
+  rw [hhalf]
+  have h1 := forIn_range_set!_get_unaffected (inBytes / 2) (inBytes / 2) (fun i => L[i]!)
+    (forIn (List.range' 0 (inBytes / 2)) (Array.replicate inBytes 0)
+      (fun i acc => ForInStep.yield (acc.set! i R[i]!)) : Id (Array UInt8)) k hk
+  exact h1.trans (forIn_range_set!_get_lt0 (inBytes / 2) inBytes (fun i => R[i]!)
+    (Array.replicate inBytes 0) (by simp) (by omega) k hk)
+
+theorem mergeEven_get_right (inBytes : Nat) (heven : inBytes % 2 = 0) (L R : Block) (k : Nat)
+    (hk : k < inBytes / 2) : (mergeEven inBytes L R).get! (inBytes / 2 + k) = L[k]! := by
+  show (mergeEven inBytes L R).data[inBytes / 2 + k]! = L[k]!
+  unfold mergeEven
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, Id.run, pure, bind]
+  have hhalf : (inBytes + 1) / 2 = inBytes / 2 := by omega
+  rw [hhalf]
+  exact forIn_range_set!_get_lt (inBytes / 2) (inBytes / 2) inBytes (fun i => L[i]!)
+    (forIn (List.range' 0 (inBytes / 2)) (Array.replicate inBytes 0)
+      (fun i acc => ForInStep.yield (acc.set! i R[i]!)) : Id (Array UInt8))
+    (by rw [forIn_set!_size]; simp) (by omega) k hk
+
+/-- Decrypt's `initLR`, fed the ciphertext `mergeEven inBytes L R`, recovers `(R, L)` in the first
+`inBytes / 2` bytes (all that `mergeEven`'s own construction ever reads) — the concrete instance
+of the "half-agrees-with-swap" fact `ladderBwdN_prefix_of_swap` needs. -/
+theorem initLR_mergeEven (inBytes : Nat) (heven : inBytes % 2 = 0) (hlt : inBytes < 32)
+    (L R : Block) :
+    PrefixEq (inBytes / 2) (initLR (mergeEven inBytes L R)).1 R ∧
+    PrefixEq (inBytes / 2) (initLR (mergeEven inBytes L R)).2.1 L ∧
+    (initLR (mergeEven inBytes L R)).2.2 = (0, 0x80) := by
+  have hsize : (mergeEven inBytes L R).size = inBytes := mergeEven_size inBytes L R
+  unfold initLR
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, Id.run, pure, bind]
+  rw [hsize]
+  have heven' : (inBytes % 2 == 1) = false := by simp [heven]
+  have hhalf : (inBytes + 1) / 2 = inBytes / 2 := by omega
+  rw [heven', hhalf]
+  simp only [Bool.false_eq_true, if_false]
+  refine ⟨?_, ?_, trivial⟩
+  · intro k hk
+    exact (forIn_range_set!_get_lt0 (inBytes / 2) 16 (fun i => (mergeEven inBytes L R).get! i)
+        zero16 (by simp [zero16]) (by omega) k hk).trans
+      (mergeEven_get_left inBytes heven L R k hk)
+  · intro k hk
+    exact (forIn_range_set!_get_lt0 (inBytes / 2) 16
+        (fun i => (mergeEven inBytes L R).get! (inBytes / 2 + i)) zero16
+        (by simp [zero16]) (by omega) k hk).trans
+      (mergeEven_get_right inBytes heven L R k hk)
+
+/-- The same extraction facts as `initLR_mergeEven`, but for `initLR` applied directly to a raw
+even-length input `inArr` rather than to `mergeEven`'s reconstruction: `initLR`'s own `L`/`R`
+loops read `inArr.get!` directly, with no intervening `mergeEven`/`get!`-bridging needed. This is
+what recovers the *original* `inArr` from the round-trip's final `(L, R)`. -/
+theorem initLR_even_eq (inArr : ByteArray) (heven : inArr.size % 2 = 0) (hlt : inArr.size < 32) :
+    (∀ k, k < inArr.size / 2 → (initLR inArr).1[k]! = inArr.get! k) ∧
+    (∀ k, k < inArr.size / 2 → (initLR inArr).2.1[k]! = inArr.get! (inArr.size / 2 + k)) ∧
+    (initLR inArr).2.2 = (0, 0x80) := by
+  unfold initLR
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, Id.run, pure, bind]
+  have heven' : (inArr.size % 2 == 1) = false := by simp [heven]
+  have hhalf : (inArr.size + 1) / 2 = inArr.size / 2 := by omega
+  rw [heven', hhalf]
+  simp only [Bool.false_eq_true, if_false]
+  refine ⟨?_, ?_, trivial⟩
+  · intro k hk
+    exact forIn_range_set!_get_lt0 (inArr.size / 2) 16 (fun i => inArr.get! i) zero16
+      (by simp [zero16]) (by omega) k hk
+  · intro k hk
+    exact forIn_range_set!_get_lt0 (inArr.size / 2) 16
+      (fun i => inArr.get! (inArr.size / 2 + i)) zero16 (by simp [zero16]) (by omega) k hk
+
+/-- `aezTinyParams`'s only branch reachable for inputs of at least 16 bytes. -/
+theorem aezTinyParams_ge16 (n : Nat) (h : 16 ≤ n) : aezTinyParams n = (6, 8) := by
+  unfold aezTinyParams
+  have h1 : (n == 1) = false := by simp only [beq_eq_false_iff_ne]; omega
+  have h2 : (n == 2) = false := by simp only [beq_eq_false_iff_ne]; omega
+  rw [if_neg (by simpa using h1), if_neg (by simpa using h2), if_neg (by omega)]
+
+/-- `initLR`'s `L`/`R` components always come out as 16-byte blocks, for an even-length input:
+both start from `zero16` and are only ever `.set!`-updated (no odd-length nibble-packing branch
+taken), and `.set!` never changes an array's size. -/
+theorem initLR_size (inArr : ByteArray) (heven : inArr.size % 2 = 0) :
+    (initLR inArr).1.size = 16 ∧ (initLR inArr).2.1.size = 16 := by
+  unfold initLR
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range', Id.run, pure, bind]
+  have heven' : (inArr.size % 2 == 1) = false := by simp [heven]
+  simp only [heven', Bool.false_eq_true, if_false, forIn_set!_size, Array.size_replicate, zero16]
+  exact ⟨trivial, trivial⟩
+
+private theorem byteArray_get!_eq (b : ByteArray) (i : Nat) : b.get! i = b[i]! := by
+  show b.data[i]! = b[i]!
+  by_cases h : i < b.size
+  · rw [getElem!_pos b i h]
+    show b.data[i]! = b.get i h
+    rw [getElem!_pos b.data i h]
+    rfl
+  · rw [getElem!_neg b i h]
+    show b.data[i]! = (default : UInt8)
+    exact getElem!_neg b.data i (by simpa using h)
+
+/-- Byte-level extensionality for `ByteArray`, stated via `.get!` (the form every lemma in this
+file, e.g. `mergeEven_get_left`/`mergeEven_get_right`, works with) rather than `getElem`-with-proof
+(`ByteArray.ext_getElem`'s own form). -/
+private theorem byteArray_ext_get! {a b : ByteArray} (hsize : a.size = b.size)
+    (h : ∀ i, i < a.size → a.get! i = b.get! i) : a = b := by
+  apply ByteArray.ext_getElem hsize
+  intro i hi hi'
+  have := h i hi
+  rwa [byteArray_get!_eq, byteArray_get!_eq, getElem!_pos a i hi, getElem!_pos b i hi'] at this
+
+/-- **The full `aezTiny` round-trip, for even-length inputs of at least 16 bytes**: encrypting
+(`d = 0`) then decrypting (`d = 1`) recovers the original input exactly. Composes the whole chain
+built above: `aezTiny_eq_mergeEven` (both directions) reduces both calls to their `aezTinyLR`
+cores; `aezTinyLR_fwd_eq`/`aezTinyLR_bwd_eq` identify those cores with the abstract ladder;
+`initLR_mergeEven` supplies the prefix-agreement the decrypt ladder actually receives (not full
+agreement — see the "Locality" section); `ladderBwdN_prefix_of_swap` (built from the exact
+`ladderBwdN_ladderFwdN_swap` round-trip together with `G_real_congr`'s locality) then recovers the
+original `(L, R)` up to that same prefix; and `initLR_even_eq` plus `mergeEven_get_left`/
+`mergeEven_get_right` translate that prefix-equality on `(L, R)` back into byte-equality with
+`inArr` itself, closed via `byteArray_ext_get!`. -/
+theorem aezTiny_roundtrip_even (e : EState) (delta : Block) (inArr : ByteArray)
+    (heven : inArr.size % 2 = 0) (h16 : 16 ≤ inArr.size) (hlt : inArr.size < 32) :
+    aezTiny e delta (aezTiny e delta inArr 0) 1 = inArr := by
+  have hparams : aezTinyParams inArr.size = (6, 8) := aezTinyParams_ge16 inArr.size h16
+  have half_eq : (inArr.size + 1) / 2 = inArr.size / 2 := by omega
+  -- Encrypt: `aezTiny ... 0 = mergeEven ... (aezTinyLR ... 0 ...)`.
+  have hnotweak0 : ¬(inArr.size < 16 ∧ (0 : Nat) == 0) := by rintro ⟨h1, -⟩; omega
+  have henc := aezTiny_eq_mergeEven e delta inArr 0 heven hnotweak0
+  simp only [hparams] at henc
+  set L0 := (initLR inArr).1 with hL0def
+  set R0 := (initLR inArr).2.1 with hR0def
+  obtain ⟨hL0, hR0, hmp0⟩ := initLR_even_eq inArr heven hlt
+  have hinit0 : initLR inArr = (L0, R0, 0, 0x80) := by rw [← hmp0]
+  have hfwd := aezTinyLR_fwd_eq e delta inArr 8 6 L0 R0 0 0x80 hinit0
+  rw [half_eq] at hfwd
+  set L1 := (ladderFwdN (FofG (G_real e delta (inArr.size / 2) (inArr.size / 2) 6 0 0x80))
+      (8 / 2) (L0, R0)).1 with hL1def
+  set R1 := (ladderFwdN (FofG (G_real e delta (inArr.size / 2) (inArr.size / 2) 6 0 0x80))
+      (8 / 2) (L0, R0)).2 with hR1def
+  rw [show (aezTinyLR e delta inArr 0 8 6).1 = L1 from by rw [hfwd],
+    show (aezTinyLR e delta inArr 0 8 6).2 = R1 from by rw [hfwd]] at henc
+  -- Decrypt: `aezTiny ... 1 = mergeEven ... (aezTinyLR ... 1 ...)`, on the ciphertext.
+  set C := mergeEven inArr.size L1 R1 with hCdef
+  have hCsize : C.size = inArr.size := mergeEven_size inArr.size L1 R1
+  have hnotweak1 : ¬(C.size < 16 ∧ (1 : Nat) == 0) := by simp
+  have hdec := aezTiny_eq_mergeEven e delta C 1 (by rw [hCsize]; exact heven) hnotweak1
+  simp only [hCsize, hparams] at hdec
+  -- Identify decrypt's `initLR C` extraction and feed it to `aezTinyLR_bwd_eq`.
+  obtain ⟨hCswap1, hCswap2, hCmp⟩ := initLR_mergeEven inArr.size heven hlt L1 R1
+  rw [← hCdef] at hCswap1 hCswap2 hCmp
+  set L0' := (initLR C).1 with hL0'def
+  set R0' := (initLR C).2.1 with hR0'def
+  have hinit1 : initLR C = (L0', R0', 0, 0x80) := by rw [← hCmp]
+  have hbwd := aezTinyLR_bwd_eq e delta C 8 6 (by decide) L0' R0' 0 0x80 hinit1
+  rw [hCsize, half_eq] at hbwd
+  have htweaknoop : tinyTweakedL0 e delta C L0' = L0' := by
+    unfold tinyTweakedL0
+    rw [hCsize, if_neg (show ¬ inArr.size < 16 from by omega)]
+    simp [Id.run, pure]
+  rw [htweaknoop] at hbwd
+  -- The swap-prefix fact: decrypt's ladder, seeded from something only `half`-agreeing with the
+  -- swap of encrypt's output, still recovers `(R0, L0)` up to that same prefix.
+  obtain ⟨hL0size, hR0size⟩ := initLR_size inArr heven
+  rw [← hL0def] at hL0size
+  rw [← hR0def] at hR0size
+  have hswap := ladderBwdN_prefix_of_swap
+    (FofG (G_real e delta (inArr.size / 2) (inArr.size / 2) 6 0 0x80)) (inArr.size / 2)
+    (by omega)
+    (fun j X X' h => by
+      simp only [FofG]
+      exact G_real_congr e delta (inArr.size / 2) (inArr.size / 2) 6 0 0x80 (j : Int) X X' h)
+    (8 / 2) L0 R0 L0' R0' hL0size hR0size hCswap1 hCswap2
+  set L2 := (aezTinyLR e delta C 1 8 6).1 with hL2def
+  set R2 := (aezTinyLR e delta C 1 8 6).2 with hR2def
+  have hL2eq : L2 = (ladderBwdN (FofG (G_real e delta (inArr.size / 2) (inArr.size / 2) 6 0 0x80))
+      (8 / 2) (L0', R0')).1 := by rw [hL2def, hbwd]
+  have hR2eq : R2 = (ladderBwdN (FofG (G_real e delta (inArr.size / 2) (inArr.size / 2) 6 0 0x80))
+      (8 / 2) (L0', R0')).2 := by rw [hR2def, hbwd]
+  have hL2R0 : PrefixEq (inArr.size / 2) L2 R0 := hL2eq ▸ hswap.1
+  have hR2L0 : PrefixEq (inArr.size / 2) R2 L0 := hR2eq ▸ hswap.2
+  rw [henc, hdec]
+  apply byteArray_ext_get!
+  · rw [mergeEven_size]
+  · intro i hi
+    rw [mergeEven_size] at hi
+    rcases Nat.lt_or_ge i (inArr.size / 2) with hlt' | hge
+    · exact (mergeEven_get_left inArr.size heven L2 R2 i hlt').trans
+        ((hR2L0 i hlt').trans (hL0 i hlt'))
+    · have hk : i - inArr.size / 2 < inArr.size / 2 := by omega
+      have hrw : i = inArr.size / 2 + (i - inArr.size / 2) := by omega
+      rw [hrw]
+      exact (mergeEven_get_right inArr.size heven L2 R2 _ hk).trans
+        ((hL2R0 _ hk).trans (hR0 _ hk))
 
 end CryptWalker.Sphinx.Crypto.AEZ
