@@ -383,6 +383,116 @@ private theorem aezTiny_size (e : EState) (delta : Block) (inArr : ByteArray) (d
     simp only [Id.run, pure, bind, ByteArray.size, ByteArray.set!, ByteArray.get!, zero16,
       foldl_set!_size, Array.size_replicate, Array.size_set!, ByteArray.size_set!, hL, hR]
 
+/-! ## Toward round-trip correctness: `aezTinyLR`'s abstract Feistel-style ladder
+
+`decipher (encipher m) = m` (the fact `wrapNIKE_unwrapNIKE_complete`/`wrapKEM_unwrapKEM_complete`
+ultimately need) is real cryptographic-construction correctness, not the loop-invariant/size
+bookkeeping the rest of this file's proofs are — a categorically different, larger undertaking.
+This section proves the algebraic crux of the `aezTiny` half of it (the `< 32`-byte path):
+`aezTinyLR`'s `for _ in [0:rounds/2] do ...` loop, run forward (`d = 0`, ascending counters
+`j = 0,2,4,...`) or backward (`d ≠ 0`, descending counters `j = rounds-1,rounds-3,...`), each
+double-round updating a pair `(L,R)` via a round function `F` keyed by the running counter.
+Numerically checking this first (a Python simulation with a deliberately non-injective,
+non-cryptographic stand-in `F`) confirmed the round-trip holds by pure XOR algebra alone — no
+property of AES4 is needed, and no property of the counter arithmetic beyond what's proved here.
+
+The catch: running the loop backward over descending counters does **not**, by itself, invert
+running it forward — `aezTiny`'s surrounding merge/demerge step also swaps `L`/`R` between an
+encrypt call and the following decrypt call (ciphertext bytes are laid out `R ‖ L`, not `L ‖ R`),
+and it's *that* swap, composed with the reversed counters, that makes each double-round exactly
+undo the matching forward one via `xor16`'s self-cancellation (`a ^^^ b ^^^ b = a`).
+
+`ladderFwdN`/`ladderBwdN` below model the loop with the counter folded into a plain recursion on
+the iteration count (rather than `aezTinyLR`'s actual mutable `Int` `j`/`step` state) — connecting
+this to the real loop, then to `aezTiny`'s merge/demerge and its small-input/odd-length special
+cases, then doing the analogous (structurally different — a two-pass X/S/Y construction, not a
+Feistel ladder) derivation for `aezCore`, and finally composing through `unwrapNIKE`/`unwrapKEM`'s
+whole multi-hop chain, is substantial further work not attempted here. This lemma is the one piece
+of that chain proved so far, kept as a real, checked, standalone fact. -/
+
+private theorem xor16_get! {i : Nat} (hi : i < 16) (a b : Block) :
+    (xor16 a b)[i]! = a[i]! ^^^ b[i]! := by
+  simp only [xor16, getElem!_pos, Array.getElem_ofFn, Array.size_ofFn, hi]
+
+/-- The one fact behind the whole ladder round-trip: XOR is its own inverse, per byte. Needs only
+`a.size = 16` (not `b`'s) — `b` is read at the same index on both sides, whatever it is. -/
+private theorem xor16_cancel {a : Block} (b : Block) (ha : a.size = 16) :
+    xor16 (xor16 a b) b = a := by
+  apply Array.ext (by rw [xor16_size, ha])
+  intro i hi1 hi2
+  have hi16 : i < 16 := by rw [xor16_size] at hi1; exact hi1
+  rw [← getElem!_pos (xor16 (xor16 a b) b) i hi1, ← getElem!_pos a i hi2,
+    xor16_get! hi16, xor16_get! hi16, UInt8.xor_assoc, UInt8.xor_self, UInt8.xor_zero]
+
+/-- One forward double-round at iteration `k`: update `L` from `R` under counter `2k`, then `R`
+from the new `L` under counter `2k+1`. Matches `aezTinyLR`'s loop body when `d = 0` (`j` starts at
+`0`, `step = 1`). -/
+private def ladderFwdStep (F : Nat → Block → Block) (k : Nat) (LR : Block × Block) : Block × Block :=
+  let L' := xor16 LR.1 (F (2*k) LR.2)
+  let R' := xor16 LR.2 (F (2*k+1) L')
+  (L', R')
+
+/-- One backward double-round starting from counter `s` (the *higher* of the pair): update `L`
+from `R` under counter `s`, then `R` from the new `L` under counter `s-1`. Matches `aezTinyLR`'s
+loop body when `d ≠ 0` (`j` starts at `rounds-1`, `step = -1`), with `s` the current `j`. -/
+private def ladderBwdStep (F : Nat → Block → Block) (s : Nat) (LR : Block × Block) : Block × Block :=
+  let L' := xor16 LR.1 (F s LR.2)
+  let R' := xor16 LR.2 (F (s-1) L')
+  (L', R')
+
+/-- `n` forward double-rounds, counters ascending from `0`. -/
+private def ladderFwdN (F : Nat → Block → Block) : Nat → Block × Block → Block × Block
+  | 0, LR => LR
+  | n+1, LR => ladderFwdStep F n (ladderFwdN F n LR)
+
+/-- `n` backward double-rounds, counters descending from `2n-1`. -/
+private def ladderBwdN (F : Nat → Block → Block) : Nat → Block × Block → Block × Block
+  | 0, LR => LR
+  | n+1, LR => ladderBwdN F n (ladderBwdStep F (2*n+1) LR)
+
+private theorem ladderFwdN_size1 (F : Nat → Block → Block) (n : Nat) (L R : Block)
+    (hL : L.size = 16) : (ladderFwdN F n (L, R)).1.size = 16 := by
+  cases n with
+  | zero => exact hL
+  | succ n => simp [ladderFwdN, ladderFwdStep]
+
+private theorem ladderFwdN_size2 (F : Nat → Block → Block) (n : Nat) (L R : Block)
+    (hR : R.size = 16) : (ladderFwdN F n (L, R)).2.size = 16 := by
+  cases n with
+  | zero => exact hR
+  | succ n => simp [ladderFwdN, ladderFwdStep]
+
+/-- **The ladder round-trip.** `n` forward double-rounds, then (after swapping `L`/`R` — exactly
+what `aezTinyLR`'s caller does between an encrypt call and the matching decrypt call) `n` backward
+double-rounds, recover the original pair, swapped back. True for *any* `F` — nothing here uses
+anything about the round function beyond its type, matching the numerical check this was verified
+against first. Proved by induction on `n`, peeling the *last* forward double-round (counters
+`2n,2n+1`) and showing it's exactly undone by the *first* backward double-round (counter `2n+1`),
+via `xor16_cancel` applied twice. -/
+private theorem ladderBwdN_ladderFwdN_swap (F : Nat → Block → Block) (n : Nat) (L R : Block)
+    (hL : L.size = 16) (hR : R.size = 16) :
+    ladderBwdN F n (ladderFwdN F n (L, R)).swap = (R, L) := by
+  induction n generalizing L R with
+  | zero => rfl
+  | succ n ih =>
+    obtain ⟨Ln, Rn, hLR⟩ : ∃ Ln Rn, ladderFwdN F n (L, R) = (Ln, Rn) := ⟨_, _, rfl⟩
+    have hLn : Ln.size = 16 := by
+      have h := ladderFwdN_size1 F n L R hL; rw [hLR] at h; exact h
+    have hRn : Rn.size = 16 := by
+      have h := ladderFwdN_size2 F n L R hR; rw [hLR] at h; exact h
+    show ladderBwdN F n (ladderBwdStep F (2*n+1)
+        (ladderFwdStep F n (ladderFwdN F n (L, R))).swap) = (R, L)
+    rw [hLR]
+    show ladderBwdN F n (ladderBwdStep F (2*n+1) (ladderFwdStep F n (Ln, Rn)).swap) = (R, L)
+    have key : ladderBwdStep F (2*n+1) (ladderFwdStep F n (Ln, Rn)).swap = (Rn, Ln) := by
+      have e : 2*n+1-1 = 2*n := by omega
+      simp only [ladderFwdStep, ladderBwdStep, Prod.swap, e]
+      rw [xor16_cancel _ hRn, xor16_cancel _ hLn]
+    rw [key]
+    have hih := ih L R hL hR
+    rw [hLR] at hih
+    exact hih
+
 /-! ## `aezCore`: inputs of 32 bytes or more
 
 `aezCorePass1`/`aezCorePass2` process the input in 32-byte chunks, all but the final chunk and
