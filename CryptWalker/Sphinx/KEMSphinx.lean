@@ -1254,6 +1254,42 @@ private theorem newKEMPacket_payload_content (cipher : WideBlockCipher) (sprpKey
   rw [show sprpKeys.size - 1 - (sprpKeys.size - k - 1) = k from by omega] at hstepk
   rw [hstepk, show sprpKeys.size - (k + 1) = sprpKeys.size - k - 1 from by omega]
 
+/-- **`newKEMPacket`, fully unfolded to content.** As `createKEMHeader_unfold`: packages
+`createKEMHeader`'s own success, and the payload-encryption trace (`newKEMPacket_payload_trace`),
+behind one hypothesis, in the shape a successful `newKEMPacket` call actually unfolds to. -/
+private theorem newKEMPacket_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
+    (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
+    (h : newKEMPacket kem cipher macS kdfS streamS geom ephemeralSeeds filler path payload
+      = Except.ok pkt) :
+    payload.size = geom.forwardPayloadLength ∧
+    ∃ (hdr : ByteArray) (sprpKeys : Array SPRPKey) (t : Nat → ByteArray),
+      createKEMHeader kem macS kdfS streamS geom ephemeralSeeds filler path = Except.ok (hdr, sprpKeys) ∧
+      t 0 = (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload ∧
+      (∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j) ∧
+      pkt = hdr ++ t sprpKeys.size := by
+  unfold newKEMPacket at h
+  dsimp only at h
+  split at h
+  case isTrue =>
+    have h' : (Except.error
+        s!"sphinx: invalid payload length: {payload.size}, expected {geom.forwardPayloadLength}" :
+        Except String ByteArray) = Except.ok pkt := h
+    injection h'
+  case isFalse =>
+    rename_i hpay
+    simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+      Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind] at h
+    obtain ⟨x, hx, hfx⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+    obtain ⟨t, ht0, htl, hstep⟩ := newKEMPacket_payload_trace cipher x.2
+      ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
+    refine ⟨by omega, x.1, x.2, t, hx, ht0, hstep, ?_⟩
+    injection hfx with hfx
+    have hfeq : (fun b a => cipher.encrypt x.2[x.2.size - 1 - a]!.key.toArray
+        (ofVector x.2[x.2.size - 1 - a]!.iv) b) = payloadEncryptStep cipher x.2 := rfl
+    rw [hfeq] at hfx
+    rw [← hfx, htl]
+
 /-- As `NIKESphinx.newNIKEPacket_size`. Generic in `cipher` too: `cipher.encrypt_size` replaces
 `AEZ.sprpEncrypt_size` directly, no extra hypothesis needed (length preservation never depended on
 `cipher.keySize`/`ivSize`, since `encrypt`'s type doesn't mention them). -/
