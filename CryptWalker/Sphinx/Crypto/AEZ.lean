@@ -40,9 +40,12 @@ against `sprp_aez.json`, covering both the `aezTiny` (<32B) and `aezCore` (≥32
 abbrev Block := Array UInt8 -- always length 16 here; not tracked in the type, matching this
                              -- module's Go original, which is not proof-carrying either.
 
-private def zero16 : Block := Array.replicate 16 0
+-- Not `private`: `zero16`/`xor16` (plus `aezTinyParams`/`aezTinyLR` and the ladder section below)
+-- are also needed from `AEZCorrectness.lean`, which reasons about `aezTinyLR`'s round-trip
+-- correctness against this file's own definitions rather than restating them.
+def zero16 : Block := Array.replicate 16 0
 
-private def xor16 (a b : Block) : Block := Array.ofFn fun i : Fin 16 => a[i.val]! ^^^ b[i.val]!
+def xor16 (a b : Block) : Block := Array.ofFn fun i : Fin 16 => a[i.val]! ^^^ b[i.val]!
 
 private def xor4 (a b c d : Block) : Block :=
   Array.ofFn fun i : Fin 16 => a[i.val]! ^^^ b[i.val]! ^^^ c[i.val]! ^^^ d[i.val]!
@@ -135,7 +138,7 @@ private theorem aes10_size {e : EState} (h : e.aes10Sched ≠ []) (l src : Block
 
 /-- Unconditional version: `aes4`'s whitened input is already size 16 (via `xor4_size`), so the
 result is size 16 whether or not `e.aes4Sched` is empty (an empty schedule just returns it as-is). -/
-@[simp] private theorem aes4_size' (e : EState) (j i l src : Block) : (aes4 e j i l src).size = 16 := by
+@[simp] theorem aes4_size' (e : EState) (j i l src : Block) : (aes4 e j i l src).size = 16 := by
   unfold aes4 roundsApply
   rcases foldl_aesRound_size_or_eq e.aes4Sched (xor4 j i l src) with h | ⟨-, h⟩
   · exact h
@@ -263,7 +266,7 @@ trip count, neither of which affects `aezTiny`'s output *size* (every branch of 
 is a `.set!`, unconditionally preserving size regardless of how many times it runs or which
 index it touches), so there is nothing to gain from a size proof case-splitting on it — and
 plenty to lose, since it would multiply every other case split by its own four branches. -/
-private def aezTinyParams (inBytes : Nat) : Nat × Nat :=
+def aezTinyParams (inBytes : Nat) : Nat × Nat :=
   if inBytes == 1 then (7, 24)
   else if inBytes == 2 then (7, 16)
   else if inBytes < 16 then (7, 10)
@@ -276,7 +279,7 @@ in isolation, the same way `roundsApply_size` is), and can otherwise treat this 
 as opaque — without this split, every occurrence of `L`/`R` inside the merge step's own
 `for`-loops gets inlined into a separate copy of this entire computation, and the resulting term
 is too large for `simp`/`split` to process. -/
-private def aezTinyLR (e : EState) (delta : Block) (inArr : ByteArray) (d rounds i0 : Nat) :
+def aezTinyLR (e : EState) (delta : Block) (inArr : ByteArray) (d rounds i0 : Nat) :
     Block × Block := Id.run do
   let inBytes := inArr.size
   let half := (inBytes + 1) / 2
@@ -410,13 +413,13 @@ Feistel ladder) derivation for `aezCore`, and finally composing through `unwrapN
 whole multi-hop chain, is substantial further work not attempted here. This lemma is the one piece
 of that chain proved so far, kept as a real, checked, standalone fact. -/
 
-private theorem xor16_get! {i : Nat} (hi : i < 16) (a b : Block) :
+theorem xor16_get! {i : Nat} (hi : i < 16) (a b : Block) :
     (xor16 a b)[i]! = a[i]! ^^^ b[i]! := by
   simp only [xor16, getElem!_pos, Array.getElem_ofFn, Array.size_ofFn, hi]
 
 /-- The one fact behind the whole ladder round-trip: XOR is its own inverse, per byte. Needs only
 `a.size = 16` (not `b`'s) — `b` is read at the same index on both sides, whatever it is. -/
-private theorem xor16_cancel {a : Block} (b : Block) (ha : a.size = 16) :
+theorem xor16_cancel {a : Block} (b : Block) (ha : a.size = 16) :
     xor16 (xor16 a b) b = a := by
   apply Array.ext (by rw [xor16_size, ha])
   intro i hi1 hi2
@@ -427,7 +430,7 @@ private theorem xor16_cancel {a : Block} (b : Block) (ha : a.size = 16) :
 /-- One forward double-round at iteration `k`: update `L` from `R` under counter `2k`, then `R`
 from the new `L` under counter `2k+1`. Matches `aezTinyLR`'s loop body when `d = 0` (`j` starts at
 `0`, `step = 1`). -/
-private def ladderFwdStep (F : Nat → Block → Block) (k : Nat) (LR : Block × Block) : Block × Block :=
+def ladderFwdStep (F : Nat → Block → Block) (k : Nat) (LR : Block × Block) : Block × Block :=
   let L' := xor16 LR.1 (F (2*k) LR.2)
   let R' := xor16 LR.2 (F (2*k+1) L')
   (L', R')
@@ -435,28 +438,28 @@ private def ladderFwdStep (F : Nat → Block → Block) (k : Nat) (LR : Block ×
 /-- One backward double-round starting from counter `s` (the *higher* of the pair): update `L`
 from `R` under counter `s`, then `R` from the new `L` under counter `s-1`. Matches `aezTinyLR`'s
 loop body when `d ≠ 0` (`j` starts at `rounds-1`, `step = -1`), with `s` the current `j`. -/
-private def ladderBwdStep (F : Nat → Block → Block) (s : Nat) (LR : Block × Block) : Block × Block :=
+def ladderBwdStep (F : Nat → Block → Block) (s : Nat) (LR : Block × Block) : Block × Block :=
   let L' := xor16 LR.1 (F s LR.2)
   let R' := xor16 LR.2 (F (s-1) L')
   (L', R')
 
 /-- `n` forward double-rounds, counters ascending from `0`. -/
-private def ladderFwdN (F : Nat → Block → Block) : Nat → Block × Block → Block × Block
+def ladderFwdN (F : Nat → Block → Block) : Nat → Block × Block → Block × Block
   | 0, LR => LR
   | n+1, LR => ladderFwdStep F n (ladderFwdN F n LR)
 
 /-- `n` backward double-rounds, counters descending from `2n-1`. -/
-private def ladderBwdN (F : Nat → Block → Block) : Nat → Block × Block → Block × Block
+def ladderBwdN (F : Nat → Block → Block) : Nat → Block × Block → Block × Block
   | 0, LR => LR
   | n+1, LR => ladderBwdN F n (ladderBwdStep F (2*n+1) LR)
 
-private theorem ladderFwdN_size1 (F : Nat → Block → Block) (n : Nat) (L R : Block)
+theorem ladderFwdN_size1 (F : Nat → Block → Block) (n : Nat) (L R : Block)
     (hL : L.size = 16) : (ladderFwdN F n (L, R)).1.size = 16 := by
   cases n with
   | zero => exact hL
   | succ n => simp [ladderFwdN, ladderFwdStep]
 
-private theorem ladderFwdN_size2 (F : Nat → Block → Block) (n : Nat) (L R : Block)
+theorem ladderFwdN_size2 (F : Nat → Block → Block) (n : Nat) (L R : Block)
     (hR : R.size = 16) : (ladderFwdN F n (L, R)).2.size = 16 := by
   cases n with
   | zero => exact hR
@@ -469,7 +472,7 @@ anything about the round function beyond its type, matching the numerical check 
 against first. Proved by induction on `n`, peeling the *last* forward double-round (counters
 `2n,2n+1`) and showing it's exactly undone by the *first* backward double-round (counter `2n+1`),
 via `xor16_cancel` applied twice. -/
-private theorem ladderBwdN_ladderFwdN_swap (F : Nat → Block → Block) (n : Nat) (L R : Block)
+theorem ladderBwdN_ladderFwdN_swap (F : Nat → Block → Block) (n : Nat) (L R : Block)
     (hL : L.size = 16) (hR : R.size = 16) :
     ladderBwdN F n (ladderFwdN F n (L, R)).swap = (R, L) := by
   induction n generalizing L R with

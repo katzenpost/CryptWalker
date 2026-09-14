@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import CryptWalker.Sphinx.Crypto.AEZ
+import CryptWalker.Sphinx.Crypto.AEZCorrectness
 import CryptWalker.Util.newhex
 
 /-!
