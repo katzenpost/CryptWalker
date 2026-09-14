@@ -207,6 +207,39 @@ private theorem ite_pure_yield {α : Type} (c : Prop) [Decidable c] (a b : α) :
       pure (ForInStep.yield (if c then a else b)) := by
   split <;> rfl
 
+/-- **The honest-pairing KEM round trip, at the byte level.** If `pkBytes` is `skBytes`'s own
+public key (`kemSelfPublicKeyBytes`) and encapsulating against it succeeds, decapsulating with
+`skBytes` recovers the same shared secret. Reduces entirely to `KEM.honestRoundTrip` (the
+`generate`-independent round-trip law added for exactly this purpose) plus the encode/decode round
+trips already on `KEM` — no AEZ/HMAC/KDF/stream-cipher content, and no assumption about which `KEM`
+this is beyond its own laws. -/
+theorem kemEncap_kemDecap_of_honest (kem : KEM) (skBytes : ByteArray) (seedV : Vector UInt8 32)
+    (ctBytes ssBytes : ByteArray)
+    (henc : kemEncap kem (kemSelfPublicKeyBytes kem skBytes) seedV = .ok (ctBytes, ssBytes)) :
+    kemDecap kem skBytes ctBytes = .ok ssBytes := by
+  obtain ⟨sk, hsk⟩ := kem.decodePrivateKey_total (toVecN kem.privateKeySize skBytes)
+  unfold kemSelfPublicKeyBytes at henc
+  rw [hsk] at henc
+  unfold kemEncap at henc
+  rw [toVecN_ofVector, kem.decode_encode_pub] at henc
+  dsimp only at henc
+  generalize hgb : kem.encap (kem.derivePublicKey sk) (kem.stateFromSeed seedV) = r at henc
+  cases r with
+  | error e s' => simp only [pure, Except.pure] at henc; injection henc
+  | ok val s' =>
+    obtain ⟨ct, ss⟩ := val
+    simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at henc
+    obtain ⟨hct, hss⟩ := henc
+    obtain ⟨t', hd⟩ := kem.honestRoundTrip sk (kem.stateFromSeed seedV) ct ss s' hgb
+      (kem.stateFromSeed (Vector.replicate 32 0))
+    unfold kemDecap
+    rw [hsk, ← hct, toVecN_ofVector, kem.decode_encode_ct]
+    dsimp only
+    rw [hd]
+    dsimp only
+    rw [← hss]
+    rfl
+
 /-- `kemEncap`'s ciphertext output is always exactly `kem.ciphertextSize` bytes — `kem.encap`'s
 own type guarantees this via `encodeCiphertext`. -/
 private theorem kemEncap_size (kem : KEM) (pkBytes : ByteArray) (seed : Vector UInt8 32)
