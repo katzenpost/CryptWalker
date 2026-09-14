@@ -73,6 +73,25 @@ theorem extract_append_ge (a b : ByteArray) {lo : Nat} (h : lo ≤ a.size) :
       rw [htail]
       omega
 
+/-- Extracting a prefix that reaches past the left half of a concatenation into the right: the
+whole left half, followed by however much of the right half's own start is needed. -/
+theorem extract_append_le (a b : ByteArray) {m : Nat} (h : a.size ≤ m) :
+    (a ++ b).extract 0 m = a ++ b.extract 0 (m - a.size) := by
+  have htail : (b.extract 0 (m - a.size)).size = min (m - a.size) b.size := by
+    rw [ByteArray.size_extract]; omega
+  apply ByteArray.ext_getElem
+  · simp only [ByteArray.size_extract, ByteArray.size_append, htail]
+    omega
+  · intro i h1 h2
+    simp only [ByteArray.size_append] at h2
+    simp only [ByteArray.getElem_extract, Nat.zero_add]
+    by_cases hi : i < a.size
+    · rw [ByteArray.getElem_append_left hi, ByteArray.getElem_append_left hi]
+    · have hge : a.size ≤ i := by omega
+      have hlt : i - a.size < (b.extract 0 (m - a.size)).size := by omega
+      rw [ByteArray.getElem_append_right hge, ByteArray.getElem_append_right hge]
+      simp only [ByteArray.getElem_extract, Nat.zero_add]
+
 /-- Splitting at any point and rejoining is the identity. -/
 theorem append_extract (b : ByteArray) (n : Nat) (h : n ≤ b.size) :
     b.extract 0 n ++ b.extract n b.size = b := by

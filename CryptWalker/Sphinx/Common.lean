@@ -19,7 +19,7 @@ namespace CryptWalker.Sphinx.Common
 open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Crypto.HMAC (hmacSha256)
-open CryptWalker.Util.Bytes (ofVector)
+open CryptWalker.Util.Bytes (ofVector extract_append_le extract_append_of_le)
 
 def v0AD : ByteArray := ⟨#[0, 0]⟩
 
@@ -243,6 +243,38 @@ theorem zeroPadTo_size {n : Nat} {b : ByteArray} (h : b.size ≤ n) : (zeroPadTo
   · omega
   · simp only [ByteArray.size_append, byteArray_mk_size, Array.size_replicate]
     omega
+
+private theorem replicate_extract (k j : Nat) (h : j ≤ k) :
+    (⟨Array.replicate k (0 : UInt8)⟩ : ByteArray).extract 0 j = ⟨Array.replicate j 0⟩ := by
+  apply ByteArray.ext_getElem
+  · simp [ByteArray.size_extract]; omega
+  · intro i h1 h2
+    have hik : i < (Array.replicate k (0 : UInt8)).size := by
+      rw [Array.size_replicate]
+      have : i < j := by simpa using h2
+      omega
+    have hij : i < (Array.replicate j (0 : UInt8)).size := by
+      rw [Array.size_replicate]; simpa using h2
+    simp only [ByteArray.getElem_extract, Nat.zero_add]
+    show (Array.replicate k (0:UInt8))[i]'hik = (Array.replicate j (0:UInt8))[i]'hij
+    rw [Array.getElem_replicate, Array.getElem_replicate]
+
+/-- Padding to a wider target and then taking a prefix that still reaches or exceeds the original
+content is the same as padding to that narrower width directly — what lets `kemRiFragment`'s
+terminal-hop fragment (zero-padded to the full per-hop budget) still support extracting just its
+leading `perHopRoutingInfoLength - kem.ciphertextSize` bytes as if it had been padded to exactly
+that width. -/
+theorem zeroPadTo_extract_prefix {n m : Nat} (b : ByteArray) (h1 : b.size ≤ m) (h2 : m ≤ n) :
+    (zeroPadTo n b).extract 0 m = zeroPadTo m b := by
+  unfold zeroPadTo
+  by_cases hbn : b.size ≥ n
+  · have heqm : b.size = m := by omega
+    rw [if_pos hbn, if_pos (show b.size ≥ m by omega), ← heqm, ByteArray.extract_zero_size]
+  · by_cases hbm : b.size ≥ m
+    · have heqm : b.size = m := by omega
+      rw [if_neg hbn, if_pos hbm, ← heqm, extract_append_of_le b _ (le_refl b.size),
+        ByteArray.extract_zero_size]
+    · rw [if_neg hbn, if_neg hbm, extract_append_le b _ h1, replicate_extract _ _ (by omega)]
 
 /-- Go's "leave spare room for one" check: `budget` is what's left of `perHopRoutingInfoLength`
 for the caller's *own* commands once whatever `createHeader`/`createKEMHeader` appends
