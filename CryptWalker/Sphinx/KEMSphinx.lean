@@ -514,6 +514,72 @@ private theorem createKEMHeader_loop3_never_done (kem : KEM) (macS : MAC) (geom 
   injection hstep with hstep
   injection hstep
 
+/-- **The full trace of `createKEMHeader`'s third loop.** Not just the size invariant
+(`createKEMHeader_loop3_step`) but the actual sequence of `(routingInfo, macBytes)` values, one
+per iteration — exactly the `R(i)`/`M(i)` pair from the hand derivation this file's module doc
+refers to (`s j` is `(R(nrHops - j), M(nrHops - j))`; equivalently, writing `i := nrHops - 1 - j`
+for the hop processed at step `j`, `s j = (R(i+1), M(i+1))` and `s (j+1) = (R(i), M(i))`). Built
+from the fully generic `List.forIn_exists_trace` plus the already-proved
+`createKEMHeader_loop3_never_done`; no new induction needed here. -/
+private theorem createKEMHeader_loop3_trace (kem : KEM) (macS : MAC) (geom : Geometry)
+    (path : Array PathHop)
+    (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
+    (nrHops : Nat) (init final : ByteArray × ByteArray)
+    (hfinal :
+      forIn (List.range' 0 nrHops) init
+        (fun iRev (st : ByteArray × ByteArray) =>
+          (do
+            let i := nrHops - 1 - iRev
+            let riFragment ← kemRiFragment kem geom path kemElements st.2 nrHops i
+            let routingInfo := riFragment ++ st.1
+            let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
+            let mPreimage := v0AD ++ kemElements[i]! ++ routingInfo
+              ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
+            let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
+            pure (ForInStep.yield (routingInfo, macBytes)) :
+              Except String (ForInStep (ByteArray × ByteArray)))) = Except.ok final) :
+    ∃ s : Nat → ByteArray × ByteArray, s 0 = init ∧ s nrHops = final ∧
+      ∀ j (hj : j < nrHops), ∃ riFragment,
+        kemRiFragment kem geom path kemElements (s j).2 nrHops (nrHops - 1 - j)
+            = Except.ok riFragment ∧
+        (s (j + 1)).1 = xorBytes (riFragment ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+          (v0AD ++ kemElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+            ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty))) := by
+  have hnd : ∀ (b : Nat) (a a' : ByteArray × ByteArray), b ∈ List.range' 0 nrHops →
+      (fun iRev (st : ByteArray × ByteArray) =>
+        (do
+          let i := nrHops - 1 - iRev
+          let riFragment ← kemRiFragment kem geom path kemElements st.2 nrHops i
+          let routingInfo := riFragment ++ st.1
+          let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
+          let mPreimage := v0AD ++ kemElements[i]! ++ routingInfo
+            ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
+          let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
+          pure (ForInStep.yield (routingInfo, macBytes)) :
+            Except String (ForInStep (ByteArray × ByteArray)))) b a
+        ≠ Except.ok (ForInStep.done a') := by
+    intro b a a' _hb hcontra
+    exact createKEMHeader_loop3_never_done kem macS geom path keys kemElements riKeyStream riPadding
+      nrHops b a.1 a.2 a' hcontra
+  obtain ⟨s, hs0, hsl, hstep⟩ := CryptWalker.Sphinx.Common.List.forIn_exists_trace
+    (List.range' 0 nrHops) _ hnd init final hfinal
+  refine ⟨s, hs0, by simpa using hsl, ?_⟩
+  intro j hj
+  have hj' : j < (List.range' 0 nrHops).length := by simpa using hj
+  have hstepj := hstep j hj'
+  simp only [List.getElem_range', Nat.one_mul, Nat.zero_add] at hstepj
+  obtain ⟨riFragment, hriFragment, hstepj⟩ := Except.eq_ok_of_bind_eq_ok hstepj
+  simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
+  have h1 : (s (j + 1)).1 = xorBytes (riFragment ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) :=
+    (congrArg Prod.fst hstepj).symm
+  have h2 : (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+      (v0AD ++ kemElements[nrHops - 1 - j]!
+        ++ xorBytes (riFragment ++ (s j).1) (riKeyStream[nrHops - 1 - j]!)
+        ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty))) :=
+    (congrArg Prod.snd hstepj).symm
+  exact ⟨riFragment, hriFragment, h1, by rw [h2, ← h1]⟩
+
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 4000 in
 /-- As `NIKESphinx.createHeader_hdr_size`. Generic in `macS`/`kdfS`/`streamS`: the one extra

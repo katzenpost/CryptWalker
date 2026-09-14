@@ -223,6 +223,48 @@ theorem List.forIn_const_of_forall_mem {α β ε γ : Type} (l : List β) (hl : 
     | done a' =>
       exact absurd hstep (fun hh => hdone init a' b List.mem_cons_self hh)
 
+/-- **The full trace of a `forIn` loop**, when it never exits early: not just a size/count/overwrite
+invariant (the three lemmas above), but the *entire* sequence of intermediate accumulator values,
+recoverable one step at a time. `createKEMHeader`'s routing-info loop composes `kemRiFragment`, an
+XOR, and a MAC in a way none of `forIn_congr_of_forall_mem`/`forIn_add_of_forall_mem`/
+`forIn_const_of_forall_mem`'s single-invariant shapes can express — the multi-hop completeness
+proof needs the actual per-hop values, not a derived numeric fact about them. Fully generic in the
+step function `f`, so it costs nothing to state once here rather than duplicating the induction at
+the call site. -/
+theorem List.forIn_exists_trace {α β ε : Type} (l : List β) (f : β → α → Except ε (ForInStep α))
+    (hnd : ∀ (b : β) (a a' : α), b ∈ l → f b a ≠ Except.ok (ForInStep.done a')) :
+    ∀ (init final : α), forIn l init f = Except.ok final →
+      ∃ s : Nat → α, s 0 = init ∧ s l.length = final ∧
+        ∀ j (hj : j < l.length), f (l[j]'hj) (s j) = Except.ok (ForInStep.yield (s (j + 1))) := by
+  induction l with
+  | nil =>
+    intro init final hfinal
+    simp only [List.forIn_nil, pure, Except.pure, Except.ok.injEq] at hfinal
+    exact ⟨fun _ => init, rfl, hfinal, by simp⟩
+  | cons hd tl ih =>
+    intro init final hfinal
+    rw [List.forIn_cons] at hfinal
+    obtain ⟨r, hr, hfinal2⟩ := Except.eq_ok_of_bind_eq_ok hfinal
+    cases r with
+    | done a' => exact absurd hr (hnd hd init a' List.mem_cons_self)
+    | yield a =>
+      simp only [Except.pure] at hfinal2
+      have hnd' : ∀ (b : β) (a a' : α), b ∈ tl → f b a ≠ Except.ok (ForInStep.done a') :=
+        fun b a a' hb => hnd b a a' (List.mem_cons_of_mem hd hb)
+      obtain ⟨s, hs0, hsl, hstep⟩ := ih hnd' a final hfinal2
+      refine ⟨fun j => match j with | 0 => init | j' + 1 => s j', rfl, ?_, ?_⟩
+      · show s tl.length = final
+        exact hsl
+      · intro j hj
+        cases j with
+        | zero =>
+          show f hd init = Except.ok (ForInStep.yield (s 0))
+          rw [hs0]; exact hr
+        | succ j' =>
+          have hj' : j' < tl.length := by simpa using hj
+          show f (tl[j']'hj') (s j') = Except.ok (ForInStep.yield (s (j' + 1)))
+          exact hstep j' hj'
+
 def mac (key : Vector UInt8 32) (msg : ByteArray) : Vector UInt8 32 := hmacSha256 (ofVector key) msg
 
 def zeroPadTo (n : Nat) (b : ByteArray) : ByteArray :=
