@@ -1431,4 +1431,58 @@ theorem aezTiny_roundtrip_odd (e : EState) (delta : Block) (inArr : ByteArray)
           (inArr.get! (inArr.size / 2 + inArr.size / 2))
           (hL2R0bnd.trans (congrArg (· &&& (0xf0 : UInt8)) hRmm))
 
+/-- **`aezTiny`'s full round-trip**, both parities combined: everything `aezTiny_roundtrip_even`/
+`aezTiny_roundtrip_odd` need, minus the parity split itself. -/
+theorem aezTiny_roundtrip (e : EState) (delta : Block) (inArr : ByteArray)
+    (h16 : 16 ≤ inArr.size) (hlt : inArr.size < 32) :
+    aezTiny e delta (aezTiny e delta inArr 0) 1 = inArr := by
+  rcases Nat.even_or_odd inArr.size with heven | hodd
+  · exact aezTiny_roundtrip_even e delta inArr (Nat.even_iff.mp heven) h16 hlt
+  · exact aezTiny_roundtrip_odd e delta inArr (Nat.odd_iff.mp hodd) h16 hlt
+
+/-! ## `aezCore`'s round-trip: isolated as its own boundary
+
+`aezCore` is a full two-pass wide-block construction (`pass1`/`pass2` accumulate XOR sums across
+every interior 32-byte chunk; a value `S`, derived from the *entire* input plus a tweak-dependent
+key selection, feeds from pass 1 into pass 2) — a substantially larger and more novel proof than
+`aezTiny`'s Feistel ladder, comparable in scope to that whole effort on its own. Isolating it here,
+as its own named fact rather than folding it silently into a much bigger claim, is deliberate: it
+is the one remaining piece `encipher_decipher_roundtrip` needs that isn't proved yet, and every
+theorem downstream of it can already be built and verified against this exact interface. -/
+axiom aezCore_roundtrip (e : EState) (delta : Block) (inArr : ByteArray) (h32 : 32 ≤ inArr.size) :
+    aezCore e delta (aezCore e delta inArr 0) 1 = inArr
+
+/-- **`encipher`/`decipher`'s round-trip**, for any input of at least 16 bytes (the only sizes
+`sprpEncrypt`/`sprpDecrypt` are ever actually called with in this codebase's Sphinx wrap/unwrap
+path — always `payloadTagLength(32) + forwardPayloadLength ≥ 32`, so in practice this only ever
+takes the `aezCore` branch, but the `aezTiny` branch is proved unconditionally too since it was
+already in hand). -/
+theorem encipher_decipher_roundtrip (e : EState) (delta : Block) (inArr : ByteArray)
+    (h16 : 16 ≤ inArr.size) : decipher e delta (encipher e delta inArr) = inArr := by
+  unfold encipher decipher
+  have hne0 : ¬ inArr.size == 0 := by simp only [beq_iff_eq]; omega
+  simp only [hne0, Bool.false_eq_true, if_false]
+  by_cases h32 : inArr.size < 32
+  · simp only [h32, if_true]
+    have hne0' : ¬ (aezTiny e delta inArr 0).size == 0 := by
+      rw [aezTiny_size]; simp only [beq_iff_eq]; omega
+    have h32' : (aezTiny e delta inArr 0).size < 32 := by rw [aezTiny_size]; exact h32
+    simp only [hne0', Bool.false_eq_true, if_false, h32', if_true]
+    exact aezTiny_roundtrip e delta inArr h16 h32
+  · simp only [h32, Bool.false_eq_true, if_false]
+    have hge32 : 32 ≤ inArr.size := by omega
+    have hne0' : ¬ (aezCore e delta inArr 0).size == 0 := by
+      rw [aezCore_size e delta inArr 0 hge32]; simp only [beq_iff_eq]; omega
+    have h32' : ¬ (aezCore e delta inArr 0).size < 32 := by
+      rw [aezCore_size e delta inArr 0 hge32]; omega
+    simp only [hne0', Bool.false_eq_true, if_false, h32', if_false]
+    exact aezCore_roundtrip e delta inArr hge32
+
+/-- **`sprpEncrypt`/`sprpDecrypt`'s round-trip**: the same key/iv derive the same `(e, delta)` on
+both sides, so this is `encipher_decipher_roundtrip` composed with that. -/
+theorem sprpDecrypt_sprpEncrypt (key : Array UInt8) (iv msg : ByteArray) (h16 : 16 ≤ msg.size) :
+    sprpDecrypt key iv (sprpEncrypt key iv msg) = msg := by
+  unfold sprpEncrypt sprpDecrypt
+  exact encipher_decipher_roundtrip (initState key) (aezHashNoAD (initState key) iv) msg h16
+
 end CryptWalker.Sphinx.Crypto.AEZ

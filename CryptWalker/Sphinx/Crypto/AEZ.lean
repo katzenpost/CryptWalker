@@ -385,7 +385,7 @@ private theorem aezTinyLR_size (e : EState) (delta : Block) (inArr : ByteArray) 
       (by simp only [zero16, Array.size_replicate, foldl_set!_size, Array.size_set!])
 
 set_option maxHeartbeats 8000000 in
-private theorem aezTiny_size (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) :
+theorem aezTiny_size (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) :
     (aezTiny e delta inArr d).size = inArr.size := by
   unfold aezTiny
   obtain ⟨hL, hR⟩ := aezTinyLR_size e delta inArr d (aezTinyParams inArr.size).2
