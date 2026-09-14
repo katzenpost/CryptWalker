@@ -69,4 +69,24 @@ def hkdfSha256Expand : KDF where
   expand      := CryptWalker.Sphinx.Crypto.KDF.expand
   expand_size := HKDFSha256Expand.expand_size
 
+/-- `PacketKeys`, generic over which `KDF` does the expansion — Sphinx's own domain-separation
+string and the five fields' byte offsets/widths are its own choice, layered on top of the
+abstract `expand`; only the KDF algorithm itself is what varies here. Agrees with `KDF.sphinxKDF`
+exactly when `kdf = hkdfSha256Expand` (both call the same `expand` on the same `kdfInfo`, sliced
+the same way). `blindingFactorSeed`'s slice is included for parity with `KDF.sphinxKDF`, even
+though `KEMSphinx` never reads it (`NIKESphinx.HopKeys`' own doc comment notes the same field is
+unused on the KEM side). -/
+def packetKeysFrom (kdf : KDF) (ikm : ByteArray) : CryptWalker.Sphinx.Crypto.KDF.PacketKeys :=
+  let okm := kdf.expand ikm CryptWalker.Sphinx.Crypto.KDF.kdfInfo (32 + 32 + 16 + 48 + 32)
+  { headerMAC          := CryptWalker.Sphinx.Crypto.KDF.sliceV okm 0 32
+    headerEncryption   := CryptWalker.Sphinx.Crypto.KDF.sliceV okm 32 32
+    headerEncryptionIV := CryptWalker.Sphinx.Crypto.KDF.sliceV okm 64 16
+    payloadEncryption  := CryptWalker.Sphinx.Crypto.KDF.sliceV okm 80 48
+    blindingFactorSeed := CryptWalker.Sphinx.Crypto.KDF.sliceV okm 128 32 }
+
+/-- Sanity check: `packetKeysFrom` at the concrete `hkdfSha256Expand` instance is definitionally
+`KDF.sphinxKDF` — the generalization above didn't change Sphinx's actual key derivation. -/
+theorem packetKeysFrom_hkdfSha256Expand (ikm : ByteArray) :
+    packetKeysFrom hkdfSha256Expand ikm = CryptWalker.Sphinx.Crypto.KDF.sphinxKDF ikm := rfl
+
 end CryptWalker.Sphinx.Crypto.GenericKDF

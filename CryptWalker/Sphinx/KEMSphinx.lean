@@ -13,6 +13,10 @@ import CryptWalker.Sphinx.NIKESphinx
 import CryptWalker.Sphinx.SURB
 import CryptWalker.Sphinx.Crypto.Stream
 import CryptWalker.Sphinx.Crypto.AEZ
+import CryptWalker.Sphinx.Crypto.WideBlockCipher
+import CryptWalker.Sphinx.Crypto.MAC
+import CryptWalker.Sphinx.Crypto.GenericKDF
+import CryptWalker.Sphinx.Crypto.StreamCipher
 import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Schemes
 import CryptWalker.Hash.Sha512
@@ -25,9 +29,11 @@ open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Common
-open CryptWalker.Sphinx.NIKESphinx (HopKeys deriveHopKeys)
-open CryptWalker.Sphinx.Crypto.Stream (keystream)
-open CryptWalker.Sphinx.Crypto.AEZ (sprpEncrypt sprpDecrypt)
+open CryptWalker.Sphinx.NIKESphinx (HopKeys)
+open CryptWalker.Sphinx.Crypto.WideBlockCipher (WideBlockCipher)
+open CryptWalker.Sphinx.Crypto.MAC (MAC)
+open CryptWalker.Sphinx.Crypto.GenericKDF (KDF)
+open CryptWalker.Sphinx.Crypto.StreamCipher (StreamCipher)
 open CryptWalker.KEM.KEM (KEM)
 open CryptWalker.Hash.Sha512 (sha512_256)
 open CryptWalker.Util.Bytes (ofVector)
@@ -89,6 +95,20 @@ private def kemSelfPublicKeyBytes (kem : KEM) (skBytes : ByteArray) : ByteArray 
   | none => skBytes
   | some sk => ofVector (kem.encodePublicKey (kem.derivePublicKey sk))
 
+/-- As `NIKESphinx.deriveHopKeys`, generic over which `KDF` does the expansion —
+`GenericKDF.packetKeysFrom` reproduces `sphinxKDF`'s own domain string and slicing exactly (see
+its doc comment), so this agrees with `NIKESphinx.deriveHopKeys sharedSecret` definitionally when
+`kdfS = GenericKDF.hkdfSha256Expand`. `blindingFactor` is the one `HopKeys` field this never
+populates (`ByteArray.empty`, matching `HopKeys`' own doc comment: unused on the KEM side, since
+there is no blinding chain to feed it into). -/
+private def deriveHopKeysG (kdfS : KDF) (sharedSecret : ByteArray) : HopKeys :=
+  let pk := CryptWalker.Sphinx.Crypto.GenericKDF.packetKeysFrom kdfS sharedSecret
+  { headerMAC := pk.headerMAC
+    headerEncryption := pk.headerEncryption
+    headerEncryptionIV := pk.headerEncryptionIV
+    payloadEncryption := pk.payloadEncryption
+    blindingFactor := ByteArray.empty }
+
 /-- The per-hop routing-info fragment for `createKEMHeader`'s third loop, factored out on its
 own: a non-terminal hop's fragment gets padded to a full `perHopRoutingInfoLength` and then has
 its last `kem.ciphertextSize` bytes overwritten with the next hop's embedded ciphertext, while a
@@ -123,8 +143,9 @@ private def kemRiFragment (kem : KEM) (geom : Geometry) (path : Array PathHop)
   pure riFragment
 
 /-- **`createKEMHeader`**. `ephemeralSeeds` (one per hop) plays the role Go's `io.Reader` does
-inside each `Encapsulate` call; `filler` is as in `NIKESphinx.createHeader`. -/
-def createKEMHeader (kem : KEM) (geom : Geometry)
+inside each `Encapsulate` call; `filler` is as in `NIKESphinx.createHeader`. Generic in the MAC,
+KDF and stream cipher (`macS`/`kdfS`/`streamS`) — never calls `HMAC`/`KDF`/`Stream` by name. -/
+def createKEMHeader (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
     (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop) :
     Except String (ByteArray × Array SPRPKey) := do
   let nrHops := path.size
@@ -141,14 +162,15 @@ def createKEMHeader (kem : KEM) (geom : Geometry)
     | .error e => throw e
     | .ok (ct, ss) =>
       kemElements := kemElements.push ct
-      keys := keys.push (deriveHopKeys ss)
+      keys := keys.push (deriveHopKeysG kdfS ss)
 
   -- Per-hop routing-info keystream and encrypted padding, as in NIKESphinx.
   let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
   let mut riKeyStream : Array ByteArray := #[]
   let mut riPadding : Array ByteArray := #[]
   for i in [0:nrHops] do
-    let ks := keystream (keys[i]!).headerEncryption (keys[i]!).headerEncryptionIV totalRiLen
+    let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+      (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
     let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
     let mut thisPad := ks.extract ksLen totalRiLen
     if i > 0 then
@@ -169,7 +191,7 @@ def createKEMHeader (kem : KEM) (geom : Geometry)
     routingInfo := xorBytes routingInfo (riKeyStream[i]!)
     let mPreimage := v0AD ++ kemElements[i]! ++ routingInfo
       ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
-    macBytes := ofVector (mac (keys[i]!).headerMAC mPreimage)
+    macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
 
   let hdr := v0AD ++ kemElements[0]! ++ routingInfo ++ macBytes
   let sprpKeys : Array SPRPKey := Array.ofFn fun i : Fin nrHops =>
@@ -203,7 +225,7 @@ private theorem kemEncap_size (kem : KEM) (pkBytes : ByteArray) (seed : Vector U
 `kem.ciphertextSize` bytes — needed both for `kemElements[0]!` (the header's leading element) and
 for `kemElements[i+1]!` (embedded into a non-terminal hop's routing-info fragment in the third
 loop). -/
-private theorem createKEMHeader_loop1_size (kem : KEM) (path : Array PathHop)
+private theorem createKEMHeader_loop1_size (kem : KEM) (kdfS : KDF) (path : Array PathHop)
     (ephemeralSeeds : Array (Vector UInt8 32)) (nrHops : Nat) :
     ∀ (init final : Array ByteArray × Array HopKeys),
       init.1 = #[] →
@@ -213,7 +235,7 @@ private theorem createKEMHeader_loop1_size (kem : KEM) (path : Array PathHop)
             (match kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) with
               | .error e => throw e
               | .ok (ct, ss) =>
-                pure (ForInStep.yield (a.1.push ct, a.2.push (deriveHopKeys ss)))
+                pure (ForInStep.yield (a.1.push ct, a.2.push (deriveHopKeysG kdfS ss)))
               : Except String (ForInStep (Array ByteArray × Array HopKeys))))
         = Except.ok final →
       ∀ j (hj : j < final.1.size), (final.1[j]'hj).size = kem.ciphertextSize := by
@@ -283,7 +305,8 @@ private theorem kemRiFragment_size (kem : KEM) (geom : Geometry) (path : Array P
     rw [← h, ByteArray.size_append, ByteArray.size_extract, zeroPadTo_size hle1perHop, hctsBang]
     omega
 
-private theorem createKEMHeader_loop3_step (kem : KEM) (geom : Geometry) (path : Array PathHop)
+private theorem createKEMHeader_loop3_step (kem : KEM) (macS : MAC) (geom : Geometry)
+    (path : Array PathHop)
     (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
     (nrHops : Nat)
     (hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength)
@@ -300,7 +323,7 @@ private theorem createKEMHeader_loop3_step (kem : KEM) (geom : Geometry) (path :
         let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
         let mPreimage := v0AD ++ kemElements[i]! ++ routingInfo
           ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
-        let macBytes := ofVector (mac (keys[i]!).headerMAC mPreimage)
+        let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
         pure (ForInStep.yield (routingInfo, macBytes)) :
           Except String (ForInStep (ByteArray × ByteArray))) = Except.ok (ForInStep.yield (ri', mb'))) :
     ri'.size = ri.size + geom.perHopRoutingInfoLength := by
@@ -313,7 +336,8 @@ private theorem createKEMHeader_loop3_step (kem : KEM) (geom : Geometry) (path :
   omega
 
 /-- Companion to `createKEMHeader_loop3_step`: the loop never exits via `.done`. -/
-private theorem createKEMHeader_loop3_never_done (kem : KEM) (geom : Geometry) (path : Array PathHop)
+private theorem createKEMHeader_loop3_never_done (kem : KEM) (macS : MAC) (geom : Geometry)
+    (path : Array PathHop)
     (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
     (nrHops : Nat) (iRev : Nat) (ri mb : ByteArray) (a' : ByteArray × ByteArray)
     (hstep :
@@ -324,7 +348,7 @@ private theorem createKEMHeader_loop3_never_done (kem : KEM) (geom : Geometry) (
         let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
         let mPreimage := v0AD ++ kemElements[i]! ++ routingInfo
           ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
-        let macBytes := ofVector (mac (keys[i]!).headerMAC mPreimage)
+        let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
         pure (ForInStep.yield (routingInfo, macBytes)) :
           Except String (ForInStep (ByteArray × ByteArray))) = Except.ok (ForInStep.done a')) :
     False := by
@@ -335,12 +359,19 @@ private theorem createKEMHeader_loop3_never_done (kem : KEM) (geom : Geometry) (
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 4000 in
-/-- As `NIKESphinx.createHeader_hdr_size`. -/
-theorem createKEMHeader_hdr_size (kem : KEM) (geom : Geometry)
+/-- As `NIKESphinx.createHeader_hdr_size`. Generic in `macS`/`kdfS`/`streamS`: the one extra
+hypothesis this needs beyond `geom.ValidForKEM kem` is `hmactag`, tying `macS`'s output width to
+`Geometry`'s own fixed `macLength` constant — the one place a MAC's width is actually baked into
+the wire format (the header's trailing MAC field, at a fixed offset). `kdfS`/`streamS` need no
+such hypothesis: `deriveHopKeysG`/`keystream_size` compose with an arbitrary `KDF`/`StreamCipher`
+regardless of their declared `keySize`/`ivSize`, since those never appear in the *type* of
+`expand`/`keystream` (both take plain `ByteArray`). -/
+theorem createKEMHeader_hdr_size (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+    (geom : Geometry)
     (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
     (hdr : ByteArray) (sprpKeys : Array SPRPKey)
-    (hvalid : geom.ValidForKEM kem)
-    (h : createKEMHeader kem geom ephemeralSeeds filler path = .ok (hdr, sprpKeys)) :
+    (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (h : createKEMHeader kem macS kdfS streamS geom ephemeralSeeds filler path = .ok (hdr, sprpKeys)) :
     hdr.size = geom.headerLength := by
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, -, -⟩ := id hvalid
   have hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by omega
@@ -396,7 +427,8 @@ theorem createKEMHeader_hdr_size (kem : KEM) (geom : Geometry)
             (#[], #[]) loop1Final hLoop1
           simpa [List.length_range'] using this
         have hloop1size : ∀ j (hj : j < loop1Final.1.size), (loop1Final.1[j]'hj).size = kem.ciphertextSize :=
-          createKEMHeader_loop1_size kem path ephemeralSeeds path.size (#[], #[]) loop1Final rfl hLoop1
+          createKEMHeader_loop1_size kem kdfS path ephemeralSeeds path.size (#[], #[]) loop1Final rfl
+            hLoop1
         have hge0size : loop1Final.1[0]!.size = kem.ciphertextSize := by
           rw [getElem!_pos _ _ (by simpa [hloop1count] using hpos)]
           exact hloop1size 0 (by simpa [hloop1count] using hpos)
@@ -434,9 +466,9 @@ theorem createKEMHeader_hdr_size (kem : KEM) (geom : Geometry)
           simpa [List.length_range'] using hraw.symm
         have hlne : List.range' 0 path.size ≠ [] := by
           simp only [ne_eq, List.range'_eq_nil_iff]; omega
-        have hmacsize : loop3Final.2.size = 32 := by
+        have hmacsize : loop3Final.2.size = macS.tagSize := by
           refine CryptWalker.Sphinx.Common.List.forIn_const_of_forall_mem (List.range' 0 path.size) hlne
-            _ (fun (a : ByteArray × ByteArray) => a.2.size) 32 ?_ ?_ _ _ hLoop3
+            _ (fun (a : ByteArray × ByteArray) => a.2.size) macS.tagSize ?_ ?_ _ _ hLoop3
           · intro a a' iRev hiRev hgb
             obtain ⟨riFragment, -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
             simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hgb
@@ -452,29 +484,32 @@ theorem createKEMHeader_hdr_size (kem : KEM) (geom : Geometry)
           rw [← Nat.add_mul, Nat.sub_add_cancel hgen, Nat.mul_comm]
         rw [← hhdr]
         simp only [ByteArray.size_append, hv0, hge0size, hloop3size, hinit_size, hmacsize,
-          byteArray_empty_size]
+          byteArray_empty_size, hmactag]
         rw [hheader, hrouting, ← hmulcombine]
         simp only [adLength, macLength]
 
-/-- **`newKEMPacket`**. -/
-def newKEMPacket (kem : KEM) (geom : Geometry)
-    (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray)
-    (path : Array PathHop) (payload : ByteArray) : Except String ByteArray := do
+/-- **`newKEMPacket`**. Generic in the wide-block cipher (`cipher`) as well as the header's
+`macS`/`kdfS`/`streamS`. -/
+def newKEMPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
+    (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) : Except String ByteArray := do
   if payload.size ≠ geom.forwardPayloadLength then
     throw s!"sphinx: invalid payload length: {payload.size}, expected {geom.forwardPayloadLength}"
-  let (hdr, sprpKeys) ← createKEMHeader kem geom ephemeralSeeds filler path
+  let (hdr, sprpKeys) ← createKEMHeader kem macS kdfS streamS geom ephemeralSeeds filler path
   let mut b := (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload
   for iRev in [0:sprpKeys.size] do
     let k := sprpKeys[sprpKeys.size - 1 - iRev]!
-    b := sprpEncrypt k.key.toArray (ofVector k.iv) b
+    b := cipher.encrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
-/-- As `NIKESphinx.newNIKEPacket_size`. -/
-theorem newKEMPacket_size (kem : KEM) (geom : Geometry)
-    (ephemeralSeeds : Array (Vector UInt8 32))
+/-- As `NIKESphinx.newNIKEPacket_size`. Generic in `cipher` too: `cipher.encrypt_size` replaces
+`AEZ.sprpEncrypt_size` directly, no extra hypothesis needed (length preservation never depended on
+`cipher.keySize`/`ivSize`, since `encrypt`'s type doesn't mention them). -/
+theorem newKEMPacket_size (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
-    (hvalid : geom.ValidForKEM kem)
-    (h : newKEMPacket kem geom ephemeralSeeds filler path payload = .ok pkt)
+    (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (h : newKEMPacket kem cipher macS kdfS streamS geom ephemeralSeeds filler path payload = .ok pkt)
     (hpay : payload.size = geom.forwardPayloadLength) :
     pkt.size = geom.packetLength := by
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
@@ -492,13 +527,14 @@ theorem newKEMPacket_size (kem : KEM) (geom : Geometry)
       Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind] at h
     obtain ⟨x, hx, hfx⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
     have hpkt : pkt = x.1 ++ (List.range' 0 x.2.size).foldl
-        (fun b a ↦ sprpEncrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
+        (fun b a ↦ cipher.encrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
         ({ data := Array.replicate geom.payloadTagLength 0 } ++ payload) := by
       injection hfx with hfx; exact hfx.symm
-    have hhdrsize := createKEMHeader_hdr_size kem geom ephemeralSeeds filler path x.1 x.2 hvalid hx
+    have hhdrsize := createKEMHeader_hdr_size kem macS kdfS streamS geom ephemeralSeeds filler path
+      x.1 x.2 hvalid hmactag hx
     have hfoldsize := CryptWalker.Sphinx.Common.List.foldl_size_preserving (List.range' 0 x.2.size)
-      (fun b a ↦ sprpEncrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
-      (fun b a ↦ CryptWalker.Sphinx.Crypto.AEZ.sprpEncrypt_size _ _ b)
+      (fun b a ↦ cipher.encrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
+      (fun b a ↦ cipher.encrypt_size _ _ b)
       ({ data := Array.replicate geom.payloadTagLength 0 } ++ payload)
     rw [hpkt, ByteArray.size_append, hhdrsize, hfoldsize, ByteArray.size_append, hpacket]
     simp only [byteArray_mk_size, Array.size_replicate]
@@ -508,21 +544,23 @@ open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
 
 /-- **`wrapKEM`**: `Sphinx.Interface.wrap` for `KEMSphinxScheme` — `newKEMPacket`, drawing one
 ephemeral seed per hop from the seed stream instead of taking them as a bare array. -/
-def wrapKEM (kem : KEM) (geom : Geometry) (path : List PathHop) (filler : ByteArray)
+def wrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+    (geom : Geometry) (path : List PathHop) (filler : ByteArray)
     (payload : Vector UInt8 geom.forwardPayloadLength) :
     EStateM String SeedStream (Vector UInt8 geom.packetLength) := do
   let seeds ← path.toArray.mapM (fun _ => nextSeed)
-  match newKEMPacket kem geom seeds filler path.toArray (ofVector payload) with
+  match newKEMPacket kem cipher macS kdfS streamS geom seeds filler path.toArray (ofVector payload) with
   | .error e => throw e
   | .ok pkt =>
     if hsize : pkt.size = geom.packetLength then pure ⟨pkt.data, hsize⟩
     else throw "sphinx: internal error: newKEMPacket produced a wrong-sized packet"
 
 /-- **`newKEMSURB`**. As `NIKESphinx.newNIKESURB`, over `createKEMHeader`. -/
-def newKEMSURB (kem : KEM) (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32))
+def newKEMSURB (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
+    (ephemeralSeeds : Array (Vector UInt8 32))
     (keyPayload : Vector UInt8 64) (filler : ByteArray) (path : Array PathHop) :
     Except String (ByteArray × ByteArray) := do
-  let (hdr, sprpKeys) ← createKEMHeader kem geom ephemeralSeeds filler path
+  let (hdr, sprpKeys) ← createKEMHeader kem macS kdfS streamS geom ephemeralSeeds filler path
   let mut k : ByteArray := ByteArray.empty
   for iRev in [0:sprpKeys.size] do
     let kk := sprpKeys[sprpKeys.size - 1 - iRev]!
@@ -532,12 +570,14 @@ def newKEMSURB (kem : KEM) (geom : Geometry) (ephemeralSeeds : Array (Vector UIn
   pure (surb, k)
 
 /-- As `NIKESphinx.newNIKESURB_size`. -/
-theorem newKEMSURB_size (kem : KEM) (geom : Geometry)
+theorem newKEMSURB_size (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+    (geom : Geometry)
     (ephemeralSeeds : Array (Vector UInt8 32)) (keyPayload : Vector UInt8 64)
     (filler : ByteArray) (path : Array PathHop)
-    (hvalid : geom.ValidForKEM kem)
+    (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
     (surb surbKeys : ByteArray)
-    (h : newKEMSURB kem geom ephemeralSeeds keyPayload filler path = .ok (surb, surbKeys)) :
+    (h : newKEMSURB kem macS kdfS streamS geom ephemeralSeeds keyPayload filler path
+      = .ok (surb, surbKeys)) :
     surb.size = geom.surbLength := by
   obtain ⟨-, -, -, -, -, hsurb⟩ := id hvalid
   unfold newKEMSURB at h
@@ -547,7 +587,8 @@ theorem newKEMSURB_size (kem : KEM) (geom : Geometry)
   obtain ⟨x, hx, hfx⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
   have hsurbeq : surb = x.1 ++ ofVector (path[0]!).id ++ ofVector keyPayload := by
     injection hfx with hfx; exact congrArg Prod.fst hfx.symm
-  have hhdrsize := createKEMHeader_hdr_size kem geom ephemeralSeeds filler path x.1 x.2 hvalid hx
+  have hhdrsize := createKEMHeader_hdr_size kem macS kdfS streamS geom ephemeralSeeds filler path
+    x.1 x.2 hvalid hmactag hx
   rw [hsurbeq, ByteArray.size_append, ByteArray.size_append, hhdrsize, hsurb,
     CryptWalker.Util.Bytes.size_ofVector, CryptWalker.Util.Bytes.size_ofVector]
   simp only [nodeIDLength, CryptWalker.Sphinx.Constants.sprpKeyMaterialLength,
@@ -556,13 +597,13 @@ theorem newKEMSURB_size (kem : KEM) (geom : Geometry)
 
 /-- **`wrapKEMSURB`**: `Sphinx.Interface.newSURB` for `KEMSphinxScheme` — draws one ephemeral seed
 per hop plus `keyPayload` (two seeds' worth) from the seed stream. -/
-def wrapKEMSURB (kem : KEM) (geom : Geometry) (path : List PathHop)
-    (filler : ByteArray) :
+def wrapKEMSURB (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
+    (path : List PathHop) (filler : ByteArray) :
     EStateM String SeedStream (Vector UInt8 geom.surbLength × ByteArray) := do
   let seeds ← path.toArray.mapM (fun _ => nextSeed)
   let kp1 ← nextSeed
   let kp2 ← nextSeed
-  match newKEMSURB kem geom seeds (kp1 ++ kp2) filler path.toArray with
+  match newKEMSURB kem macS kdfS streamS geom seeds (kp1 ++ kp2) filler path.toArray with
   | .error e => throw e
   | .ok (surb, k) =>
     if hsize : surb.size = geom.surbLength then pure (⟨surb.data, hsize⟩, k)
@@ -570,8 +611,10 @@ def wrapKEMSURB (kem : KEM) (geom : Geometry) (path : List PathHop)
 
 /-- **`unwrapKEM`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Interface.unwrap`.
 Forwarding copies the next-hop ciphertext straight out of the decrypted routing-info block —
-unlike `unwrapNIKE`, no `Blind` step, since there is no group element to re-blind. -/
-def unwrapKEM (kem : KEM) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArray) :
+unlike `unwrapNIKE`, no `Blind` step, since there is no group element to re-blind. Generic in the
+wide-block cipher/MAC/KDF/stream cipher, matching `createKEMHeader`. -/
+def unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArray) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
   let geOff := 2
@@ -587,8 +630,8 @@ def unwrapKEM (kem : KEM) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArr
   let replayTag := sha512_256 kemCiphertext
   let sharedSecret ← kemDecap kem privKey kemCiphertext
 
-  let keys := deriveHopKeys sharedSecret
-  let gotMac := mac keys.headerMAC (pkt.extract 0 macOff)
+  let keys := deriveHopKeysG kdfS sharedSecret
+  let gotMac := macS.mac (ofVector keys.headerMAC) (pkt.extract 0 macOff)
   if (ofVector gotMac).data ≠ (pkt.extract macOff (macOff + macLength)).data then
     throw "sphinx: invalid packet, MAC mismatch"
 
@@ -600,7 +643,7 @@ def unwrapKEM (kem : KEM) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArr
       = geom.routingInfoLength + geom.perHopRoutingInfoLength
     rw [ByteArray.size_append, ByteArray.size_extract, hpad]
     omega
-  b := xorBytes b (keystream keys.headerEncryption keys.headerEncryptionIV b.size)
+  b := xorBytes b (streamS.keystream (ofVector keys.headerEncryption) (ofVector keys.headerEncryptionIV) b.size)
   have hb' : b.size = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
     show (xorBytes _ _).size = _
     rw [size_xorBytes]; exact hb
@@ -628,14 +671,14 @@ def unwrapKEM (kem : KEM) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArr
     rw [ByteArray.size_extract]
     omega
   let decPayload :=
-    if rawPayload.size > 0 then sprpDecrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
+    if rawPayload.size > 0 then cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
     else rawPayload
   have hdec : decPayload.size = rawPayload.size := by
     show (if rawPayload.size > 0
-          then sprpDecrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
+          then cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
           else rawPayload).size = rawPayload.size
     split
-    · exact CryptWalker.Sphinx.Crypto.AEZ.sprpDecrypt_size _ _ _
+    · exact cipher.decrypt_size _ _ _
     · rfl
 
   match nextNode with
@@ -667,47 +710,56 @@ def unwrapKEM (kem : KEM) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArr
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
 /-- As `NIKESphinx.wrapNIKE_unwrapNIKE_complete`: `KEMSphinxScheme`'s witness for
-`Sphinx.Interface.unwrap_complete`. -/
-axiom wrapKEM_unwrapKEM_complete (kem : KEM) (geom : Geometry) (path : List PathHop)
+`Sphinx.Interface.unwrap_complete`. Generic over the wide-block cipher/MAC/KDF/stream cipher, not
+just the `KEM` — never AEZ/HMAC-SHA256/HKDF/AES-CTR specifics, only `cipher`/`macS`/`kdfS`/
+`streamS`'s own fields, as `wrapKEM`/`unwrapKEM` themselves now are. -/
+axiom wrapKEM_unwrapKEM_complete (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (path : List PathHop)
     (privKeys : List ByteArray) (filler : ByteArray)
     (payload : Vector UInt8 geom.forwardPayloadLength) (st : SeedStream)
     (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream) :
     path ≠ [] →
     path.map (·.publicKey) = privKeys.map (kemSelfPublicKeyBytes kem) →
-    wrapKEM kem geom path filler payload st = .ok pkt st' →
-    unwrapChainAux (unwrapKEM kem geom) privKeys (ofVector pkt) = .ok (some (ofVector payload))
+    wrapKEM kem cipher macS kdfS streamS geom path filler payload st = .ok pkt st' →
+    unwrapChainAux (unwrapKEM kem cipher macS kdfS streamS geom) privKeys (ofVector pkt)
+      = .ok (some (ofVector payload))
 
 structure KEMSphinxScheme extends CryptWalker.Sphinx.Interface.Sphinx where
   kem : KEM
   /-- **Not wrap-resistant** — the inverse of `NIKESphinxScheme.wrap_resistant`: a known-key
   adversary hits any target routing-info block with certainty, not merely `1/N`. See
-  `unwrapKEM_routingInfoBlock_not_wrap_resistant` below for why. -/
-  not_wrap_resistant : ∀ (key : Vector UInt8 32) (iv : Vector UInt8 16) (target : ByteArray),
-      ∃ raw : ByteArray, xorBytes raw (keystream key iv target.size) = target :=
-    fun key iv target => xorBytes_achieves_any_target (keystream key iv target.size) target
+  `unwrapKEM_routingInfoBlock_not_wrap_resistant` below for why. Stated against `stream` (this very
+  instance's own field, from the base `Sphinx`), not a hardcoded stream cipher — the fact holds
+  for *any* `StreamCipher`, since `xorBytes_achieves_any_target` never needed `keystream_size`. -/
+  not_wrap_resistant : ∀ (key iv target : ByteArray),
+      ∃ raw : ByteArray, xorBytes raw (stream.keystream key iv target.size) = target :=
+    fun key iv target => xorBytes_achieves_any_target (stream.keystream key iv target.size) target
 
 /-- Build a `KEMSphinxScheme` from any `KEM` at all — total, no `Except`. -/
-def kemSphinxSchemeOf (kem : KEM) (geom : Geometry) : KEMSphinxScheme where
-  State := SeedStream
-  PrivateKey := ByteArray
-  Command := RoutingCommand
-  geometry := geom
-  stateI := ⟨CryptWalker.Sphinx.Interface.initWith (fun _ => Vector.replicate 32 0)⟩
-  -- As `NIKESphinx.nikeSphinxCore`: named honestly here even though `createKEMHeader`/
-  -- `unwrapKEM`'s bodies still call `AEZ`/`HMAC`/`KDF`/`Stream` directly rather than through
-  -- these fields -- rewiring those call sites is the next step.
-  cipher := CryptWalker.Sphinx.Crypto.WideBlockCipher.aez
-  mac    := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
-  kdf    := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
-  stream := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
-  derivePublicKey := kemSelfPublicKeyBytes kem
-  wrap := wrapKEM kem geom
-  unwrap := unwrapKEM kem geom
-  newSURB := wrapKEMSURB kem geom
-  newPacketFromSURB := fun surb payload =>
-    CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
-  unwrap_complete := wrapKEM_unwrapKEM_complete kem geom
-  kem := kem
+def kemSphinxSchemeOf (kem : KEM) (geom : Geometry) : KEMSphinxScheme :=
+  let cipher := CryptWalker.Sphinx.Crypto.WideBlockCipher.aez
+  let macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+  let kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+  let streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
+  { State := SeedStream
+    PrivateKey := ByteArray
+    Command := RoutingCommand
+    geometry := geom
+    stateI := ⟨CryptWalker.Sphinx.Interface.initWith (fun _ => Vector.replicate 32 0)⟩
+    cipher := cipher
+    mac    := macS
+    kdf    := kdfS
+    stream := streamS
+    derivePublicKey := kemSelfPublicKeyBytes kem
+    wrap := wrapKEM kem cipher macS kdfS streamS geom
+    unwrap := unwrapKEM kem cipher macS kdfS streamS geom
+    newSURB := wrapKEMSURB kem macS kdfS streamS geom
+    newPacketFromSURB := fun surb payload =>
+      CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
+    unwrap_complete := wrapKEM_unwrapKEM_complete kem cipher macS kdfS streamS geom
+    kem := kem
+    not_wrap_resistant := fun key iv target =>
+      xorBytes_achieves_any_target (streamS.keystream key iv target.size) target }
 
 /-- Build a `KEMSphinxScheme` for whatever KEM `geom.scheme` names, resolved through
 `CryptWalker.KEM.byName` — the same registry `Geometry.ofKEM` resolves its ciphertext size
@@ -753,9 +805,9 @@ and AEAD security was never a guarantee against a party who holds the key, which
 own threat model grants the adversary. For any routing-info-block `target` a key-holder wants the
 mix to forward, there are raw (pre-decryption) bytes achieving it exactly — the opposite of a
 `1/N`-style bound. -/
-theorem unwrapKEM_routingInfoBlock_not_wrap_resistant (key : Vector UInt8 32) (iv : Vector UInt8 16)
+theorem unwrapKEM_routingInfoBlock_not_wrap_resistant (streamS : StreamCipher) (key iv : ByteArray)
     (target : ByteArray) :
-    ∃ raw : ByteArray, xorBytes raw (keystream key iv target.size) = target :=
-  xorBytes_achieves_any_target (keystream key iv target.size) target
+    ∃ raw : ByteArray, xorBytes raw (streamS.keystream key iv target.size) = target :=
+  xorBytes_achieves_any_target (streamS.keystream key iv target.size) target
 
 end CryptWalker.Sphinx.KEMSphinx

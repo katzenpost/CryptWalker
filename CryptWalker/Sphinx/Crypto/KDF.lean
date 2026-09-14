@@ -30,7 +30,9 @@ The fifth slice, `blindingFactorSeed`, is the raw 32 bytes Go's `KDF` feeds to
 `privateKeyFromSeed`'s job (or, for KEM-Sphinx, the seed is simply unused) — not this module's;
 `sphinx_kdf.json`'s vectors accordingly stop at the raw seed. -/
 
-private def kdfInfo : ByteArray := ⟨"katzenpost-kdf-v0-hkdf-sha256".toUTF8.data⟩
+/-- Not `private`: `GenericKDF.packetKeysFrom` reuses this exact string to slice `PacketKeys` out
+of any `GenericKDF.KDF` instance's `expand`, not just this file's own `expand`. -/
+def kdfInfo : ByteArray := ⟨"katzenpost-kdf-v0-hkdf-sha256".toUTF8.data⟩
 
 /-- RFC 5869 §2.3 Expand: iterated HMAC-SHA256 over `(PRK, T(i-1) ‖ info ‖ i)`. `prk` here is
 the raw input keying material itself — Sphinx's Extract-skipping shortcut, valid because the
@@ -57,8 +59,9 @@ structure PacketKeys where
 /-- Reinterpret a `len`-byte slice of a `ByteArray` as a fixed-width vector, panicking if the
 source is shorter than `off + len` — the caller always supplies a 160-byte `okm`, so this
 never fires in practice; it exists to keep `sphinxKDF` free of `Option`/proof plumbing that the
-vectors-first pass has chosen not to carry. -/
-private def sliceV (b : ByteArray) (off len : Nat) : Vector UInt8 len :=
+vectors-first pass has chosen not to carry. Not `private`: `GenericKDF.packetKeysFrom` reuses it
+too. -/
+def sliceV (b : ByteArray) (off len : Nat) : Vector UInt8 len :=
   Vector.ofFn fun i : Fin len => b.data.getD (off + i.val) 0
 
 /-- **Sphinx's KDF**: expand the raw shared secret into 160 bytes of OKM and slice it into

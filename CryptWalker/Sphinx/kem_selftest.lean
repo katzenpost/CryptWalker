@@ -32,6 +32,14 @@ open CryptWalker.Util.Bytes (ofVector)
 
 private def x25519Kem := CryptWalker.KEM.kemX25519Ladder
 
+-- The four crypto primitives `kemSphinxSchemeOf` wires up internally; the direct
+-- `createKEMHeader`/`newKEMPacket`/`unwrapKEM`/`newKEMSURB` calls below (bypassing the abstract
+-- `Sphinx.Interface` scheme) need them threaded through explicitly, same as `kemSphinxSchemeOf`.
+private def wbCipher := CryptWalker.Sphinx.Crypto.WideBlockCipher.aez
+private def macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+private def kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+private def streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
+
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)
   pure (Vector.ofFn fun i : Fin n => bs[i.val]!)
@@ -76,7 +84,7 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
   for i in [0:n] do
     if !stop then
       let node := nodes[i]!
-      match unwrapKEM x25519Kem geom (ofVector node.priv) pkt with
+      match unwrapKEM x25519Kem wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
       | .error e =>
         IO.eprintln s!"  hop {i}: unwrap failed: {e}"
         ok := false
@@ -113,7 +121,7 @@ def runRound (geom : Geometry) : IO Bool := do
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomBytes geom.forwardPayloadLength
-  match newKEMPacket x25519Kem geom seeds ByteArray.empty path payload with
+  match newKEMPacket x25519Kem wbCipher macS kdfS streamS geom seeds ByteArray.empty path payload with
   | .error e =>
     IO.eprintln s!"newKEMPacket failed: {e}"
     pure false
@@ -131,7 +139,7 @@ def runFillerRound : IO Bool := do
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomBytes geom.forwardPayloadLength
   let filler ← randomBytes ((geom.nrHops - 3) * geom.perHopRoutingInfoLength)
-  match newKEMPacket x25519Kem geom seeds filler path payload with
+  match newKEMPacket x25519Kem wbCipher macS kdfS streamS geom seeds filler path payload with
   | .error e =>
     IO.eprintln s!"filler round: newKEMPacket failed: {e}"
     pure false
@@ -169,7 +177,7 @@ def runCompletenessRound (geom : Geometry) : IO Bool := do
     pure false
   | .ok pkt _ =>
     let privKeys := (nodes.map (fun n => ofVector n.priv)).toList
-    match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapKEM x25519Kem geom) privKeys (ofVector pkt) with
+    match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapKEM x25519Kem wbCipher macS kdfS streamS geom) privKeys (ofVector pkt) with
     | .error e =>
       IO.eprintln s!"completeness: unwrapChainAux failed: {e}"
       pure false
@@ -214,7 +222,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapKEM x25519Kem geom (ofVector node.priv) pkt with
+          match unwrapKEM x25519Kem wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -250,7 +258,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let kp1 ← randomVector 32
   let kp2 ← randomVector 32
-  match newKEMSURB x25519Kem geom seeds (kp1 ++ kp2) ByteArray.empty path with
+  match newKEMSURB x25519Kem macS kdfS streamS geom seeds (kp1 ++ kp2) ByteArray.empty path with
   | .error e =>
     IO.eprintln s!"newKEMSURB failed: {e}"
     pure false
@@ -276,7 +284,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapKEM x25519Kem geom (ofVector node.priv) pkt with
+          match unwrapKEM x25519Kem wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true

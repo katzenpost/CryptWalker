@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import CryptWalker.Sphinx.Crypto.Stream
+import CryptWalker.Sphinx.Common
 import CryptWalker.Util.Bytes
 
 namespace CryptWalker.Sphinx.Crypto.StreamCipher
@@ -12,8 +13,13 @@ open CryptWalker.Util.Bytes
 
 /-! # Stream ciphers, generically
 
-The same shape as `NIKE`, `KEM`, `Hash` and `HKDF`: a plain structure whose one law is a field, so
-no instance can exist without discharging it.
+The same shape as `NIKE`, `KEM`, `Hash`, `HKDF`, `MAC` and `WideBlockCipher`: a plain structure
+whose one law is a field, so no instance can exist without discharging it.
+
+`key`/`iv` are plain `ByteArray`, not `Vector UInt8 keySize`/`Vector UInt8 ivSize` — `keySize`/
+`ivSize` stay informational only, as `WideBlockCipher.encrypt`/`decrypt`'s key already does, so a
+caller holding fixed-width `Vector`s can pass any `StreamCipher` instance's `keystream` directly
+via `ofVector`, with no equality proof tying those widths to whatever an instance declares.
 
 ## What can and cannot be a law here
 
@@ -36,9 +42,9 @@ structure StreamCipher where
 
   /-- `len` bytes of keystream, from a key and nonce/IV. Any size `len`, including one not a
   multiple of the cipher's underlying block size. -/
-  keystream : Vector UInt8 keySize → Vector UInt8 ivSize → (len : Nat) → ByteArray
+  keystream : ByteArray → ByteArray → (len : Nat) → ByteArray
 
-  keystream_size : ∀ k iv len, (keystream k iv len).size = len
+  keystream_size : ∀ key iv len, (keystream key iv len).size = len
 
 /-- The empty stream cipher: a placeholder so `StreamCipher` is demonstrably inhabited. Obviously
 not a stream cipher (every output is all-zero). -/
@@ -76,10 +82,17 @@ theorem keystream_size (key : Vector UInt8 32) (iv : Vector UInt8 16) (len : Nat
 
 end AES256CTR
 
+/-- `Stream.keystream` reinterpreted at plain-`ByteArray` key/IV, via `Common.toVecN` — the same
+total, default-on-wrong-length reinterpretation `MAC.hmacSha256MAC` uses, never exercised here
+since callers always supply exactly 32/16 bytes. -/
 def aes256CTR : StreamCipher where
   keySize := 32
   ivSize  := 16
-  keystream      := CryptWalker.Sphinx.Crypto.Stream.keystream
-  keystream_size := AES256CTR.keystream_size
+  keystream := fun key iv len =>
+    CryptWalker.Sphinx.Crypto.Stream.keystream (CryptWalker.Sphinx.Common.toVecN 32 key)
+      (CryptWalker.Sphinx.Common.toVecN 16 iv) len
+  keystream_size := fun key iv len =>
+    AES256CTR.keystream_size (CryptWalker.Sphinx.Common.toVecN 32 key)
+      (CryptWalker.Sphinx.Common.toVecN 16 iv) len
 
 end CryptWalker.Sphinx.Crypto.StreamCipher

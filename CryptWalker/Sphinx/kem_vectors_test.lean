@@ -32,6 +32,10 @@ open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.Util.Bytes (ofVector)
 
 private def x25519Kem := CryptWalker.KEM.kemX25519Ladder
+private def wbCipher := CryptWalker.Sphinx.Crypto.WideBlockCipher.aez
+private def macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+private def kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+private def streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
 
 def field (j : Json) (k : String) : Except String ByteArray := do
   let s ← (← j.getObjVal? k).getStr?
@@ -109,7 +113,7 @@ def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   for i in [0:n] do
     if !stop then
       let node := v.nodes[i]!
-      match unwrapKEM x25519Kem geom (ofVector node.privateKey) pkt with
+      match unwrapKEM x25519Kem wbCipher macS kdfS streamS geom (ofVector node.privateKey) pkt with
       | .error e =>
         IO.eprintln s!"    hop {i}: unwrap failed: {e}"
         ok := false; stop := true
