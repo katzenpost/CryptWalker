@@ -66,6 +66,96 @@ theorem xorBytes_achieves_any_target (ks target : ByteArray) :
     ∃ raw : ByteArray, xorBytes raw ks = target :=
   ⟨xorBytes target ks, xorBytes_xorBytes target ks⟩
 
+/-- `xorBytes`'s `i`-th byte, spelled out: XOR `a`'s own `i`-th byte against `b`'s if `b` reaches
+that far, or against `0` (unchanged) otherwise — the `getD` in `xorBytes`'s definition, made
+explicit as an ordinary `if`. -/
+theorem xorBytes_getElem (a b : ByteArray) (i : Nat) (hi : i < a.size) :
+    (xorBytes a b)[i]'(by simp only [size_xorBytes]; exact hi)
+      = a[i]'hi ^^^ (if h2 : i < b.size then b[i]'h2 else 0) := by
+  simp only [xorBytes, ByteArray.getElem_eq_getElem_data]
+  rw [Array.getElem_mapIdx]
+  rw [Array.getD_eq_getD_getElem?]
+  by_cases h2 : i < b.size
+  · rw [dif_pos h2]
+    have heq : b.data[i]? = some (b.data[i]'(by simpa using h2)) := by simp
+    rw [heq, Option.getD_some]
+  · rw [dif_neg h2]
+    have heq : b.data[i]? = none := by
+      rw [Array.getElem?_eq_none_iff]
+      simpa using h2
+    rw [heq, Option.getD_none]
+
+/-- **`xorBytes` distributes over `++`**, given the two left-hand pieces match the two
+right-hand pieces in width: XOR-ing a concatenation against another of the same shape is the same
+as XOR-ing the pieces separately and reassembling. Lets a multi-hop XOR argument work one
+byte-range at a time instead of only on whole buffers — the byte-level heart of the
+cascading-padding argument (`a1`/`a2` the routing-info slot split at a hop boundary, `b1`/`b2` the
+matching split of the keystream). -/
+theorem xorBytes_append (a1 a2 b1 b2 : ByteArray) (h : a1.size = b1.size)
+    (h' : a2.size ≤ b2.size) :
+    xorBytes (a1 ++ a2) (b1 ++ b2) = xorBytes a1 b1 ++ xorBytes a2 b2 := by
+  apply ByteArray.ext_getElem
+  · simp [ByteArray.size_append]
+  · intro i hi hi'
+    have hi2 : i < (a1 ++ a2).size := by simp only [size_xorBytes] at hi; exact hi
+    rw [xorBytes_getElem (a1 ++ a2) (b1 ++ b2) i hi2]
+    by_cases h1 : i < a1.size
+    · have h1' : i < b1.size := by rw [← h]; exact h1
+      have h1bb : i < (b1 ++ b2).size := by simp only [ByteArray.size_append]; omega
+      rw [ByteArray.getElem_append_left h1, dif_pos h1bb, ByteArray.getElem_append_left h1']
+      have hi1' : i < (xorBytes a1 b1).size := by simpa using h1
+      rw [ByteArray.getElem_append_left hi1', xorBytes_getElem a1 b1 i h1, dif_pos h1']
+    · push_neg at h1
+      have h1'' : b1.size ≤ i := by rw [← h]; omega
+      have hi2a : i < a1.size + a2.size := by simpa [ByteArray.size_append] using hi2
+      have h1bb : i < (b1 ++ b2).size := by
+        simp only [ByteArray.size_append]; omega
+      rw [ByteArray.getElem_append_right h1, dif_pos h1bb, ByteArray.getElem_append_right h1'']
+      have hi1' : (xorBytes a1 b1).size ≤ i := by simp only [size_xorBytes]; omega
+      rw [ByteArray.getElem_append_right hi1']
+      have hi2' : i - (xorBytes a1 b1).size < a2.size := by
+        simp only [size_xorBytes]; omega
+      rw [xorBytes_getElem a2 b2 (i - (xorBytes a1 b1).size) (by simpa using hi2')]
+      simp only [size_xorBytes]
+      rw [dif_pos (by omega : i - a1.size < b2.size)]
+      congr 2
+      omega
+
+/-- `xorBytes` is commutative once the two sides agree in width — not in general, since `xorBytes
+a b` pads a short `b` with zeros using `a`'s own length. Matches how the cascading-padding
+argument needs to swap the two operands of one of `kemRiFragment`'s XORs mid-derivation. -/
+theorem xorBytes_comm_of_size_eq (a b : ByteArray) (h : a.size = b.size) :
+    xorBytes a b = xorBytes b a := by
+  apply ByteArray.ext_getElem
+  · simp [h]
+  · intro i hi hi'
+    have hia : i < a.size := by simpa using hi
+    have hib : i < b.size := by simpa using hi'
+    rw [xorBytes_getElem a b i hia, xorBytes_getElem b a i hib, dif_pos (h ▸ hia : i < b.size),
+      dif_pos (h ▸ hib : i < a.size)]
+    exact UInt8.xor_comm _ _
+
+/-- XOR-ing against an all-zero buffer of matching width is the identity — the trailing "as-is"
+half of the cascading-padding argument's recursive step, where the receiver's zero-padded tail
+XORs against the keystream's own trailing bytes unchanged. -/
+theorem xorBytes_zero_left (n : Nat) (X : ByteArray) (h : n = X.size) :
+    xorBytes (⟨Array.replicate n 0⟩ : ByteArray) X = X := by
+  apply ByteArray.ext_getElem
+  · rw [size_xorBytes]
+    show (Array.replicate n (0 : UInt8)).size = X.size
+    rw [Array.size_replicate]; exact h
+  · intro i hi hi'
+    have hin : i < (⟨Array.replicate n 0⟩ : ByteArray).size := by
+      have hi2 := hi
+      rwa [size_xorBytes] at hi2
+    rw [xorBytes_getElem (⟨Array.replicate n 0⟩ : ByteArray) X i hin, dif_pos (h ▸ hi' : i < X.size)]
+    have hin2 : i < (Array.replicate n (0 : UInt8)).size := hin
+    have hzero : (⟨Array.replicate n 0⟩ : ByteArray)[i]'hin = (0 : UInt8) := by
+      show (Array.replicate n (0 : UInt8))[i]'hin2 = 0
+      rw [Array.getElem_replicate]
+    rw [hzero]
+    simp
+
 /-- A `List.foldl` step that leaves some projection `φ` of the accumulator alone at every element
 of `l` leaves `φ` alone overall — the general shape behind `createHeader`'s "this loop never
 touches `groupElements[0]!`" invariant. -/
