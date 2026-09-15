@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import VCVio.CryptoFoundations.HardnessAssumptions.DiffieHellman
 import CryptWalker.NIKE.X25519
-import CryptWalker.Sphinx.Interface
+import CryptWalker.Sphinx.interface
 
 /-! # Wrap-resistance (Danezis–Goldberg §4.3)
 

@@ -3,10 +3,10 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Sphinx.Geometry
-import CryptWalker.Sphinx.Types
+import CryptWalker.Sphinx.geometry
+import CryptWalker.Sphinx.types
 import CryptWalker.Sphinx.kem_sphinx_theorems
-import CryptWalker.Sphinx.SURB
+import CryptWalker.Sphinx.surb
 import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes

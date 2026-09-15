@@ -5,10 +5,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import CryptWalker.Hash.Sha512
-import CryptWalker.Sphinx.Crypto.HMAC
-import CryptWalker.Sphinx.Crypto.Stream
-import CryptWalker.Sphinx.Crypto.KDF
-import CryptWalker.Sphinx.Crypto.ChaCha20
+import CryptWalker.Sphinx.Crypto.hmac
+import CryptWalker.Sphinx.Crypto.stream
+import CryptWalker.Sphinx.Crypto.kdf
+import CryptWalker.Sphinx.Crypto.chacha20
 import CryptWalker.Util.newhex
 
 /-!

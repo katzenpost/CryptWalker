@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Sphinx.Constants
+import CryptWalker.Sphinx.constants
 import CryptWalker.NIKE.Schemes
 import CryptWalker.KEM.Schemes
 

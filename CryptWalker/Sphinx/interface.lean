@@ -6,14 +6,14 @@ SPDX-License-Identifier: AGPL-3.0-only
 import VCVio.OracleComp.Constructions.SampleableType
 import VCVio.EvalDist.Bool
 
-import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.Geometry
-import CryptWalker.Sphinx.Indistinguishability
-import CryptWalker.Sphinx.Integrity
+import CryptWalker.Sphinx.types
+import CryptWalker.Sphinx.geometry
+import CryptWalker.Sphinx.indistinguishability
+import CryptWalker.Sphinx.integrity
 import CryptWalker.WideBlockCipher.WideBlockCipher
-import CryptWalker.Sphinx.Crypto.MAC
-import CryptWalker.Sphinx.Crypto.GenericKDF
-import CryptWalker.Sphinx.Crypto.StreamCipher
+import CryptWalker.Sphinx.Crypto.mac
+import CryptWalker.Sphinx.Crypto.generic_kdf
+import CryptWalker.Sphinx.Crypto.stream_cipher
 import CryptWalker.Util.Bytes
 
 namespace CryptWalker.Sphinx.Interface

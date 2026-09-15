@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Mathlib.Tactic.Set
 import Mathlib.Tactic.IntervalCases
-import CryptWalker.Sphinx.Constants
+import CryptWalker.Sphinx.constants
 import CryptWalker.Util.Bytes
 
 namespace CryptWalker.Sphinx.Commands

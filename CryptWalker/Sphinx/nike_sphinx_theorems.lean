@@ -3,26 +3,26 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Sphinx.Constants
-import CryptWalker.Sphinx.Geometry
-import CryptWalker.Sphinx.Commands
-import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.Interface
-import CryptWalker.Sphinx.Common
-import CryptWalker.Sphinx.SURB
-import CryptWalker.Sphinx.Crypto.KDF
-import CryptWalker.Sphinx.Crypto.ChaCha20
+import CryptWalker.Sphinx.constants
+import CryptWalker.Sphinx.geometry
+import CryptWalker.Sphinx.commands
+import CryptWalker.Sphinx.types
+import CryptWalker.Sphinx.interface
+import CryptWalker.Sphinx.common
+import CryptWalker.Sphinx.surb
+import CryptWalker.Sphinx.Crypto.kdf
+import CryptWalker.Sphinx.Crypto.chacha20
 import CryptWalker.WideBlockCipher.WideBlockCipher
 import CryptWalker.WideBlockCipher.AEZ
-import CryptWalker.Sphinx.Crypto.MAC
-import CryptWalker.Sphinx.Crypto.GenericKDF
-import CryptWalker.Sphinx.Crypto.StreamCipher
+import CryptWalker.Sphinx.Crypto.mac
+import CryptWalker.Sphinx.Crypto.generic_kdf
+import CryptWalker.Sphinx.Crypto.stream_cipher
 import CryptWalker.NIKE.NIKE
 import CryptWalker.NIKE.Schemes
-import CryptWalker.Sphinx.WrapResistance
+import CryptWalker.Sphinx.wrap_resistance
 import CryptWalker.Hash.Sha512
 import CryptWalker.Util.Bytes
-import CryptWalker.Sphinx.NIKESphinx
+import CryptWalker.Sphinx.nike_sphinx
 
 namespace CryptWalker.Sphinx.NIKESphinx
 

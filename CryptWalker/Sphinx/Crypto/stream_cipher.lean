@@ -3,8 +3,8 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Sphinx.Crypto.Stream
-import CryptWalker.Sphinx.Common
+import CryptWalker.Sphinx.Crypto.stream
+import CryptWalker.Sphinx.common
 import CryptWalker.Util.Bytes
 
 namespace CryptWalker.Sphinx.Crypto.StreamCipher

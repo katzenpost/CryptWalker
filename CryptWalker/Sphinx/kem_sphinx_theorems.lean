@@ -3,21 +3,21 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Sphinx.Constants
-import CryptWalker.Sphinx.Geometry
-import CryptWalker.Sphinx.Commands
-import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.Interface
-import CryptWalker.Sphinx.Common
+import CryptWalker.Sphinx.constants
+import CryptWalker.Sphinx.geometry
+import CryptWalker.Sphinx.commands
+import CryptWalker.Sphinx.types
+import CryptWalker.Sphinx.interface
+import CryptWalker.Sphinx.common
 import CryptWalker.Sphinx.nike_sphinx_theorems
-import CryptWalker.Sphinx.KEMSphinx
-import CryptWalker.Sphinx.SURB
-import CryptWalker.Sphinx.Crypto.Stream
+import CryptWalker.Sphinx.kem_sphinx
+import CryptWalker.Sphinx.surb
+import CryptWalker.Sphinx.Crypto.stream
 import CryptWalker.WideBlockCipher.WideBlockCipher
 import CryptWalker.WideBlockCipher.AEZ
-import CryptWalker.Sphinx.Crypto.MAC
-import CryptWalker.Sphinx.Crypto.GenericKDF
-import CryptWalker.Sphinx.Crypto.StreamCipher
+import CryptWalker.Sphinx.Crypto.mac
+import CryptWalker.Sphinx.Crypto.generic_kdf
+import CryptWalker.Sphinx.Crypto.stream_cipher
 import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Schemes
 import CryptWalker.Hash.Sha512
