@@ -7,22 +7,14 @@ namespace CryptWalker.Sphinx.Crypto.ChaCha20
 
 /-! # ChaCha20 (original/Bernstein construction, 64-bit nonce)
 
-Needed for one thing only: `hpqc/rand.NewDeterministicRandReader` — which
-`internal/crypto.KDF` feeds `PacketKeys.blindingFactorSeed` into, whose first 32 bytes
-`nike/x25519.scheme.GeneratePrivateKey` then reads directly as the next hop's blinding-factor
-NIKE private key (`NewKeypair` performs no clamping at generation time;
-`X25519_montgomery_ladder.curve25519` clamps at use). `NIKESphinx`'s multi-hop blinding chain
-needs this to match Go byte-for-byte, so it needs this cipher.
+Needed for one thing only: `hpqc/rand.NewDeterministicRandReader`, which
+`PacketKeys.blindingFactorSeed` feeds into to derive the next hop's blinding-factor NIKE private
+key — `NIKESphinx`'s blinding chain needs this to match Go byte-for-byte.
 
-`github.com/katzenpost/chacha20`'s `NewDeterministicRandReader` always calls `chacha20.New(key,
-nonce)` with an 8-byte **zero** nonce (`var nonce [8]byte`) — the original Bernstein variant
-(not RFC 8439's 12-byte-nonce/32-bit-counter IETF variant), which places the nonce in state
-words 14–15 and a 64-bit counter in words 12–13, both starting at zero. Since
-`GeneratePrivateKey` only ever reads the first 32 bytes (half a block), only a *single* block
-(counter = 0) is needed — no counter increment logic is implemented here.
-
-Standard ChaCha20: the "expand 32-byte k" constants, 20 rounds (ten applications of the column
-+ diagonal quarter-rounds), add the original state back in, serialize little-endian. -/
+`NewDeterministicRandReader` always uses an 8-byte zero nonce (original Bernstein variant, not
+RFC 8439's IETF one) and only ever reads the first 32 bytes, so only a single block (counter 0)
+is implemented — no counter increment. Otherwise standard ChaCha20: "expand 32-byte k" constants,
+20 rounds, add the original state back in, serialize little-endian. -/
 
 private def rotl (x : UInt32) (n : UInt32) : UInt32 := (x <<< n) ||| (x >>> (32 - n))
 

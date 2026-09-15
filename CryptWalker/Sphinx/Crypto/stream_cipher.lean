@@ -13,28 +13,14 @@ open CryptWalker.Util.Bytes
 
 /-! # Stream ciphers, generically
 
-The same shape as `NIKE`, `KEM`, `Hash`, `HKDF`, `MAC` and `WideBlockCipher`: a plain structure
-whose one law is a field, so no instance can exist without discharging it.
+The same shape as `NIKE`, `KEM`, `Hash`, `HKDF`, `MAC`, `WideBlockCipher`: a plain structure whose
+one law is a field. `key`/`iv` are plain `ByteArray`s, `keySize`/`ivSize` informational only.
 
-`key`/`iv` are plain `ByteArray`, not `Vector UInt8 keySize`/`Vector UInt8 ivSize` — `keySize`/
-`ivSize` stay informational only, as `WideBlockCipher.encrypt`/`decrypt`'s key already does, so a
-caller holding fixed-width `Vector`s can pass any `StreamCipher` instance's `keystream` directly
-via `ofVector`, with no equality proof tying those widths to whatever an instance declares.
-
-## What can and cannot be a law here
-
-Pseudorandomness (that `keystream key iv` is indistinguishable from true random bits without
-`key`) is computational — it quantifies over adversaries and negligible functions — so it cannot
-be a field here, for the same reason `Hash.lean` gives for collision resistance: no instance could
-ever discharge it as a `Prop`. Determinism ("same inputs, same output") is likewise not stated:
-`keystream` is a plain Lean function, so it holds of *any* value this field could be given,
-vacuously, and can't distinguish a real stream cipher from garbage.
-
-What *is* statable, and is exactly what Sphinx's routing-info encryption depends on to line up
-sender and receiver, is the one genuine structural constraint: a request for `len` bytes of
-keystream actually produces `len` bytes, for every `len` — not fewer (which would silently pad
-with implicit zeros wherever `xorBytes` reads past the end) and not more (which would silently
-truncate). -/
+Pseudorandomness is computational, so it can't be a field here (as `Hash.lean` explains for
+collision resistance); determinism needs no stating, since `keystream` being a plain function
+already gives it. What *is* statable, and what routing-info encryption depends on to line up
+sender and receiver, is the one structural constraint: a request for `len` bytes of keystream
+produces exactly `len` bytes. -/
 
 structure StreamCipher where
   keySize : Nat
@@ -82,9 +68,8 @@ theorem keystream_size (key : Vector UInt8 32) (iv : Vector UInt8 16) (len : Nat
 
 end AES256CTR
 
-/-- `Stream.keystream` reinterpreted at plain-`ByteArray` key/IV, via `Common.toVecN` — the same
-total, default-on-wrong-length reinterpretation `MAC.hmacSha256MAC` uses, never exercised here
-since callers always supply exactly 32/16 bytes. -/
+/-- `Stream.keystream` reinterpreted at plain-`ByteArray` key/IV, via `Common.toVecN`, as
+`MAC.hmacSha256MAC` does. -/
 def aes256CTR : StreamCipher where
   keySize := 32
   ivSize  := 16

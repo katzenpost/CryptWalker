@@ -13,30 +13,20 @@ open CryptWalker.Util.Bytes
 
 /-! # Sphinx's `PacketKeys` derivation
 
-`crypto.KDF` (`katzenpost/core/sphinx/internal/crypto/crypto.go`) is HKDF-SHA256 (RFC 5869)
-**Expand only**: the raw DH/KEM shared secret is used directly as the PRK, with no Extract
-step (`hkdf.Expand(sha256.New, ikm, kdfInfo)`), reading 160 bytes of output key material and
-slicing it into five fields.
-
-This implements RFC 5869 §2.3 Expand directly against `HMAC.hmacSha256`, rather than routing
-through `Hash.HKDF`'s abstract `extract`/`expand` structure (which is built for the
-Extract-then-Expand two-phase case `Hash.HKDF.blake2b512_hkdf` models) — Sphinx genuinely skips
-Extract, so there is no `PRK` type to encode/decode here, only a raw 32-byte secret. Deferred
+`crypto.KDF` is HKDF-SHA256 (RFC 5869) **Expand only**: the raw DH/KEM shared secret is used
+directly as the PRK, no Extract step, reading 160 bytes of OKM sliced into five fields. Deferred
 per the project's vectors-first pass: no laws are stated about this module.
 
-The fifth slice, `blindingFactorSeed`, is the raw 32 bytes Go's `KDF` feeds to
-`rand.NewDeterministicRandReader` and then `scheme.GeneratePrivateKey` to derive the NIKE
-`BlindingFactor` private key. Turning that seed into a NIKE private key is `NIKE.lean`'s
-`privateKeyFromSeed`'s job (or, for KEM-Sphinx, the seed is simply unused) — not this module's;
-`sphinx_kdf.json`'s vectors accordingly stop at the raw seed. -/
+The fifth slice, `blindingFactorSeed`, is the raw 32 bytes Go's `KDF` feeds to derive the NIKE
+`BlindingFactor` private key; turning it into one is `NIKE.lean`'s `privateKeyFromSeed`'s job
+(unused for KEM-Sphinx), not this module's. -/
 
 /-- Not `private`: `GenericKDF.packetKeysFrom` reuses this exact string to slice `PacketKeys` out
 of any `GenericKDF.KDF` instance's `expand`, not just this file's own `expand`. -/
 def kdfInfo : ByteArray := ⟨"katzenpost-kdf-v0-hkdf-sha256".toUTF8.data⟩
 
-/-- RFC 5869 §2.3 Expand: iterated HMAC-SHA256 over `(PRK, T(i-1) ‖ info ‖ i)`. `prk` here is
-the raw input keying material itself — Sphinx's Extract-skipping shortcut, valid because the
-NIKE/KEM shared secret this is fed is already exactly `HashLen` (32) bytes. -/
+/-- RFC 5869 §2.3 Expand: iterated HMAC-SHA256 over `(PRK, T(i-1) ‖ info ‖ i)`. `prk` is the raw
+input keying material — Sphinx's Extract-skipping shortcut. -/
 def expand (prk info : ByteArray) (len : Nat) : ByteArray :=
   if len = 0 then ByteArray.empty
   else
@@ -56,11 +46,9 @@ structure PacketKeys where
   payloadEncryption  : Vector UInt8 48
   blindingFactorSeed : Vector UInt8 32
 
-/-- Reinterpret a `len`-byte slice of a `ByteArray` as a fixed-width vector, panicking if the
-source is shorter than `off + len` — the caller always supplies a 160-byte `okm`, so this
-never fires in practice; it exists to keep `sphinxKDF` free of `Option`/proof plumbing that the
-vectors-first pass has chosen not to carry. Not `private`: `GenericKDF.packetKeysFrom` reuses it
-too. -/
+/-- Reinterpret a `len`-byte slice of a `ByteArray` as a fixed-width vector (never out of range in
+practice, since the caller always supplies a 160-byte `okm`). Not `private`:
+`GenericKDF.packetKeysFrom` reuses it too. -/
 def sliceV (b : ByteArray) (off len : Nat) : Vector UInt8 len :=
   Vector.ofFn fun i : Fin len => b.data.getD (off + i.val) 0
 

@@ -9,15 +9,12 @@ namespace CryptWalker.Sphinx.Crypto.GenericKDF
 
 /-! # Key-derivation functions, generically
 
-The same shape as `NIKE`, `KEM`, `Hash`, `StreamCipher`, `MAC` and `WideBlockCipher`: a plain
+The same shape as `NIKE`, `KEM`, `Hash`, `StreamCipher`, `MAC`, `WideBlockCipher`: a plain
 structure whose one law is a field.
 
-This is deliberately lighter than `Hash.HKDF`: that structure models the full RFC 5869
-Extract-then-Expand two-phase construction, with an abstract `PRK` type and `decode_encode_prk`.
-Sphinx's own KDF (`KDF.sphinxKDF`) genuinely skips Extract — the raw shared secret is fed directly
-to Expand as the PRK — so there is no `PRK` type to abstract over here, only the one operation
-Sphinx's completeness proof actually uses: expand a raw input into exactly `len` bytes of output
-key material, deterministically. -/
+Lighter than `Hash.HKDF`, which models the full Extract-then-Expand construction: Sphinx's own
+KDF skips Extract, feeding the raw shared secret directly to Expand, so there's no `PRK` type to
+abstract over — just expand a raw input into exactly `len` bytes, deterministically. -/
 
 structure KDF where
   /-- Expand `(ikm, info)` into exactly `len` bytes of output key material. -/
@@ -69,13 +66,10 @@ def hkdfSha256Expand : KDF where
   expand      := CryptWalker.Sphinx.Crypto.KDF.expand
   expand_size := HKDFSha256Expand.expand_size
 
-/-- `PacketKeys`, generic over which `KDF` does the expansion — Sphinx's own domain-separation
-string and the five fields' byte offsets/widths are its own choice, layered on top of the
-abstract `expand`; only the KDF algorithm itself is what varies here. Agrees with `KDF.sphinxKDF`
-exactly when `kdf = hkdfSha256Expand` (both call the same `expand` on the same `kdfInfo`, sliced
-the same way). `blindingFactorSeed`'s slice is included for parity with `KDF.sphinxKDF`, even
-though `KEMSphinx` never reads it (`NIKESphinx.HopKeys`' own doc comment notes the same field is
-unused on the KEM side). -/
+/-- `PacketKeys`, generic over which `KDF` does the expansion — Sphinx's domain-separation string
+and the five fields' offsets/widths are fixed, only the KDF algorithm varies. Agrees with
+`KDF.sphinxKDF` exactly when `kdf = hkdfSha256Expand`. `blindingFactorSeed` is included for
+parity even though KEM-Sphinx never reads it. -/
 def packetKeysFrom (kdf : KDF) (ikm : ByteArray) : CryptWalker.Sphinx.Crypto.KDF.PacketKeys :=
   let okm := kdf.expand ikm CryptWalker.Sphinx.Crypto.KDF.kdfInfo (32 + 32 + 16 + 48 + 32)
   { headerMAC          := CryptWalker.Sphinx.Crypto.KDF.sliceV okm 0 32

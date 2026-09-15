@@ -17,37 +17,18 @@ Port of `katzenpost/core/sphinx/geo/geo.go` + `geo_impl.go`'s `geometryFactory`:
 count, a target payload size, and the chosen scheme, compute every fixed byte offset Sphinx's
 header/routing-info/packet layout needs.
 
-Go's `Geometry` carries `NIKEName`/`KEMName string` fields, resolved through
-`hpqc/nike/schemes.ByName`/`hpqc/kem/schemes.ByName` at construction time
-(`GeometryFromUserForwardPayloadLength`/`KEMGeometryFromUserForwardPayloadLength` both take an
-already-resolved `nike.Scheme`/`kem.Scheme`, so the *name* stored in the resulting `Geometry` is
-just that scheme's own `.Name()`) and re-checked by `Validate` ("geometry has invalid NIKE Scheme
-%s") wherever a `Geometry` arrives from outside the process (a config file, an untrusted peer).
+`ofNIKE`/`ofKEM` take a bare scheme name (as Go's config format does) and resolve it against
+`CryptWalker.NIKE.byName`/`CryptWalker.KEM.byName`, so a returned `Geometry`'s stored name and
+derived sizes can never disagree. `Geometry.scheme : String ⊕ String` (`Sum.inl`/`Sum.inr`)
+replaces Go's separate nullable `NIKEName`/`KEMName`, making "exactly one of NIKE or KEM" a fact
+of the type rather than a runtime invariant.
 
-This file used to invent its own scheme identity here — first a bare `Nat` size, then a
-`Geometry`-local `NIKEScheme`/`KEMScheme` enum, then a `CryptWalker.NIKE.Schemes.RegistryEntry`
-value the caller constructed directly — none of which is the right layer for it to live at
-(scheme identity is a project-wide concept, `hpqc/nike/schemes`/`hpqc/kem/schemes` are used far
-beyond Sphinx) or safe against a mismatch (a hand-built `RegistryEntry` could still pair
-`hpqcName := "x448"` with the X25519 implementation — nothing checked the two agreed). `ofNIKE`/
-`ofKEM` now take a bare scheme *name*, exactly as Go's config format does, and resolve it against
-`CryptWalker.NIKE.byName`/`CryptWalker.KEM.byName` — the project's one real
-registry — failing with Go's own `Validate` message if the name isn't registered. There is no
-longer any way to reach a `Geometry` whose stored name and derived sizes disagree, because there
-is no longer a code path that accepts the two as independent inputs.
-
-`Geometry.scheme : String ⊕ String` (`Sum.inl` for a NIKE's `hpqc` name, `Sum.inr` for a KEM's)
-replaces Go's separate nullable `NIKEName`/`KEMName`: a `Sum` makes "exactly one of NIKE or KEM"
-a fact of the type, not a runtime invariant `Validate` has to separately check for.
-
-Still dropped relative to Go's `Geometry`: `Marshal`/`Display`/`Hash`/`String` (I/O-and-display
+Dropped relative to Go's `Geometry`: `Marshal`/`Display`/`Hash`/`String` (I/O-and-display
 conveniences, orthogonal to the packet crypto this project is porting). -/
 
 structure Geometry where
   /-- Which scheme this geometry's sizes were derived for, by its canonical `hpqc` name —
-  `Sum.inl` for a NIKE (`CryptWalker.NIKE.byName` resolves it back to the
-  implementation), `Sum.inr` for a KEM (`CryptWalker.KEM.byName`). Replaces Go's
-  `NIKEName`/`KEMName` pair — see the module doc. -/
+  `Sum.inl` for a NIKE, `Sum.inr` for a KEM. Replaces Go's `NIKEName`/`KEMName` pair. -/
   scheme                       : String ⊕ String
   packetLength                : Nat
   nrHops                      : Nat
@@ -114,11 +95,9 @@ private def buildKEM (name : String) (kemCiphertextSize userForwardPayloadLength
     nextNodeHopLength := nextNodeHopLength
     sprpKeyMaterialLength := sprpKeyMaterialLength }
 
-/-- `GeometryFromUserForwardPayloadLength`, ported with `Validate`'s scheme-name check folded in
-up front rather than left for a caller to remember to run separately: `nikeSchemeName` is
-resolved against `CryptWalker.NIKE.byName` (case-insensitively, as Go's `ByName` does),
-and the derived public-key size comes *only* from that lookup, never from a caller-supplied
-number — so a `Geometry` this returns is, by construction, never mismatched. -/
+/-- `GeometryFromUserForwardPayloadLength`, ported with `Validate`'s scheme-name check folded in:
+`nikeSchemeName` resolves against `CryptWalker.NIKE.byName`, and the public-key size comes only
+from that lookup, never from a caller-supplied number. -/
 def ofNIKE (nikeSchemeName : String) (userForwardPayloadLength : Nat) (withSURB : Bool)
     (nrHops : Nat) : Except String Geometry :=
   match CryptWalker.NIKE.byName nikeSchemeName with
@@ -137,13 +116,10 @@ def ofKEM (kemSchemeName : String) (userForwardPayloadLength : Nat) (withSURB : 
 open CryptWalker.NIKE.NIKE (NIKE)
 open CryptWalker.KEM.KEM (KEM)
 
-/-- What it means for `geom` to have actually been built for `nike` via `buildNIKE` — exactly
-`buildNIKE`'s own field equations, spelled out directly rather than through the existence of some
-unnamed `ofNIKE` call. Every `Geometry.ofNIKE` result satisfies this for the `nike` it resolved
-(`ofNIKE_validForNIKE`). `NIKESphinx.lean`'s `nike`/`geom`-generic functions (`createHeader`,
-`newNIKEPacket`, `newNIKESURB`) accept *any* `(nike, geom)` pair — nothing in their types pins them
-together — so their size theorems need this as an explicit hypothesis to relate `geom`'s fixed
-fields to whichever specific `nike` a caller actually hands them. -/
+/-- What it means for `geom` to have actually been built for `nike` via `buildNIKE`: `buildNIKE`'s
+field equations, spelled out directly. Every `ofNIKE` result satisfies this for the `nike` it
+resolved (`ofNIKE_validForNIKE`). Needed because `createHeader`/`newNIKEPacket`/`newNIKESURB`
+accept any `(nike, geom)` pair — nothing in their types pins the two together. -/
 @[reducible] def Geometry.ValidForNIKE (geom : Geometry) (nike : NIKE) : Prop :=
   geom.nextNodeHopLength = CryptWalker.Sphinx.Constants.nextNodeHopLength ∧
   geom.perHopRoutingInfoLength = geom.nextNodeHopLength + surbReplyLength ∧
@@ -152,10 +128,9 @@ fields to whichever specific `nike` a caller actually hands them. -/
   geom.packetLength = geom.headerLength + geom.payloadTagLength + geom.forwardPayloadLength ∧
   geom.surbLength = geom.headerLength + nodeIDLength + CryptWalker.Sphinx.Constants.sprpKeyMaterialLength
 
-/-- As `Geometry.ValidForNIKE`, for the KEM side (`buildKEM`): the group-element/ciphertext slot's
-width is `kem.ciphertextSize` rather than a NIKE's `publicKeySize`, and it's folded into
-`perHopRoutingInfoLength` too (`KEMSphinx.createKEMHeader` embeds a full ciphertext at every hop,
-not just the header's leading element). -/
+/-- As `Geometry.ValidForNIKE`, for the KEM side (`buildKEM`): the ciphertext slot's width is
+`kem.ciphertextSize`, folded into `perHopRoutingInfoLength` too, since `createKEMHeader` embeds a
+full ciphertext at every hop, not just the header's leading element. -/
 @[reducible] def Geometry.ValidForKEM (geom : Geometry) (kem : KEM) : Prop :=
   geom.nextNodeHopLength = CryptWalker.Sphinx.Constants.nextNodeHopLength ∧
   geom.perHopRoutingInfoLength = geom.nextNodeHopLength + surbReplyLength + kem.ciphertextSize ∧
@@ -186,10 +161,9 @@ theorem ofKEM_validForKEM (kemSchemeName : String) (userForwardPayloadLength : N
   subst h
   exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
-/-- `payloadTagLength` is a pure protocol constant (`Constants.payloadTagLength`, the width of the
-all-zero tag a correctly-decrypted payload ends in) — `buildKEM` sets it the same way regardless
-of which `kem` resolved, so unlike `ValidForKEM` this needs no `byName` witness at all. Lets a
-caller holding only `ofKEM`'s success proof (not which specific `KEM` it resolved to) discharge
+/-- `payloadTagLength` (`Constants.payloadTagLength`) is a pure protocol constant — `buildKEM`
+sets it the same way regardless of which `kem` resolved, so unlike `ValidForKEM` this needs no
+`byName` witness. Lets a caller holding only `ofKEM`'s success proof discharge
 `wrapKEM_unwrapKEM_complete_valid`'s `h16` hypothesis. -/
 theorem ofKEM_payloadTagLength (kemSchemeName : String) (userForwardPayloadLength : Nat)
     (withSURB : Bool) (nrHops : Nat) (geom : Geometry)
@@ -200,10 +174,7 @@ theorem ofKEM_payloadTagLength (kemSchemeName : String) (userForwardPayloadLengt
   · injection h
   · injection h with h; subst h; rfl
 
-/-- As `ofKEM_payloadTagLength`, for the NIKE side: `buildNIKE` sets `payloadTagLength` the same
-way regardless of which `nike` resolved, so this needs no `byName` witness either. Lets a caller
-holding only `ofNIKE`'s success proof discharge `wrapNIKE_unwrapNIKE_complete_valid`'s `h16`
-hypothesis. -/
+/-- As `ofKEM_payloadTagLength`, for the NIKE side. -/
 theorem ofNIKE_payloadTagLength (nikeSchemeName : String) (userForwardPayloadLength : Nat)
     (withSURB : Bool) (nrHops : Nat) (geom : Geometry)
     (h : ofNIKE nikeSchemeName userForwardPayloadLength withSURB nrHops = .ok geom) :

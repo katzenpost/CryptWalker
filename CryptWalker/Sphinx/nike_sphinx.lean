@@ -52,12 +52,10 @@ re-blindable-envelope structure (`Envelope`/`Factor`/`blind`/`wrap_resistant`/`e
 `nikeSphinxScheme`) that actually construct one of these. -/
 
 /-- A `Sphinx` scheme whose header carries a re-blindable public-key element: `Envelope` is that
-element's type (`parseEnvelope` extracts it from a packet), `Factor` is the space a fresh
-blinding value is drawn from, and `blind` is the re-blinding action. `wrap_resistant` needs no
-per-instance proof — it's `uniformHit_eq` specialized to `act := blind · e`, true for *every*
-instance automatically. Its hypothesis, `Function.Bijective (blind · e)`, is what actually
-carries content, and is false (so the implication holds vacuously) for a degenerate `e` such as
-a group's identity element — exactly the case a well-formed header never produces. -/
+element's type (`parseEnvelope` extracts it from a packet), `Factor` the space a fresh blinding
+value is drawn from, `blind` the re-blinding action. `wrap_resistant` needs no per-instance proof
+— it's `uniformHit_eq` specialized to `act := blind · e`, true automatically; its hypothesis
+(`blind · e` bijective) is false only for a degenerate `e` a well-formed header never produces. -/
 structure NIKESphinxScheme extends CryptWalker.Sphinx.Interface.Sphinx where
   nike : NIKE
   Envelope : Type
@@ -70,22 +68,18 @@ structure NIKESphinxScheme extends CryptWalker.Sphinx.Interface.Sphinx where
   [factorSampleable : SampleableType Factor]
   /-- Re-blind an envelope element by a factor. -/
   blind : Factor → Envelope → Envelope
-  /-- **Wrap-resistance.** Whenever blinding by `e` is a bijection — the case for any `e` that
-  actually generates the (sub)group a well-formed header's element lives in — a freshly drawn
-  factor hits a chosen `target` with probability exactly `1/|Factor|`. -/
+  /-- **Wrap-resistance**: whenever blinding by `e` is a bijection (the case for any `e` that
+  generates the (sub)group a well-formed header's element lives in), a freshly drawn factor hits
+  a chosen `target` with probability exactly `1/|Factor|`. -/
   wrap_resistant : ∀ (e target : Envelope), Function.Bijective (blind · e) →
       Pr[= true | ($ᵗ Factor) >>= fun b => pure (decide (blind b e = target))] =
         (Fintype.card Factor : ℝ≥0∞)⁻¹ :=
     fun _ target hbij => CryptWalker.Sphinx.Interface.uniformHit_eq hbij target
-  /-- **Envelope independence** (§4.4's indistinguishability claim, for the one header component
-  a re-blindable-group-element scheme pins down exactly rather than up to some advantage): the
-  envelope depends only on `wrap`'s own seed-stream draw, never on the caller's path, filler, or
-  payload, so two calls sharing the same starting `State` produce byte-for-byte identical
-  envelopes regardless of what either call was building. Since it carries no information about
-  the session's content at all, no adversary — however powerful — can learn anything about that
-  content from the envelope alone; this is a stronger, exact form of indistinguishability, not
-  merely a negligible-advantage bound. See `wrapNIKE_envelope_indep` (in `nike_sphinx_theorems.lean`) for why this holds
-  concretely (the envelope is the client's own public key, a pure function of the drawn seed). -/
+  /-- **Envelope independence** (§4.4, exact rather than up to some advantage): the envelope
+  depends only on `wrap`'s seed-stream draw, never on path/filler/payload, so two calls sharing a
+  starting `State` produce byte-for-byte identical envelopes — no adversary can learn anything
+  about the session's content from it alone. See `wrapNIKE_envelope_indep` (in
+  `nike_sphinx_theorems.lean`) for why: the envelope is the client's own public key. -/
   envelope_indep : ∀ (hop0 hop1 : Types.PathHop) (rest0 rest1 : List Types.PathHop)
       (filler0 filler1 : ByteArray)
       (payload0 payload1 : Vector UInt8 geometry.forwardPayloadLength) (st : State)

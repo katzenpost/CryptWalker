@@ -32,10 +32,8 @@ NIKE/KEM-generic caller needs, since a scheme's own `publicKeySize`/`privateKeyS
 def toVecN (n : Nat) (a : ByteArray) : Vector UInt8 n := Vector.ofFn fun i : Fin n => a.get! i.val
 
 /-- `toVecN` undoes `ofVector`: reinterpreting an already-fixed-width vector's own bytes at that
-same width recovers it exactly. Bridges an encode/decode round trip (`decodePrivateKey
-(encodePrivateKey sk) = some sk`-shaped, e.g. `KEM.decode_encode_priv`) stated over `Vector UInt8
-n` into one stated over the raw `ByteArray` a caller like `KEMSphinx.kemSelfPublicKeyBytes`
-actually has in hand. -/
+width recovers it exactly. Bridges an encode/decode round trip stated over `Vector UInt8 n` into
+one stated over a raw `ByteArray`. -/
 @[simp] theorem toVecN_ofVector {n : Nat} (v : Vector UInt8 n) : toVecN n (ofVector v) = v := by
   apply Vector.ext
   intro i hi
@@ -44,10 +42,7 @@ actually has in hand. -/
   show v.toArray[i]! = v[i]
   simp [getElem!_pos, hi]
 
-/-- `ofVector` undoes `toVecN`, the other direction from `toVecN_ofVector`: reinterpreting a
-byte string of exactly the right width as a fixed-size vector and back is the identity. Bridges
-`unwrapKEM`'s `nextCiphertext := ofVector (toVecN kem.ciphertextSize ...)` back into a bare
-`ByteArray` equality. -/
+/-- `ofVector` undoes `toVecN`, the other direction from `toVecN_ofVector`. -/
 theorem ofVector_toVecN {n : Nat} (X : ByteArray) (h : X.size = n) : ofVector (toVecN n X) = X := by
   apply ByteArray.ext_getElem
   · show (Array.ofFn (fun i : Fin n => X.get! i.val)).size = X.size
@@ -111,12 +106,9 @@ theorem xorBytes_getElem (a b : ByteArray) (i : Nat) (hi : i < a.size) :
       simpa using h2
     rw [heq, Option.getD_none]
 
-/-- **`xorBytes` distributes over `++`**, given the two left-hand pieces match the two
-right-hand pieces in width: XOR-ing a concatenation against another of the same shape is the same
-as XOR-ing the pieces separately and reassembling. Lets a multi-hop XOR argument work one
-byte-range at a time instead of only on whole buffers — the byte-level heart of the
-cascading-padding argument (`a1`/`a2` the routing-info slot split at a hop boundary, `b1`/`b2` the
-matching split of the keystream). -/
+/-- **`xorBytes` distributes over `++`**, given matching widths on each side: XOR-ing a
+concatenation is the same as XOR-ing the pieces separately and reassembling. The byte-level heart
+of the cascading-padding argument below. -/
 theorem xorBytes_append (a1 a2 b1 b2 : ByteArray) (h : a1.size = b1.size)
     (h' : a2.size ≤ b2.size) :
     xorBytes (a1 ++ a2) (b1 ++ b2) = xorBytes a1 b1 ++ xorBytes a2 b2 := by
@@ -182,16 +174,11 @@ theorem xorBytes_zero_left (n : Nat) (X : ByteArray) (h : n = X.size) :
     rw [hzero]
     simp
 
-/-- **The cascading-padding argument, at the byte level.** The core mathematical crux of Sphinx's
-completeness (Danezis–Goldberg §3.2): given the sender's `Rk := xorBytes (riFragment ++ Rk1)
-riKeyStream` (where `riKeyStream` is the exact-length prefix `ks.extract 0 ksLen` of the full
-keystream `ks` requested at this hop), the *receiver*'s single XOR against the *whole* `ks`
-recovers `riFragment ++ Rk1` in its first `ksLen` bytes (`xorBytes_xorBytes` cancels the
-sender's own construction exactly) and reproduces `riPadding`'s own recursive definition
-term-for-term in its trailing bytes (`prevPad` cascaded against `ks`'s own tail, zeros left
-unchanged) — the two halves of `loop3`/`loop2`'s constructions the receiver's one XOR undoes at
-once. Fully generic in `ks`/`riFragment`/`Rk1`/`prevPad` — no `KEM`/`NIKE` dependence, so both
-`KEMSphinx.lean` and `NIKESphinx.lean` share this one copy. -/
+/-- **The cascading-padding argument, at the byte level** (§3.2): given the sender's
+`Rk := xorBytes (riFragment ++ Rk1) riKeyStream`, the receiver's single XOR against the whole
+keystream `ks` recovers `riFragment ++ Rk1` in its first `ksLen` bytes and reproduces
+`riPadding`'s recursive definition in its trailing bytes. Generic in `ks`/`riFragment`/`Rk1`/
+`prevPad`, so `kem_sphinx_theorems.lean`/`nike_sphinx_theorems.lean` share this one copy. -/
 theorem cascading_xor_step (ks riFragment Rk1 prevPad : ByteArray) (ksLen perHop : Nat)
     (hks : ks.size = ksLen + prevPad.size + perHop) (hRk1 : riFragment.size + Rk1.size = ksLen) :
     (xorBytes (xorBytes (riFragment ++ Rk1) (ks.extract 0 ksLen) ++ prevPad
@@ -415,13 +402,9 @@ theorem List.forIn_const_of_forall_mem {α β ε γ : Type} (l : List β) (hl : 
       exact absurd hstep (fun hh => hdone init a' b List.mem_cons_self hh)
 
 /-- **The full trace of a `forIn` loop**, when it never exits early: not just a size/count/overwrite
-invariant (the three lemmas above), but the *entire* sequence of intermediate accumulator values,
-recoverable one step at a time. `createKEMHeader`'s routing-info loop composes `kemRiFragment`, an
-XOR, and a MAC in a way none of `forIn_congr_of_forall_mem`/`forIn_add_of_forall_mem`/
-`forIn_const_of_forall_mem`'s single-invariant shapes can express — the multi-hop completeness
-proof needs the actual per-hop values, not a derived numeric fact about them. Fully generic in the
-step function `f`, so it costs nothing to state once here rather than duplicating the induction at
-the call site. -/
+invariant (the three lemmas above), but the entire sequence of intermediate accumulator values,
+recoverable one step at a time — what the multi-hop completeness proof needs, since it composes
+several such facts at once rather than one derived numeric summary. -/
 theorem List.forIn_exists_trace {α β ε : Type} (l : List β) (f : β → α → Except ε (ForInStep α))
     (hnd : ∀ (b : β) (a a' : α), b ∈ l → f b a ≠ Except.ok (ForInStep.done a')) :
     ∀ (init final : α), forIn l init f = Except.ok final →
@@ -456,12 +439,9 @@ theorem List.forIn_exists_trace {α β ε : Type} (l : List β) (f : β → α �
           show f (tl[j']'hj') (s j') = Except.ok (ForInStep.yield (s (j' + 1)))
           exact hstep j' hj'
 
-/-- As `List.forIn_exists_trace`, for a plain (non-monadic) `List.foldl` instead of a `forIn` loop
-that can throw or exit early: the trace of intermediate accumulator values through `l.foldl g init`,
-recoverable one step at a time. What a loop body with no `throw`/`←` reduces to once
-`List.forIn_pure_yield_eq_foldl` fires (`createKEMHeader`/`createHeader`'s per-hop keystream/padding
-loop, e.g. — it never fails, so its own `forIn` collapses to a bare `foldl` under that simp lemma,
-losing the `Except`-bind structure `forIn_exists_trace` was built for). -/
+/-- As `List.forIn_exists_trace`, for a plain (non-monadic) `List.foldl`: the trace of
+intermediate accumulator values through `l.foldl g init`. What a never-failing loop body reduces
+to once `List.forIn_pure_yield_eq_foldl` collapses its `forIn` to a bare `foldl`. -/
 theorem List.foldl_exists_trace {α β : Type} (l : List β) (g : α → β → α) (init : α) :
     ∃ s : Nat → α, s 0 = init ∧ s l.length = l.foldl g init ∧
       ∀ j (hj : j < l.length), s (j + 1) = g (s j) (l[j]'hj) := by
@@ -489,12 +469,9 @@ theorem Array.getElem!_push_stable {α : Type} [Inhabited α] (a : Array α) (x 
     Array.getElem_push_lt h]
 
 /-- **Array-index stability across a chain of pushes**: for a `Nat`-indexed sequence of arrays
-each obtained from the last by pushing one element (`t (i+1)`'s size tracking `i+1`, as
-`List.foldl_exists_trace`/`List.forIn_exists_trace`'s own traces do when the step is `Array.push`),
-index `i`'s value is already fixed the moment it's first written — every later snapshot agrees
-with `t (i+1)`, the first one big enough to contain it. Exactly what's needed to read
-`riKeyStream[i]!`/`riPadding[i]!` off the loop's *final* array from a one-step fact proved about
-the trace at step `i+1`. -/
+each obtained from the last by pushing one element, index `i`'s value is fixed the moment it's
+first written — every later snapshot agrees with `t (i+1)`. Lets a final array's entry be read
+off a one-step fact proved at the point it was pushed. -/
 theorem Array.getElem!_stable_of_pushes {α : Type} [Inhabited α] (t : Nat → Array α) (n : Nat)
     (hpush : ∀ j, j < n → ∃ x, t (j + 1) = (t j).push x) (hsize : ∀ j, j ≤ n → (t j).size = j) :
     ∀ i m, i < m → m ≤ n → (t m)[i]! = (t (i + 1))[i]! := by
@@ -599,10 +576,9 @@ theorem commandsToBytes_size_le {budget : Nat} {cmds : List RoutingCommand} {b :
       omega
 
 /-- Appending one more command to an already-successful `commandsToBytes` call, under a large
-enough budget, still succeeds — with the obvious serialized content. What lets `createKEMHeader`'s
-embedded `NextNodeHop` command (appended after a non-terminal hop's own `commandsToBytes` call
-already succeeded) be re-characterized as a *single* `commandsToBytes` call over the extended
-command list, matching what `parseAll_commandsToBytes` expects. -/
+enough budget, still succeeds, with the obvious serialized content. Lets an embedded
+`NextNodeHop` appended after the fact be re-characterized as one `commandsToBytes` call over the
+extended list, matching `parseAll_commandsToBytes`. -/
 theorem commandsToBytes_append_singleton {budget budget' : Nat} {cmds : List RoutingCommand}
     {b : ByteArray} (hcb : commandsToBytes budget' cmds = .ok b) (c : RoutingCommand)
     (hbudget : b.size + c.toBytes.size ≤ budget) :
@@ -623,13 +599,9 @@ theorem commandsToBytes_append_singleton {budget budget' : Nat} {cmds : List Rou
     rw [ByteArray.size_append]; omega
   simp only [hle, if_false, Bool.false_eq_true, pure, Except.pure]
 
-/-- **`parseAll` undoes `commandsToBytes`/`zeroPadTo`** — the exact shape `KEMSphinx`/
-`NIKESphinx`'s completeness proofs need: real commands serialized under a budget, then zero-padded
-out to `n` bytes (or left alone, if they already reached or exceeded `n`), parse back to exactly
-the same command list. Reduces to `Commands.parseAll_append_zeros`, which needs only that no
-command in `cmds` is itself `.null` (so no real command's own tag byte could be mistaken for the
-`0x00` terminator) — the terminator itself is never load-bearing for termination, since an
-exactly-exhausted buffer stops parsing just as cleanly. -/
+/-- **`parseAll` undoes `commandsToBytes`/`zeroPadTo`**: real commands serialized under a budget
+and zero-padded to `n` bytes parse back to exactly the same list. Reduces to
+`Commands.parseAll_append_zeros`, needing only that no command in `cmds` is itself `.null`. -/
 theorem parseAll_commandsToBytes (n budget : Nat) (cmds : List RoutingCommand)
     (hn : ∀ c ∈ cmds, c ≠ .null) (b : ByteArray)
     (hcb : commandsToBytes budget cmds = .ok b) (hble : b.size ≤ n) :

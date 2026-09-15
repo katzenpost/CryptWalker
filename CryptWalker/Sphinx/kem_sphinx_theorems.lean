@@ -44,17 +44,9 @@ open CryptWalker.Util.Bytes (ofVector extract_append_le extract_append_of_le ext
 
 Port of `kemsphinx.go`, genuinely generic over any `kem : CryptWalker.KEM.KEM.KEM` — not
 hardcoded to X25519, not specified in terms of a NIKE, and not bundled with a proof of any
-particular key size (a `KEM` already carries its own `ciphertextSize`/`publicKeySize`/
-`privateKeySize`, read directly, the same way `NIKESphinx` reads a `NIKE`'s).
-
-`KEM.KEM`'s abstract interface used to have no generic "seed the internal randomness from this
-value" or "derive a public key from a private key" operation — both are things this file
-genuinely needs (a packet's bytes must be an exact function of the caller's own seed stream, and
-a client must be able to state its own public key without generating a fresh pair), and
-previously the only way to get them was to reach past the interface into the underlying
-`(Adapter.PRF, NIKE)` pair every constructible `KEM` happens to be built from. `KEM.KEM` now
-carries `stateFromSeed`/`derivePublicKey` directly (see that file), so this one no longer needs
-to know a `KEM` is secretly a NIKE adapter at all.
+particular key size (a `KEM` carries its own `ciphertextSize`/`publicKeySize`/`privateKeySize`,
+the same way `NIKESphinx` reads a `NIKE`'s). Uses `KEM.KEM`'s `stateFromSeed`/`derivePublicKey`
+fields directly, so this file never needs to know a `KEM` is secretly a NIKE adapter.
 
 Differences from `NIKESphinx`, per `kemsphinx.go`/`docs/specs/kemsphinx.md`:
 
@@ -97,13 +89,10 @@ private def kemSelfPublicKeyBytes (kem : KEM) (skBytes : ByteArray) : ByteArray 
   | none => skBytes
   | some sk => ofVector (kem.encodePublicKey (kem.derivePublicKey sk))
 
-/-- The per-hop routing-info fragment for `createKEMHeader`'s third loop, factored out on its
-own: a non-terminal hop's fragment gets padded to a full `perHopRoutingInfoLength` and then has
-its last `kem.ciphertextSize` bytes overwritten with the next hop's embedded ciphertext, while a
-terminal hop's fragment is just padded. Kept as its own named function (rather than inlined
-`mut`-reassignment inside the loop) so a caller's own `unfold`/`dsimp` treats its *result* as an
-opaque value with only the size fact `kemRiFragment_size` needs, instead of re-expanding this
-two-`if` computation (and everything downstream of it) at every use site — the same term-blowup
+/-- The per-hop routing-info fragment for `createKEMHeader`'s third loop, factored out: a
+non-terminal hop's fragment is padded to a full `perHopRoutingInfoLength` with its last
+`kem.ciphertextSize` bytes overwritten by the next hop's embedded ciphertext; a terminal hop's is
+just padded. Named separately so callers can treat it opaquely (avoiding term blowup), the same
 concern `Crypto.AEZ.lean`'s `aezTinyLR` extraction addresses. -/
 private def kemRiFragment (kem : KEM) (geom : Geometry) (path : Array PathHop)
     (kemElements : Array ByteArray) (macBytes : ByteArray) (nrHops i : Nat) :
@@ -594,14 +583,10 @@ private theorem createKEMHeader_loop1_content (kem : KEM) (kdfS : KDF) (path : A
     · rw [h2, ← congrArg Prod.snd hstepi, getElem!_push_eq' _ _ _ hpi2.symm]
 
 /-- **`createKEMHeader`'s second loop, at the content level — kept in its native `forIn`/`Except`
-shape.** As `loop2_content`, but proved directly against the loop's own `forIn` (via
-`List.forIn_exists_trace`) instead of the `List.foldl` form `List.forIn_pure_yield_eq_foldl` would
-collapse it to. The two are propositionally the same loop, but the *assembled* completeness proof
-never applies that collapsing simp lemma to begin with (only `createKEMHeader_hdr_size` does) — so
-the hypothesis it actually gets from unfolding `createKEMHeader` names loop2's result as a
-freestanding `Array ByteArray × Array ByteArray` (`loop2Final`, referenced directly by loop3's own
-step), never an inlined `List.foldl` term to match against `loop2Step`. This is the version that
-composes with that hypothesis shape. -/
+shape.** As `loop2_content`, but proved directly against the loop's own `forIn` rather than the
+`List.foldl` form: the assembled completeness proof's hypothesis names loop2's result as a
+freestanding `loop2Final`, referenced directly by loop3's step, never an inlined `List.foldl`
+term — this is the version that composes with that shape. -/
 private theorem createKEMHeader_loop2_content (streamS : StreamCipher) (geom : Geometry)
     (keys : Array HopKeys) (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
     (hfinal : forIn (List.range' 0 nrHops) (#[], #[])
@@ -884,11 +869,8 @@ private theorem createKEMHeader_loop3_never_done (kem : KEM) (macS : MAC) (geom 
 
 /-- **The full trace of `createKEMHeader`'s third loop.** Not just the size invariant
 (`createKEMHeader_loop3_step`) but the actual sequence of `(routingInfo, macBytes)` values, one
-per iteration — exactly the `R(i)`/`M(i)` pair from the hand derivation this file's module doc
-refers to (`s j` is `(R(nrHops - j), M(nrHops - j))`; equivalently, writing `i := nrHops - 1 - j`
-for the hop processed at step `j`, `s j = (R(i+1), M(i+1))` and `s (j+1) = (R(i), M(i))`). Built
-from the fully generic `List.forIn_exists_trace` plus the already-proved
-`createKEMHeader_loop3_never_done`; no new induction needed here. -/
+per iteration (`s j = (R(nrHops - j), M(nrHops - j))`). Built from `List.forIn_exists_trace` plus
+`createKEMHeader_loop3_never_done`; no new induction needed. -/
 private theorem createKEMHeader_loop3_trace (kem : KEM) (macS : MAC) (geom : Geometry)
     (path : Array PathHop)
     (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
@@ -982,11 +964,8 @@ set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 4000 in
 /-- **`createKEMHeader`, fully unfolded to content.** Packages `createKEMHeader_loop1_content`/
 `createKEMHeader_loop2_content`/`createKEMHeader_loop3_trace` (plus the header/`sprpKeys` assembly
-itself) behind one hypothesis, in the exact shape a successful `createKEMHeader` call actually
-unfolds to — no `List.forIn_pure_yield_eq_foldl`/`ite_pure_yield` collapsing, so `loop3`'s own
-per-step fact references `riKeyStream`/`riPadding` as plain array parameters, matching
-`createKEMHeader_loop3_trace` directly. The single entry point the multi-hop completeness proof
-builds on. -/
+itself) behind one hypothesis, in the exact shape a successful `createKEMHeader` call unfolds to.
+The single entry point the multi-hop completeness proof builds on. -/
 private theorem createKEMHeader_unfold (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
     (geom : Geometry) (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray)
     (path : Array PathHop) (hdr : ByteArray) (sprpKeys : Array SPRPKey)
@@ -1132,13 +1111,10 @@ private theorem createKEMHeader_unfold (kem : KEM) (macS : MAC) (kdfS : KDF) (st
           simp only at hkeys
           rw [← hkeys]
 
-/-- As `NIKESphinx.createHeader_hdr_size`. Generic in `macS`/`kdfS`/`streamS`: the one extra
-hypothesis this needs beyond `geom.ValidForKEM kem` is `hmactag`, tying `macS`'s output width to
-`Geometry`'s own fixed `macLength` constant — the one place a MAC's width is actually baked into
-the wire format (the header's trailing MAC field, at a fixed offset). `kdfS`/`streamS` need no
-such hypothesis: `deriveHopKeys`/`keystream_size` compose with an arbitrary `KDF`/`StreamCipher`
-regardless of their declared `keySize`/`ivSize`, since those never appear in the *type* of
-`expand`/`keystream` (both take plain `ByteArray`). -/
+/-- As `createHeader_hdr_size`. Generic in `macS`/`kdfS`/`streamS`: the one extra hypothesis
+needed beyond `geom.ValidForKEM kem` is `hmactag`, tying `macS`'s output width to `Geometry`'s
+fixed `macLength` constant. `kdfS`/`streamS` need none, since their `expand`/`keystream` take
+plain `ByteArray`s regardless of declared `keySize`/`ivSize`. -/
 theorem createKEMHeader_hdr_size (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
     (geom : Geometry)
     (ephemeralSeeds : Array (Vector UInt8 32)) (filler : ByteArray) (path : Array PathHop)
@@ -1401,14 +1377,11 @@ theorem newKEMPacket_size (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (k
     omega
 
 /-- **The packet arriving at hop `k`** (`0 ≤ k < nrHops`), assembled from `createKEMHeader`'s
-`kemElements`/`riPadding`/loop3 trace `s` and `newKEMPacket`'s payload trace `t` — writing
-`R(i) := (s (nrHops - i)).1`, `M(i) := (s (nrHops - i)).2`, `P(i) := riPadding[i]!` and
-`payloadAt(i) := t (nrHops - i)` (matching this file's hand-derivation module doc), `hopPacket
-kemElements riPadding s t nrHops k = v0AD ++ kemElements[k]! ++ (R(k) ++ P(k-1)) ++ M(k) ++
-payloadAt(k)`, with `P(-1) := empty`. At `k = 0` this is exactly `wrapKEM`'s own output
-(`createKEMHeader_unfold`/`newKEMPacket_unfold`'s `hdr ++ t sprpKeys.size`, since `R(0) = (s
-nrHops).1`/`M(0) = (s nrHops).2` need no padding term and `sprpKeys.size = nrHops`); at `k =
-nrHops-1` it's the packet the terminal hop receives. -/
+`kemElements`/`riPadding`/loop3 trace `s` and `newKEMPacket`'s payload trace `t`: writing
+`R(i) := (s (nrHops - i)).1`, `M(i) := (s (nrHops - i)).2`, `P(i) := riPadding[i]!`,
+`payloadAt(i) := t (nrHops - i)`, `hopPacket kemElements riPadding s t nrHops k = v0AD ++
+kemElements[k]! ++ (R(k) ++ P(k-1)) ++ M(k) ++ payloadAt(k)`, with `P(-1) := empty`. At `k = 0`
+this is exactly `wrapKEM`'s own output; at `k = nrHops-1` it's what the terminal hop receives. -/
 private def hopPacket (kemElements riPadding : Array ByteArray) (s : Nat → ByteArray × ByteArray)
     (t : Nat → ByteArray) (nrHops k : Nat) : ByteArray :=
   v0AD ++ kemElements[k]! ++ ((s (nrHops - k)).1 ++ (if k > 0 then riPadding[k - 1]! else ByteArray.empty))
@@ -1769,14 +1742,11 @@ def unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
 
 set_option maxHeartbeats 1000000 in
 /-- **The single-hop agreement theorem, non-terminal case.** `unwrapKEM` applied to the packet
-`hopPacket ... k` arriving at hop `k` (`k+1 < nrHops`, so hop `k` forwards) reproduces
-`hopPacket ... (k+1)` exactly, given the honest KEM pairing (`privKey`'s own public key is
-`path[k]!`'s) and that `path[k]!`'s own commands never already contain a `null` or a
-`nextNodeHop` (the well-formedness every real path satisfies: intermediate hops carry no
-application-level commands of their own). Assembles `cascading_xor_step` (the routing-info/padding
-XOR), `kemEncap_kemDecap_of_honest` (the KEM round trip), `kemRiFragment_content_nonterminal` (what
-`cmdBuf`/`nextCiphertext` parse back to), and `newKEMPacket_payload_content` (the SPRP payload
-layering) against `unwrapKEM`'s own do-block, one step at a time. -/
+`hopPacket ... k` arriving at hop `k` (`k+1 < nrHops`) reproduces `hopPacket ... (k+1)` exactly,
+given the honest KEM pairing (`privKey`'s public key is `path[k]!`'s) and `path[k]!` well-formed.
+Assembles `cascading_xor_step`, `kemEncap_kemDecap_of_honest`,
+`kemRiFragment_content_nonterminal`, and `newKEMPacket_payload_content` against `unwrapKEM`'s
+do-block, one step at a time. -/
 theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
@@ -2135,13 +2105,10 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
 set_option maxHeartbeats 4000000 in
 /-- **The single-hop agreement theorem, terminal case.** `unwrapKEM` applied to the packet
 `hopPacket ... k` arriving at the terminal hop `k` (`k + 1 = nrHops`) recovers the original
-`payload` exactly, given the honest KEM pairing and that `path[k]!`'s own commands never
-already contain a `null`, `nextNodeHop`, or `surbReply` (the well-formedness a real recipient
-hop satisfies — no forwarding, no reply commands of its own), plus that the payload-encryption
-trace's base case `t 0` is exactly `newKEMPacket`'s own starting buffer: a zero tag of
-`geom.payloadTagLength` bytes followed by `payload`. Assembles the same pieces as
-`unwrapKEM_hopPacket_nonterminal` for the routing-info/MAC portion, then `kemRiFragment_content_terminal`
-and `newKEMPacket_payload_content` for the payload, closing with the zero-tag check. -/
+`payload` exactly, given the honest KEM pairing, `path[k]!` well-formed, and that `t 0` is
+`newKEMPacket`'s starting buffer (a zero tag followed by `payload`). Assembles the same pieces as
+`unwrapKEM_hopPacket_nonterminal` for routing-info/MAC, then `kemRiFragment_content_terminal` and
+`newKEMPacket_payload_content` for the payload, closing with the zero-tag check. -/
 theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
@@ -2624,18 +2591,12 @@ private theorem wrapKEM_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MA
       injection h
 
 /-- **The real completeness theorem**: `KEMSphinxScheme`'s witness for
-`Sphinx.Interface.unwrap_complete`, proved outright. Generic over the wide-block cipher/MAC/KDF/
-stream cipher, not just the `KEM` — never AEZ/HMAC-SHA256/HKDF/AES-CTR specifics, only `cipher`/
-`macS`/`kdfS`/`streamS`'s own fields, as `wrapKEM`/`unwrapKEM` themselves now are. Two hypotheses
-beyond what `wrap`/`unwrap`'s own use requires: `geom.ValidForKEM kem` (the geometry's numeric
-fields actually agree with `kem.ciphertextSize`, the way every concrete `Geometry.ofKEM` output
-does) and `16 ≤ geom.payloadTagLength + geom.forwardPayloadLength` (without it, `cipher.roundTrip`
-simply doesn't apply — a real precondition of the underlying wide-block cipher, not a proof
-artifact). `kemSphinxSchemeOf` takes both as explicit parameters and passes them straight through
-here, so nothing forces this fact back into an unproven assumption the way an earlier version of
-this file did. Assembles `wrapKEM_unfold` (what a successful `wrapKEM` run drew and computed),
-`newKEMPacket_unfold`/`createKEMHeader_unfold` (what that computation's own trace looked like),
-and `unwrapChain_hopPacket` (the multi-hop induction) into one call. -/
+`Sphinx.Interface.unwrap_complete`, proved outright, generic over the wide-block cipher/MAC/KDF/
+stream cipher and the `KEM`. Two hypotheses beyond `wrap`/`unwrap`'s own use: `geom.ValidForKEM
+kem` and `16 ≤ geom.payloadTagLength + geom.forwardPayloadLength` (a real precondition of
+`cipher.roundTrip`, not a proof artifact) — `kemSphinxSchemeOf` takes both explicitly and passes
+them straight through. Assembles `wrapKEM_unfold`, `newKEMPacket_unfold`/`createKEMHeader_unfold`,
+and `unwrapChain_hopPacket` into one call. -/
 theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
     (hmactag : macS.tagSize = macLength) (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
@@ -2795,12 +2756,9 @@ theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) 
   exact hind
 
 /-- Build a `KEMSphinxScheme` from any `KEM` at all — nothing unproven leaned on: `unwrap_complete`
-is `wrapKEM_unwrapKEM_complete_valid`, the real theorem, given the two extra facts it needs beyond
-what `wrap`/`unwrap` themselves require. Still total in the sense that matters (no `Except`) —
-`hvalid`/`hmactag`/`h16` are ordinary hypotheses a caller supplies, decidable and free to check at
-the one place (`kemSphinxScheme` below) that doesn't already have them in hand. Fully generic in
-the wide-block cipher/MAC/KDF/stream cipher too: nothing here picks a concrete instance of any of
-the four, matching `wrapKEM`/`unwrapKEM`'s own genericity. -/
+is `wrapKEM_unwrapKEM_complete_valid`, given the two extra facts it needs beyond `wrap`/`unwrap`
+themselves. `hvalid`/`hmactag`/`h16` are ordinary hypotheses a caller supplies, checked once at
+`kemSphinxScheme` below. Fully generic in the wide-block cipher/MAC/KDF/stream cipher too. -/
 def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
     (hmactag : macS.tagSize = macLength)
@@ -2829,20 +2787,12 @@ def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS 
 
 /-- Build a `KEMSphinxScheme` for whatever KEM `geom.scheme` names, resolved through
 `CryptWalker.KEM.byName` — the same registry `Geometry.ofKEM` resolves its ciphertext size
-against. Genuinely agnostic to *which* registered KEM this is: no NIKE, no PRF, nothing but the
-`KEM` value itself and a `Geometry`.
+against. `hvalid`/`hmactag`/`h16` are decidable `Nat` facts checked here rather than assumed; a
+mismatched `geom` is rejected explicitly, as `nikeSphinxScheme` does for `ValidForNIKE`.
 
-`hvalid`/`hmactag`/`h16` (`kemSphinxSchemeOf`'s three completeness hypotheses) are all decidable
-`Nat`-equality/inequality facts, so they're checked here rather than assumed — any `geom` actually
-obtained from `Geometry.ofKEM name ...` for this same `name` satisfies all three (`ofKEM_validForKEM`/
-`ofKEM_payloadTagLength`, and `hmacSha256MAC.tagSize = macLength` unconditionally), and a mismatched
-`geom` is rejected explicitly, the same way `nikeSphinxScheme` already rejects one that fails
-`ValidForNIKE`.
-
-The one place that picks a concrete cryptographic stack: AEZ/HMAC-SHA256/HKDF-SHA256-Expand/
-AES-256-CTR, matching this codebase's `sphinx_kem_vectors.json` — `kemSphinxSchemeOf` underneath
-is fully generic over any `WideBlockCipher`/`MAC`/`KDF`/`StreamCipher`, this is just the one default
-choice a caller who only knows a KEM's name actually needs. -/
+The one place that picks a concrete cryptographic stack (AEZ/HMAC-SHA256/HKDF-SHA256-Expand/
+AES-256-CTR, matching `sphinx_kem_vectors.json`) — `kemSphinxSchemeOf` underneath is fully
+generic, this is just the default a caller who only knows a KEM's name needs. -/
 def kemSphinxScheme (geom : Geometry) : Except String KEMSphinxScheme :=
   match geom.scheme with
   | .inl name => throw s!"sphinx: geometry scheme {name} is a NIKE, not a KEM"
@@ -2863,36 +2813,25 @@ def kemSphinxScheme (geom : Geometry) : Except String KEMSphinxScheme :=
 
 /-! ## Wrap-resistance fails
 
-The root cause is structural, not cryptographic: NIKE-Sphinx has a public-key operation
-available — blinding, `factor • pk` — that KEM-Sphinx has no analogue of for a generic KEM, so
-this design instead carries a fresh KEM ciphertext per hop, protected only by the header's own
-stream-cipher-plus-MAC (`headerEncryption`/`headerMAC`, an AEAD-shaped construction). That
-construction isn't broken, and nothing here says it is: AEAD security is a guarantee against
-adversaries who *don't* hold the key, and was never meant to be one against adversaries who do.
-Wrap-resistance's own threat model hands the adversary the hop's private key ("even one whose
-private key x the adversary can select"), and knowing that key means knowing the shared secret,
-which means knowing the AEAD key — at which point the AEAD isn't defeated, it simply was never
-protecting against this party to begin with. Any key-holder can always produce a valid
-ciphertext+tag for whatever plaintext it wants; that's what "keyed encryption" means.
+Structural, not cryptographic: NIKE-Sphinx has a blinding operation (`factor • pk`) KEM-Sphinx has
+no analogue of, so this design instead carries a fresh KEM ciphertext per hop, protected only by
+the header's stream-cipher-plus-MAC (an AEAD-shaped construction). That construction isn't
+broken — AEAD security guards against adversaries who don't hold the key, and wrap-resistance's
+threat model hands the adversary exactly that key, so it was never the right tool for this job.
+Any key-holder can always produce a valid ciphertext+tag for whatever plaintext it wants.
 
-`NIKESphinx.nikeSphinxScheme`'s `blind` is different in kind: it routes the forwarded envelope
-through a hash of the shared secret *composed with* a group operation, which the current hop's
-own key-holder cannot invert to land on a chosen output, despite holding every secret involved
-(`Sphinx.WrapResistance.blind_wrapResistance` bounds it to `1/N`). KEM-Sphinx has nothing playing
-that role — `nextCiphertext`/`newRoutingInfo`/`nextMAC` above are just slices of `b`, the AEAD's
-own decryption of bytes the packet's constructor chose freely, so the AEAD is the *only* thing
-between the adversary and the target, and it was never the right tool for that job. `kemDecap`
-above is total bar a handful of small-order ciphertexts, so anyone holding `privKey` can compute
-the header keystream for *any* `kemCiphertext` they pick, and once it's known,
-`xorBytes_achieves_any_target` says every target routing-info block is reachable, with
+`NIKESphinx`'s `blind` differs in kind: it routes the envelope through a hash composed with a
+group operation the key-holder cannot invert (bounded to `1/N` by `blind_wrapResistance`).
+KEM-Sphinx has nothing playing that role — `kemDecap` is total bar small-order ciphertexts, so
+anyone holding `privKey` computes the header keystream for any ciphertext, and
+`xorBytes_achieves_any_target` says every target routing-info block is then reachable with
 certainty. -/
 
 /-- **KEM-Sphinx does not achieve wrap-resistance** — not because its AEAD-shaped header
-protection is weak, but because it's the only thing standing in for NIKE-Sphinx's blinding step,
-and AEAD security was never a guarantee against a party who holds the key, which wrap-resistance's
-own threat model grants the adversary. For any routing-info-block `target` a key-holder wants the
-mix to forward, there are raw (pre-decryption) bytes achieving it exactly — the opposite of a
-`1/N`-style bound. -/
+protection is weak, but because it's standing in for NIKE-Sphinx's blinding step, and AEAD
+security was never a guarantee against a key-holder, which wrap-resistance's threat model grants
+the adversary. For any routing-info-block `target`, raw pre-decryption bytes achieve it exactly —
+the opposite of a `1/N`-style bound. -/
 theorem unwrapKEM_routingInfoBlock_not_wrap_resistant (streamS : StreamCipher) (key iv : ByteArray)
     (target : ByteArray) :
     ∃ raw : ByteArray, xorBytes raw (streamS.keystream key iv target.size) = target :=

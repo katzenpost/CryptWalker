@@ -53,10 +53,8 @@ structure KEMSphinxScheme extends CryptWalker.Sphinx.Interface.Sphinx where
   kem : KEM
   /-- **Not wrap-resistant** — the inverse of `NIKESphinxScheme.wrap_resistant`: a known-key
   adversary hits any target routing-info block with certainty, not merely `1/N`. See
-  `unwrapKEM_routingInfoBlock_not_wrap_resistant` (in `kem_sphinx_theorems.lean`) for why. Stated
-  against `stream` (this very instance's own field, from the base `Sphinx`), not a hardcoded
-  stream cipher — the fact holds for *any* `StreamCipher`, since `xorBytes_achieves_any_target`
-  never needed `keystream_size`. -/
+  `unwrapKEM_routingInfoBlock_not_wrap_resistant` (in `kem_sphinx_theorems.lean`) for why. Holds
+  for any `stream : StreamCipher`, not just a hardcoded one. -/
   not_wrap_resistant : ∀ (key iv target : ByteArray),
       ∃ raw : ByteArray, xorBytes raw (stream.keystream key iv target.size) = target :=
     fun key iv target => xorBytes_achieves_any_target (stream.keystream key iv target.size) target

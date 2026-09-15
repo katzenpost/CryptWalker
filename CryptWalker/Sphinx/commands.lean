@@ -98,13 +98,10 @@ def fromBytesOne (b : ByteArray) : Except String (Option RoutingCommand × ByteA
         pure (some (.nodeDelay d), rest0.extract 4 rest0.size)
     | _ => throw "sphinx: invalid per-hop command"
 
-/-- `parseAll`, bounded by an explicit fuel parameter rather than `partial`: a `partial def`
-compiles to an `opaque` constant with *no* equational lemma at all (confirmed via `#print
-parseAll`/`rw [parseAll]` on the earlier version — the kernel has no way to unfold it, so nothing
-about its behavior beyond its bare type signature is ever provable, no matter the tactic). Every
-`fromBytesOne` call that returns a real command consumes at least its own one-byte tag, so the
-buffer strictly shrinks at every step that doesn't immediately terminate — `parseAll` below uses
-`b.size` as fuel, always enough. -/
+/-- `parseAll`, bounded by an explicit fuel parameter rather than `partial` — a `partial def`
+compiles to an opaque constant with no equational lemma, so nothing about its behavior would be
+provable. Every real-command step consumes at least one byte, so `parseAll` below can always use
+`b.size` as fuel. -/
 def parseAllFuel : Nat → ByteArray → Except String (List RoutingCommand)
   | 0, _ => pure []
   | fuel + 1, b => do
@@ -374,11 +371,8 @@ private theorem fromBytesOne_toBytes_append_surbReply (id : Vector UInt8 16) (re
   unfold fromBytesOne
   simp only [h0, h1, Bool.false_eq_true, if_false, htag, hle, hidV, hrestTail, pure, Except.pure]
 
-/-- `u32ofBE` undoes `u32be`: reassembling the four big-endian bytes `u32be` split a `UInt32`
-into recovers it exactly. Bit-level (not `bv_decide`/`native_decide` — plain `decide` only on
-closed, argument-free numeral facts, everything about the free variable `d` going through real
-`BitVec` lemmas), matching this project's standing discipline against native-trust escape hatches
-like `bv_decide`/`native_decide`. -/
+/-- `u32ofBE` undoes `u32be`: reassembling the four big-endian bytes `u32be` split a `UInt32` into
+recovers it exactly. Via real `BitVec` lemmas, not `bv_decide`/`native_decide`. -/
 private theorem u32ofBE_u32be (d : UInt32) :
     u32ofBE (u32be d)[0] (u32be d)[1] (u32be d)[2] (u32be d)[3] = d := by
   have h0 : (u32be d)[0] = (d >>> 24).toUInt8 := by unfold u32be; simp

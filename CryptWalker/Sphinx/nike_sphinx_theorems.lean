@@ -114,18 +114,12 @@ private def nikeDH (nike : NIKE) (sk : nike.PrivateKey) (pkBytes : ByteArray) :
     if h : nike.Safe pk then pure (ofVector (nike.encodeSharedSecret (nike.groupAction sk pk h)))
     else throw "sphinx: unsafe public key"
 
-/-- Re-blind an envelope by a factor, at the byte level — `nikeDH` with the factor playing the
-role of private key and the envelope the role of public key (`hpqc/nike/x25519`'s `Blind` *is*
-`Exp`, just with the arguments named differently). Total, falling back to `pk` unchanged if either
-byte string fails to decode or the envelope turns out unsafe: every call site in this file already
-established the envelope's safety via a preceding `nikeDH` call before ever reaching a `blind`
-call, so this fallback is provably unreachable in practice, not a silently-accepted error case.
-
-Resized to `pk.size` (`size_nikeBlind` below) regardless of `nike.sharedSecretSize`: this is what
-lets `createHeader`'s blinding chain preserve the group-element width without needing a proof that
-a NIKE's public-key and shared-secret sizes agree — the reinterpretation still only makes *sense*
-for a Diffie-Hellman-style NIKE where they do, but a mismatched NIKE now fails safely (wrong bytes)
-rather than needing to be excluded up front. -/
+/-- Re-blind an envelope by a factor, at the byte level — `nikeDH` with the factor as private key
+and the envelope as public key. Total, falling back to `pk` unchanged on decode/safety failure
+(provably unreachable in practice: every call site already established safety via a preceding
+`nikeDH`). Resized to `pk.size` regardless of `nike.sharedSecretSize` (`size_nikeBlind` below),
+so `createHeader`'s blinding chain preserves the group-element width with no size-agreement
+proof needed. -/
 private def nikeBlind (nike : NIKE) (pk factor : ByteArray) : ByteArray :=
   let result := match nike.decodePrivateKey (toVecN nike.privateKeySize factor) with
     | none => pk
@@ -153,14 +147,10 @@ theorem nikeDH_bridge (nike : NIKE) (sk : nike.PrivateKey) (pk : nike.PublicKey)
   rfl
 
 /-- **`nikeBlind`, bridged to the typed re-blinding action**: given an honestly-encoded, `Safe`
-envelope and *any* factor bytes that decode to `sk` (not necessarily `sk`'s own canonical
-encoding — `createHeader`'s actual blinding factors are raw `blindingFactorPrivKey` output, which
-`decodePrivateKey` accepts without ever being re-encoded via `encodePrivateKey`; there's no
-`encode_decode_priv` law the way `encode_decode_pub` exists for public keys, so this is genuinely
-weaker than requiring the canonical encoding, not just a convenience), `nikeBlind` computes
-exactly `reinterpret (groupAction sk pk h)`, re-encoded — despite never calling `reinterpret`
-itself (see `nikeBlind`'s own doc comment): `NIKE.encodePublicKey_reinterpret` is exactly what
-closes that gap, once `nikeDH_bridge` identifies the DH output. -/
+envelope and any factor bytes that decode to `sk` (not necessarily `sk`'s canonical encoding —
+`createHeader`'s actual blinding factors are raw `blindingFactorPrivKey` output, never
+re-encoded), `nikeBlind` computes exactly `reinterpret (groupAction sk pk h)`, re-encoded, via
+`NIKE.encodePublicKey_reinterpret` once `nikeDH_bridge` identifies the DH output. -/
 theorem nikeBlind_bridge (nike : NIKE) (pk : nike.PublicKey) (sk : nike.PrivateKey)
     (h : nike.Safe pk) (factor : ByteArray)
     (hfactor : nike.decodePrivateKey (toVecN nike.privateKeySize factor) = some sk) :
@@ -199,10 +189,7 @@ private def nikeSelfPublicKeyBytes (nike : NIKE) (skBytes : ByteArray) : ByteArr
 bytes — see this file's module doc for the resulting limitation on `nike.privateKeySize > 32`. -/
 private def blindingFactorPrivKey (seed : Vector UInt8 32) : ByteArray := ⟨keystream32 seed.toArray⟩
 
-/-- Everything `crypto.KDF` derives for one hop, with the raw `BlindingFactor` seed already
-turned into the NIKE private key it represents (`internal/crypto.PacketKeys.BlindingFactor` is
-itself a `nike.PrivateKey`, not a raw seed — `deriveHopKeys` is the point where that conversion
-happens, once, rather than at every later use site). `blindingFactor` is raw bytes, not a decoded
+/-- Everything `crypto.KDF` derives for one hop. `blindingFactor` is raw bytes, not a decoded
 `nike.PrivateKey`, since `HopKeys` is shared with `KEMSphinx` (unused there) and isn't itself
 parametric in which `NIKE` produced it. -/
 structure HopKeys where
@@ -213,13 +200,9 @@ structure HopKeys where
   blindingFactor : ByteArray
   deriving Inhabited
 
-/-- `sharedSecret` is whatever a NIKE's `encodeSharedSecret` produced — `kdf.expand`/HKDF-expand
-accept arbitrary-length input key material, so no fixed width is assumed here. Generic in `kdfS`
-via `GenericKDF.packetKeysFrom`, which reproduces `Crypto.KDF.sphinxKDF`'s own domain string and
-slicing exactly (see that def's own doc comment) — agrees with the old hardcoded `deriveHopKeys`
-definitionally when `kdfS = GenericKDF.hkdfSha256Expand`. Shared with `KEMSphinx.lean` (its
-`deriveHopKeysG` was the same function under a different name; unified here since `HopKeys` itself
-already lives in this file). -/
+/-- `sharedSecret` is whatever a NIKE's `encodeSharedSecret` produced (no fixed width assumed).
+Generic in `kdfS` via `GenericKDF.packetKeysFrom`, agreeing with the old hardcoded `deriveHopKeys`
+definitionally when `kdfS = GenericKDF.hkdfSha256Expand`. Shared with `kem_sphinx_theorems.lean`. -/
 def deriveHopKeys (kdfS : KDF) (sharedSecret : ByteArray) : HopKeys :=
   let pk : PacketKeys := CryptWalker.Sphinx.Crypto.GenericKDF.packetKeysFrom kdfS sharedSecret
   { headerMAC := pk.headerMAC
@@ -750,12 +733,9 @@ private theorem loop2_content (streamS : StreamCipher) (geom : Geometry) (keys :
     exact h2
 
 /-- **`createHeader`'s second loop, at the content level — kept in its native `forIn`/`Except`
-shape.** As `loop2_content`, but proved directly against the loop's own `forIn` (via
-`List.forIn_exists_trace`) instead of the `List.foldl` form `List.forIn_pure_yield_eq_foldl` would
-collapse it to — needed since `createHeader`'s *actual* elaborated loop2 body distributes its `if
-i > 0` differently than `loop2Step`'s definition does (same value at every step, different term
-shape), so bridging through the named `loop2Step` doesn't typecheck against what unfolding a real
-`createHeader` call produces. Mirrors `KEMSphinx.createKEMHeader_loop2_content`. -/
+shape.** As `loop2_content`, but proved directly against the loop's own `forIn` rather than the
+`List.foldl` form, since `createHeader`'s actual elaborated body distributes its `if i > 0`
+differently than `loop2Step`'s definition does. Mirrors `createKEMHeader_loop2_content`. -/
 private theorem createHeader_loop2_content_native (streamS : StreamCipher) (geom : Geometry)
     (keys : Array HopKeys) (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
     (hfinal : forIn (List.range' 0 nrHops) (#[], #[])
@@ -1310,11 +1290,8 @@ private theorem createHeader_s_size (nike : NIKE) (macS : MAC) (geom : Geometry)
 
 set_option maxHeartbeats 1000000 in
 /-- **`createHeader`**'s `hdr.size`: `2 + nike.publicKeySize + geom.routingInfoLength +
-macLength`, matching `geom.headerLength` whenever `geom` was actually built for `nike` (the
-`hcompat`-style hypotheses below spell out exactly what that means, rather than assuming it
-silently: `geom.headerLength`, `geom.routingInfoLength` and `geom.perHopRoutingInfoLength` all
-come from `Geometry.buildNIKE`, which any `Geometry.ofNIKE nike.hpqcName ...` satisfies by
-construction). -/
+macLength`, matching `geom.headerLength` whenever `geom` was actually built for `nike`
+(`hvalid`, satisfied by construction for any `Geometry.ofNIKE nike.hpqcName ...`). -/
 theorem createHeader_hdr_size (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
     (geom : Geometry) (clientPrivateKey filler : ByteArray)
     (path : Array PathHop) (hdr : ByteArray) (sprpKeys : Array SPRPKey)
@@ -1512,13 +1489,9 @@ private theorem newNIKEPacket_bytesPub (nike : NIKE) (cipher : WideBlockCipher) 
     exact hhdrPub
 
 /-- A successful `newNIKEPacket` on a `geom.forwardPayloadLength`-sized payload produces exactly
-`geom.packetLength` bytes: `headerLength` (via `createHeader_hdr_size`, itself `createHeader`'s
-routing-info-block construction, accumulated over a `for` loop) plus `payloadTagLength +
-payload.size` (`cipher.encrypt_size`'s length preservation, applied in another loop via
-`List.foldl_size_preserving`) — proved through those loops, not assumed, and also confirmed
-empirically by all 20 `sphinx_{nike,kem}_vectors.json` packets. `wrapNIKE` uses it to give
-`Sphinx.Interface.wrap` a packet-length-preserving *type*, the same way `sprpDecrypt_size` lets
-`unwrapNIKE` do that for `forwardPkt`. -/
+`geom.packetLength` bytes: `headerLength` (`createHeader_hdr_size`) plus `payloadTagLength +
+payload.size` (`cipher.encrypt_size`'s length preservation). `wrapNIKE` uses it to give
+`Sphinx.Interface.wrap` a packet-length-preserving type. -/
 theorem newNIKEPacket_size (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (clientPrivateKey : ByteArray)
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
@@ -1609,17 +1582,13 @@ private theorem newNIKEPacket_payload_size_trace (cipher : WideBlockCipher) (spr
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 4000 in
-/-- **`createHeader`, fully unfolded to content.** Packages the loop1 blinding-chain content
-(as `createHeader_loop1_bridge`), the loop2 (`riKeyStream`/`riPadding`) content, and the loop3
-trace (as `createHeader_loop3_trace`) — plus the `hdr`/`sprpKeys` assembly itself — behind one
-hypothesis, in the exact shape a successful `createHeader` call actually unfolds to. Everything
-here is derived from *one* unfolding of `h`, so `groupElements`/`keys` (loop1's own output) are
-literally shared between the blinding-chain content and loop3's step formula — no cross-theorem
-array-equality needed. Mirrors `KEMSphinx.createKEMHeader_unfold`, though that one factors loop1's
-content into a reusable standalone lemma (`createKEMHeader_loop1_content`, taking the raw `hLoop1`
-directly); here loop1's induction is instead inlined, matching `createHeader_loop1_bridge`'s own
-proof verbatim, since NIKE's loop1 (with its nested inner re-blinding loop) makes that raw
-hypothesis type unwieldy to state as a reusable standalone signature. -/
+/-- **`createHeader`, fully unfolded to content.** Packages the loop1 blinding-chain content, the
+loop2 (`riKeyStream`/`riPadding`) content, and the loop3 trace — plus the `hdr`/`sprpKeys`
+assembly itself — behind one hypothesis, in the exact shape a successful `createHeader` call
+unfolds to, so `groupElements`/`keys` are shared between the blinding-chain content and loop3's
+step formula with no cross-theorem array-equality needed. Mirrors `createKEMHeader_unfold`,
+though loop1's induction is inlined here rather than factored out, since NIKE's nested
+inner re-blinding loop makes a standalone signature unwieldy. -/
 private theorem createHeader_unfold (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
     (geom : Geometry) (clientPrivateKey filler : ByteArray) (path : Array PathHop)
     (hdr : ByteArray) (sprpKeys : Array SPRPKey)
@@ -2397,16 +2366,11 @@ def unwrapNIKE (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF
 
 set_option maxHeartbeats 1000000 in
 /-- **The single-hop agreement theorem, non-terminal case.** `unwrapNIKE` applied to the packet
-`hopPacket ... k` arriving at hop `k` (`k+1 < nrHops`, so hop `k` forwards) reproduces
-`hopPacket ... (k+1)` exactly, given the receiver's own private key decodes to `targetSk k` and
-that `path[k]!`'s own commands never already contain a `null` or `nextNodeHop` (every real
-intermediate hop's well-formedness). Beyond the terminal case's key-agreement argument, this needs
-`nikeBlind_bridge` applied to `f k` (the decoded blinding factor `hgcontent`'s third conjunct
-already exhibits) to show the receiver's own `nikeBlind groupElement keys.blindingFactor` is
-*definitionally* `telescopeElem`'s next term — `telescopeElem`'s own recursive equation is
-literally `nike.reinterpret (nike.groupAction (f n) prev.1 prev.2)`, exactly `nikeBlind_bridge`'s
-conclusion. Mirrors `KEMSphinx.unwrapKEM_hopPacket_nonterminal` (simpler: no ciphertext to embed
-into the forwarded routing info). -/
+`hopPacket ... k` arriving at hop `k` (`k+1 < nrHops`) reproduces `hopPacket ... (k+1)` exactly,
+given the receiver's private key decodes to `targetSk k` and `path[k]!` is well-formed. Beyond
+the terminal case's key-agreement argument, this needs `nikeBlind_bridge` to show the receiver's
+`nikeBlind groupElement keys.blindingFactor` is definitionally `telescopeElem`'s next term.
+Mirrors `unwrapKEM_hopPacket_nonterminal` (simpler: no ciphertext to embed). -/
 theorem unwrapNIKE_hopPacket_nonterminal (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
@@ -2797,17 +2761,12 @@ theorem unwrapNIKE_hopPacket_nonterminal (nike : NIKE) (cipher : WideBlockCipher
 
 set_option maxHeartbeats 1000000 in
 /-- **The single-hop agreement theorem, terminal case.** `unwrapNIKE` applied to the packet
-`hopPacket ... k` arriving at the final hop `k = nrHops - 1` reveals `payload`, given the receiver's
-own private key really does decode to `targetSk k` (the same secret `hgcontent`'s `telescopeSecret`
-model used for hop `k`) and that `path[k]!`'s own commands never already contain a `null`,
-`nextNodeHop`, or `surbReply` (the well-formedness every real terminal hop satisfies). The key
-agreement itself is `nikeDH_bridge` composed with `NIKE.telescope_agree`: the receiver's own
-`nikeDH (targetSk k) groupElement` is exactly the sender's `telescopeSecret ... k`, so
-`deriveHopKeys` produces the identical `keys[k]!` on both sides — everything downstream (MAC,
-routing-info XOR via `cascading_xor_step`, payload SPRP layering via
-`newNIKEPacket_payload_content`) then matches byte-for-byte, mirroring
-`KEMSphinx.unwrapKEM_hopPacket_terminal` (simpler here: no ciphertext to carve out of the routing
-info, since the group element travels in its own header slot). -/
+`hopPacket ... k` arriving at the final hop `k = nrHops - 1` reveals `payload`, given the
+receiver's private key decodes to `targetSk k` and `path[k]!` is well-formed. The key agreement
+is `nikeDH_bridge` composed with `NIKE.telescope_agree`: the receiver's `nikeDH (targetSk k)
+groupElement` is exactly the sender's `telescopeSecret ... k`, so `deriveHopKeys` produces the
+same `keys[k]!` on both sides, and everything downstream matches byte-for-byte. Mirrors
+`unwrapKEM_hopPacket_terminal` (simpler: no ciphertext to carve out of the routing info). -/
 theorem unwrapNIKE_hopPacket_terminal (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
@@ -3105,12 +3064,10 @@ theorem unwrapNIKE_hopPacket_terminal (nike : NIKE) (cipher : WideBlockCipher) (
 
 set_option maxHeartbeats 1000000 in
 /-- **The multi-hop completeness induction.** Starting `unwrapChainAux` at any hop `k < nrHops` on
-`hopPacket ... k`, given exactly the remaining `nrHops - k` private keys (each decoding to
-`targetSk (k+i)`, matching `path[k+i]!` by construction of the whole model), always recovers
-`payload` — by downward induction on `privKeys`, repeatedly applying
-`unwrapNIKE_hopPacket_nonterminal` to peel one hop (each producing `hopPacket ... (k+1)`, which
-`unwrapChainAux`'s own recursion re-enters on `rest`) until `unwrapNIKE_hopPacket_terminal` closes
-the last one. Mirrors `KEMSphinx.unwrapChain_hopPacket`. -/
+`hopPacket ... k`, given the remaining `nrHops - k` private keys each decoding to `targetSk
+(k+i)`, always recovers `payload` — downward induction on `privKeys`, repeatedly applying
+`unwrapNIKE_hopPacket_nonterminal` to peel one hop until `unwrapNIKE_hopPacket_terminal` closes
+the last one. Mirrors `unwrapChain_hopPacket` on the KEM side. -/
 theorem unwrapChain_hopPacket (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
@@ -3308,13 +3265,11 @@ private theorem wrapNIKE_unfold (nike : NIKE) (cipher : WideBlockCipher) (macS :
       rw [hw] at h; injection h
 
 /-- **The real completeness theorem**: `NIKESphinxScheme`'s witness for
-`Sphinx.Interface.unwrap_complete`, proved outright. Generic over the wide-block cipher/MAC/KDF/
-stream cipher, matching `KEMSphinx.wrapKEM_unwrapKEM_complete_valid`, its equally
-fully-proved KEM-Sphinx counterpart. `targetSk i` is *`privKeys[i]!`'s own decoded private key* (via
-`nike.decodePrivateKey_total`, always exists), never an independently-chosen "honest" secret — this
-is what lets `unwrapNIKE_hopPacket_terminal`/`nonterminal`'s key-agreement argument go through with
-no `derivePublicKey`-injectivity assumption: the receiver at hop `i` simply *uses* the secret
-`hpriv` already says its own public key matches. -/
+`Sphinx.Interface.unwrap_complete`, proved outright, generic over the wide-block cipher/MAC/KDF/
+stream cipher (mirrors `wrapKEM_unwrapKEM_complete_valid`). `targetSk i` is `privKeys[i]!`'s own
+decoded private key, never an independently-chosen "honest" secret — this is what lets the
+key-agreement argument go through with no `derivePublicKey`-injectivity assumption: the receiver
+at hop `i` simply uses the secret `hpriv` already says its own public key matches. -/
 theorem wrapNIKE_unwrapNIKE_complete_valid (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
     (hmactag : macS.tagSize = macLength) (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
@@ -3447,14 +3402,10 @@ theorem wrapNIKE_unwrapNIKE_complete_valid (nike : NIKE) (cipher : WideBlockCiph
   exact hind
 
 /-- The base `Sphinx.Interface.Sphinx` instance for `nike` — everything `nikeSphinxSchemeOf`
-below provides *except* the re-blindable-envelope structure (`Envelope`/`Factor`/`blind`/
-`wrap_resistant`/`envelope_indep`), which needs a `Fintype`/`SampleableType` instance for
-`nike.PrivateKey` that doesn't exist computably for an arbitrary `NIKE` picked at runtime (proving
-an abstract, injectively-embedded type finite and enumerable needs classical choice —
-`Fintype.ofInjective`/`SampleableType.ofFintype`, both `noncomputable`). This core needs none of
-that, so — unlike `nikeSphinxSchemeOf`/`nikeSphinxScheme` — it compiles to real code: executable
-callers that only need `wrap`/`unwrap`/`newSURB`/`newPacketFromSURB` (tests, vector generation)
-should use this, not the fuller scheme. -/
+provides except the re-blindable-envelope structure, which needs a `Fintype`/`SampleableType`
+instance for `nike.PrivateKey` only classical choice can supply for an arbitrary runtime `NIKE`.
+This core needs none of that, so unlike `nikeSphinxSchemeOf`/`nikeSphinxScheme` it compiles to
+real code — executable callers (tests, vector generation) should use this. -/
 def nikeSphinxCore (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
     (hmactag : macS.tagSize = macLength)
@@ -3502,19 +3453,13 @@ noncomputable def nikeSphinxSchemeOf (nike : NIKE) (cipher : WideBlockCipher) (m
   nike := nike
 
 /-- Build a `NIKESphinxScheme` for whatever NIKE `geom.scheme` names, resolved through
-`CryptWalker.NIKE.byName` — the same registry `Geometry.ofNIKE` itself resolves against. Genuinely
-agnostic to *which* registered NIKE this is: no fixed-size wrapper type — every `NIKE` already
-carries the size information this file needs, in its own `publicKeySize`/`privateKeySize`/
-`sharedSecretSize` fields. Registering a new NIKE needs no change here. The one runtime check this
-adds beyond the original, less rigorous version: `geom` must actually agree with `nike` on the packet
-layout constants (`geom.ValidForNIKE nike`, decidable since it's just `Nat` equalities) — true of
-any `geom` obtained from `Geometry.ofNIKE name ...` for this same `name`, and rejected explicitly
-(rather than silently trusted) otherwise.
+`CryptWalker.NIKE.byName` — the same registry `Geometry.ofNIKE` resolves against. Registering a
+new NIKE needs no change here. Checks `geom.ValidForNIKE nike` (decidable), rejecting a mismatched
+`geom` explicitly rather than trusting it silently.
 
-The one place that picks a concrete cryptographic stack: AEZ/HMAC-SHA256/HKDF-SHA256-Expand/
-AES-256-CTR, matching this codebase's `sphinx_nike_vectors.json` — `nikeSphinxSchemeOf` underneath
-is fully generic over any `WideBlockCipher`/`MAC`/`KDF`/`StreamCipher`, this is just the one default
-choice a caller who only knows a NIKE's name actually needs. -/
+The one place that picks a concrete cryptographic stack (AEZ/HMAC-SHA256/HKDF-SHA256-Expand/
+AES-256-CTR, matching `sphinx_nike_vectors.json`) — `nikeSphinxSchemeOf` underneath is fully
+generic, this is just the default a caller who only knows a NIKE's name needs. -/
 noncomputable def nikeSphinxScheme (geom : Geometry) : Except String NIKESphinxScheme :=
   match geom.scheme with
   | .inr name => throw s!"sphinx: geometry scheme {name} is a KEM, not a NIKE"

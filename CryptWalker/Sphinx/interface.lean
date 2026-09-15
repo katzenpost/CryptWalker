@@ -27,22 +27,23 @@ open OracleComp OracleSpec ENNReal
 
 /-! # The abstract Sphinx interface
 
+Reference for this whole directory: George Danezis and Ian Goldberg, *Sphinx: A Compact and
+Provably Secure Mix Format*, IEEE S&P 2009 — <https://eprint.iacr.org/2008/475> (PDF at that URL).
+Cited elsewhere here as "Danezis–Goldberg" or "the paper"; a bare `§n.m` is that paper's own
+section numbering. Not re-cited file by file.
+
 A packet scheme: private-key/command types, `wrap`/`unwrap`, `newSURB`/`newPacketFromSURB`, and
 a completeness law relating them.
 
 `unwrap`'s forwarded packet is `Vector UInt8 pkt.size` — same length as the input, by the type.
-`wrap`/`newSURB` draw their randomness from `State` via `EStateM` (`SeedStream`/`nextSeed`/
-`initWith` below, shaped like `KEM.Adapter`'s seed stream); `unwrap`/`newPacketFromSURB` are
-deterministic, so plain `Except`. `filler` stays a bare argument regardless — its *length* is
-public, unlike a key.
+`wrap`/`newSURB` draw randomness from `State` via `EStateM` (`SeedStream`/`nextSeed`/`initWith`
+below); `unwrap`/`newPacketFromSURB` are deterministic, so plain `Except`.
 
-`NIKESphinx`/`KEMSphinx` are the two witnesses. Both prove `unwrap_complete` outright
-(`wrapNIKE_unwrapNIKE_complete_valid`/`wrapKEM_unwrapKEM_complete_valid`, generic over the
-abstract `NIKE`/`KEM`/`WideBlockCipher`/`MAC`/`KDF`/`StreamCipher` types, no concrete instance
-touched), as well as `newNIKEPacket_size` and friends (a successful `wrap`/`newSURB` produces
-exactly `packetLength`/`surbLength` bytes) — the vectors and self-tests still check all of it
-empirically too, as an independent cross-check. `unwrap_complete` only pins down the forward
-payload so far, not `cmds`/`replayTag`/SURB completeness. -/
+`NIKESphinx`/`KEMSphinx` are the two witnesses, both proving `unwrap_complete` outright
+(generic over the abstract `NIKE`/`KEM`/`WideBlockCipher`/`MAC`/`KDF`/`StreamCipher` types) plus
+`newNIKEPacket_size` and friends (`wrap`/`newSURB` produce exactly `packetLength`/`surbLength`
+bytes). `unwrap_complete` covers only the forward payload, not `cmds`/`replayTag`/SURB
+completeness. -/
 
 /-- Counter plus an inexhaustible stream of 32-byte seeds — `wrap`'s randomness source. -/
 abbrev SeedStream := Nat × (Nat → Vector UInt8 32)
@@ -79,13 +80,9 @@ structure Sphinx where
   geometry : Geometry.Geometry
 
   /-- The four cryptographic primitives every Sphinx instance needs besides its NIKE-or-KEM
-  (added one level down, by `NIKESphinxScheme`/`KEMSphinxScheme`): a wide-block cipher for the
-  payload, a MAC for header integrity, a KDF to derive per-hop keys from a shared secret, and a
-  stream cipher for routing-info encryption. `wrap`/`unwrap`/`unwrap_complete` below are written
-  purely in terms of these four fields' own laws — never against a concrete algorithm's name — so
-  swapping AEZ for another wide-block cipher, or HMAC-SHA256 for another MAC, is: define a new
-  `WideBlockCipher`/`MAC` instance elsewhere and pass it in here. Nothing under `Sphinx.Interface`
-  or its `NIKESphinx`/`KEMSphinx` witnesses needs to change or be re-proved. -/
+  (added by `NIKESphinxScheme`/`KEMSphinxScheme`): a wide-block cipher for the payload, a MAC for
+  header integrity, a KDF for per-hop keys, a stream cipher for routing-info encryption. Kept
+  abstract so swapping e.g. AEZ for another wide-block cipher needs no change below. -/
   cipher : CryptWalker.WideBlockCipher.WideBlockCipher
   mac    : CryptWalker.Sphinx.Crypto.MAC.MAC
   kdf    : CryptWalker.Sphinx.Crypto.GenericKDF.KDF
@@ -107,19 +104,11 @@ structure Sphinx where
   newPacketFromSURB : Vector UInt8 geometry.surbLength → ByteArray →
     Except String (ByteArray × Vector UInt8 32)
 
-  /-- **Completeness**: any packet `wrap` builds, `unwrap` can undo — given that `path` is
-  well-formed: no hop's own `commands` list already contains one of the two wire-level
-  sentinels that are never legitimate application-level commands (`null`, the zero-byte padding
-  terminator `parseAll` stops at — never something a real command list would contain, matching
-  `Commands.parseAll_append_zeros`'s own `c ≠ .null` precondition elsewhere in this codebase;
-  `nextNodeHop`, the forwarding marker each non-terminal hop's own header fragment gets appended
-  *after* its already-serialized commands — this port's `kemRiFragment`/its NIKE twin are the
-  only place one is ever constructed, never something a caller supplies), and the *last* hop's
-  commands don't carry a `surbReply` — a real, legitimate command (an actual SURB reply flow's
-  own completeness is a different, separately-tested claim), just not the plain forward-payload
-  delivery this one states: a `surbReply` there changes `unwrap`'s own terminal-hop behavior
-  (returning the raw decrypted buffer rather than stripping the zero tag and returning
-  `payload`). -/
+  /-- **Completeness**: any packet `wrap` builds, `unwrap` can undo, given `path` is well-formed —
+  no hop's `commands` already contains `null` or `nextNodeHop` (both wire-level sentinels this
+  port only ever constructs itself, never something a caller supplies), and the last hop carries
+  no `surbReply` (a real command, just one that changes `unwrap`'s terminal-hop behavior — its own
+  completeness is tracked separately). -/
   unwrap_complete : ∀ (path : List Types.PathHop) (privKeys : List PrivateKey)
       (filler : ByteArray) (payload : Vector UInt8 geometry.forwardPayloadLength) (st : State)
       (pkt : Vector UInt8 geometry.packetLength) (st' : State),
@@ -183,21 +172,15 @@ instance : Inhabited Sphinx := ⟨{
     cases hwrap
 }⟩
 
-/-! ## Wrap-resistance (Danezis–Goldberg §4.3)
+/-! ## Wrap-resistance (§4.3)
 
-`unwrap_complete` is a plain ∀-statement about honest execution, expressible directly in terms
-of `wrap`/`unwrap` since it only composes fields the base `Sphinx` structure already has.
-Wrap-resistance isn't that shape: it's a probabilistic bound on adversarial forgery, and its
-content — "a freshly drawn blinding factor is unlikely to hit a chosen target" — depends on
-structure (a public-key element, a factor space, a blinding action) that a scheme built on a
-group-element blinding chain has and a KEM-based scheme (independent per-hop encapsulation, no
-element to re-blind) does not. `NIKESphinx.NIKESphinxScheme` carries that structure directly;
-there is no analogous structure for KEM-Sphinx. -/
+Unlike `unwrap_complete`, wrap-resistance is a probabilistic bound on adversarial forgery, and
+needs structure (a public-key element, a factor space, a blinding action) a group-blinding-chain
+scheme has and a KEM-based one doesn't — so it lives on `NIKESphinxScheme` only. -/
 
 /-- A uniformly sampled `b : F`, pushed through a bijection `act`, hits any fixed `target` with
-probability exactly `1/|F|`. The whole mathematical content of wrap-resistance's single-query
-case: `act` stands for "blind by this freshly drawn factor," `target` for the header an
-adversary is trying to forge. -/
+probability `1/|F|`. The mathematical core of wrap-resistance's single-query case: `act` is
+"blind by this freshly drawn factor," `target` the header an adversary is trying to forge. -/
 theorem uniformHit_eq {F G : Type} [Fintype F] [SampleableType F] [DecidableEq G]
     {act : F → G} (hact : Function.Bijective act) (target : G) :
     Pr[= true | ($ᵗ F) >>= fun b => pure (decide (act b = target))] =

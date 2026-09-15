@@ -17,11 +17,9 @@ open CryptWalker.Util.Bytes
 `cipher.NewCTR(blk, iv)` from Go's standard library, keyed with the full 32-byte
 `StreamKeyLength` (AES-256) and a 16-byte IV.
 
-Go's `crypto/cipher.NewCTR` treats the **entire** IV as one big-endian 128-bit counter that
-increments (with wraparound) once per block — this is *not* the same counter convention as
-`Cipher.AESGCMSIV`'s `counterBlock`/`keystreamBlock`, which is RFC 8452's 32-bit
-little-endian counter confined to the first four bytes. The two cannot share code; this file
-reimplements the standard big-endian full-block counter.
+Go's `crypto/cipher.NewCTR` treats the entire IV as one big-endian 128-bit counter, incrementing
+with wraparound once per block — unlike `Cipher.AESGCMSIV`'s RFC 8452 32-bit little-endian
+counter, so the two can't share code.
 
 `crypto.Stream.KeyStream` zero-fills its destination buffer and then XORs the keystream into
 it, i.e. it returns the keystream itself — so `keystream` below is what the vectors record. -/

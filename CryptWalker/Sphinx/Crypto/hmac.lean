@@ -14,10 +14,7 @@ open CryptWalker.Hash.Sha2
 Sphinx's header MAC (`crypto.NewMAC` in `katzenpost/core/sphinx/internal/crypto/crypto.go`):
 `hmac.New(sha256.New, key)`, used at the full 32-byte tag width (`MACLength = 32`).
 
-RFC 2104, following the same shape as `Hash.HKDF`'s inline `blake2b512.hmac64` — sized to
-SHA-256's 64-byte block instead of BLAKE2b-512's 128-byte one, and calling `Sha256.hash`
-directly rather than going through the abstract `Hash` structure, matching that file's
-established pattern of calling the concrete hash function rather than its `Hash.hash` field. -/
+RFC 2104, sized to SHA-256's 64-byte block, calling `Sha256.hash` directly. -/
 
 private def blockSize : Nat := 64
 
