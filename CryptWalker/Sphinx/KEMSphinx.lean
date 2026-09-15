@@ -2625,6 +2625,98 @@ theorem unwrapChain_hopPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC
       rw [hofv]
       exact hind
 
+/-- `nextSeed` never fails, so `List.mapM (fun _ => nextSeed)` over any list never fails either —
+it always produces a seed list of the same length, and (though we never need the specific values)
+advances the counter by exactly that length. -/
+private theorem listMapM_nextSeed_succeeds {α : Type} (l : List α) (i : Nat)
+    (str : Nat → Vector UInt8 32) :
+    ∃ seeds : List (Vector UInt8 32), seeds.length = l.length ∧
+      (l.mapM (fun _ => nextSeed) : EStateM String SeedStream (List (Vector UInt8 32)))
+        (i, str) = .ok seeds (i + l.length, str) := by
+  induction l generalizing i with
+  | nil => exact ⟨[], rfl, rfl⟩
+  | cons a l ih =>
+    obtain ⟨seeds, hlen, heq⟩ := ih (i + 1)
+    refine ⟨str i :: seeds, by simp [hlen], ?_⟩
+    simp only [List.mapM_cons, Bind.bind, EStateM.bind, nextSeed]
+    rw [heq]
+    dsimp only [Bind.bind, EStateM.bind, pure, EStateM.pure]
+    simp only [List.length_cons]
+    congr 2
+    omega
+
+/-- As `listMapM_nextSeed_succeeds`, for `Array.mapM` — via `Array.mapM_eq_mapM_toList`. -/
+private theorem arrayMapM_nextSeed_succeeds {α : Type} (l : Array α) (i : Nat)
+    (str : Nat → Vector UInt8 32) :
+    ∃ seeds : Array (Vector UInt8 32), seeds.size = l.size ∧
+      (l.mapM (fun _ => nextSeed) : EStateM String SeedStream (Array (Vector UInt8 32)))
+        (i, str) = .ok seeds (i + l.size, str) := by
+  obtain ⟨seedsL, hlen, heq⟩ := listMapM_nextSeed_succeeds l.toList i str
+  refine ⟨seedsL.toArray, by simp [hlen], ?_⟩
+  rw [Array.mapM_eq_mapM_toList]
+  show (Functor.map List.toArray (l.toList.mapM (fun _ => nextSeed))) (i, str) = _
+  dsimp only [Functor.map, EStateM.map]
+  rw [heq]
+  dsimp only
+  congr 1
+
+/-- **`wrapKEM`, fully unfolded to content.** A successful `wrapKEM` run drew some array of
+per-hop seeds (via `nextSeed`, which never fails — `arrayMapM_nextSeed_succeeds`) and then
+`newKEMPacket` succeeded on it, producing exactly `pkt`'s own bytes. -/
+private theorem wrapKEM_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (path : List PathHop) (filler : ByteArray)
+    (payload : Vector UInt8 geom.forwardPayloadLength) (i : Nat) (str : Nat → Vector UInt8 32)
+    (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream)
+    (h : wrapKEM kem cipher macS kdfS streamS geom path filler payload (i, str) = .ok pkt st') :
+    ∃ seeds : Array (Vector UInt8 32), seeds.size = path.length ∧
+      newKEMPacket kem cipher macS kdfS streamS geom seeds filler path.toArray (ofVector payload)
+        = Except.ok (ofVector pkt) := by
+  obtain ⟨seeds, hlen, heq⟩ := arrayMapM_nextSeed_succeeds path.toArray i str
+  refine ⟨seeds, by rw [hlen]; simp, ?_⟩
+  rcases hnk : newKEMPacket kem cipher macS kdfS streamS geom seeds filler path.toArray
+      (ofVector payload) with e | pktRaw
+  · exfalso
+    have hw : wrapKEM kem cipher macS kdfS streamS geom path filler payload (i, str)
+        = .error e (i + path.toArray.size, str) := by
+      unfold wrapKEM
+      dsimp only [Bind.bind, EStateM.bind]
+      rw [heq]
+      dsimp only
+      rw [hnk]
+      rfl
+    rw [hw] at h
+    injection h
+  · by_cases hsz : pktRaw.size = geom.packetLength
+    · have hw : wrapKEM kem cipher macS kdfS streamS geom path filler payload (i, str)
+          = .ok ⟨pktRaw.data, hsz⟩ (i + path.toArray.size, str) := by
+        unfold wrapKEM
+        dsimp only [Bind.bind, EStateM.bind]
+        rw [heq]
+        dsimp only
+        rw [hnk]
+        dsimp only
+        rw [dif_pos hsz]
+        rfl
+      rw [hw] at h
+      injection h with h1 h2
+      congr 1
+      rw [← h1]
+      rfl
+    · exfalso
+      have hw : wrapKEM kem cipher macS kdfS streamS geom path filler payload (i, str)
+          = .error "sphinx: internal error: newKEMPacket produced a wrong-sized packet"
+            (i + path.toArray.size, str) := by
+        unfold wrapKEM
+        dsimp only [Bind.bind, EStateM.bind]
+        rw [heq]
+        dsimp only
+        rw [hnk]
+        dsimp only
+        rw [dif_neg hsz]
+        rfl
+      rw [hw] at h
+      injection h
+
 /-- As `NIKESphinx.wrapNIKE_unwrapNIKE_complete`: `KEMSphinxScheme`'s witness for
 `Sphinx.Interface.unwrap_complete`. Generic over the wide-block cipher/MAC/KDF/stream cipher, not
 just the `KEM` — never AEZ/HMAC-SHA256/HKDF/AES-CTR specifics, only `cipher`/`macS`/`kdfS`/
