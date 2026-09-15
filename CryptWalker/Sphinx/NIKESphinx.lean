@@ -151,16 +151,21 @@ theorem nikeDH_bridge (nike : NIKE) (sk : nike.PrivateKey) (pk : nike.PublicKey)
   rfl
 
 /-- **`nikeBlind`, bridged to the typed re-blinding action**: given an honestly-encoded, `Safe`
-envelope and an honestly-encoded factor, `nikeBlind` computes exactly `reinterpret (groupAction
-sk pk h)`, re-encoded — despite never calling `reinterpret` itself (see `nikeBlind`'s own doc
-comment): `NIKE.encodePublicKey_reinterpret` is exactly what closes that gap, once `nikeDH_bridge`
-identifies the DH output. -/
+envelope and *any* factor bytes that decode to `sk` (not necessarily `sk`'s own canonical
+encoding — `createHeader`'s actual blinding factors are raw `blindingFactorPrivKey` output, which
+`decodePrivateKey` accepts without ever being re-encoded via `encodePrivateKey`; there's no
+`encode_decode_priv` law the way `encode_decode_pub` exists for public keys, so this is genuinely
+weaker than requiring the canonical encoding, not just a convenience), `nikeBlind` computes
+exactly `reinterpret (groupAction sk pk h)`, re-encoded — despite never calling `reinterpret`
+itself (see `nikeBlind`'s own doc comment): `NIKE.encodePublicKey_reinterpret` is exactly what
+closes that gap, once `nikeDH_bridge` identifies the DH output. -/
 theorem nikeBlind_bridge (nike : NIKE) (pk : nike.PublicKey) (sk : nike.PrivateKey)
-    (h : nike.Safe pk) :
-    nikeBlind nike (ofVector (nike.encodePublicKey pk)) (ofVector (nike.encodePrivateKey sk))
+    (h : nike.Safe pk) (factor : ByteArray)
+    (hfactor : nike.decodePrivateKey (toVecN nike.privateKeySize factor) = some sk) :
+    nikeBlind nike (ofVector (nike.encodePublicKey pk)) factor
       = ofVector (nike.encodePublicKey (nike.reinterpret (nike.groupAction sk pk h))) := by
   unfold nikeBlind
-  rw [toVecN_ofVector, nike.decode_encode_priv]
+  rw [hfactor]
   dsimp only
   rw [nikeDH_bridge nike sk pk h]
   dsimp only [Except.toOption, Option.getD]
@@ -297,6 +302,37 @@ private theorem ite_pure_yield {α : Type} (c : Prop) [Decidable c] (a b : α) :
 
 @[simp] private theorem byteArray_mk_size (a : Array UInt8) : (⟨a⟩ : ByteArray).size = a.size := rfl
 
+/-- As `Common.Array.getElem!_stable_of_pushes`, for a trace whose array size is `j + 1` rather
+than `j` at step `j` — `createHeader`'s own `keys` trace: it starts at *one* entry (the first
+hop's key, already known before the loop over `[1:nrHops]` even begins), not zero. -/
+private theorem Array.getElem!_stable_of_pushes' {α : Type} [Inhabited α] (t : Nat → Array α) (n : Nat)
+    (hpush : ∀ j, j < n → ∃ x, t (j + 1) = (t j).push x) (hsize : ∀ j, j ≤ n → (t j).size = j + 1) :
+    ∀ i m, i < m → m ≤ n → (t m)[i]! = (t (i + 1))[i]! := by
+  intro i m him hmn
+  induction m with
+  | zero => omega
+  | succ m ih =>
+    rcases Nat.lt_or_ge i m with h | h
+    · obtain ⟨x, hx⟩ := hpush m (by omega)
+      rw [hx, CryptWalker.Sphinx.Common.Array.getElem!_push_stable _ _ _
+        (by rw [hsize m (by omega)]; omega), ih h (by omega)]
+    · have hie : i = m := by omega
+      rw [hie]
+
+/-- As `Array.getElem!_stable_of_pushes'`, collapsed to compare against the array's value at the
+index's own step `i` directly (rather than one step later) — one more `getElem!_push_stable`
+closes that last gap. -/
+private theorem Array.getElem!_stable_from_pushes {α : Type} [Inhabited α] (t : Nat → Array α) (n : Nat)
+    (hpush : ∀ j, j < n → ∃ x, t (j + 1) = (t j).push x) (hsize : ∀ j, j ≤ n → (t j).size = j + 1) :
+    ∀ i m, i ≤ m → m ≤ n → (t m)[i]! = (t i)[i]! := by
+  intro i m him hmn
+  rcases eq_or_lt_of_le him with heq | hlt
+  · rw [heq]
+  · rw [Array.getElem!_stable_of_pushes' t n hpush hsize i m hlt hmn]
+    obtain ⟨x, hx⟩ := hpush i (by omega)
+    rw [hx, CryptWalker.Sphinx.Common.Array.getElem!_push_stable _ _ _
+      (by rw [hsize i (by omega)]; omega)]
+
 /-- **The inner "keep DH-ing" loop, bridged**: given an honestly-encoded `Safe` target public key
 and a sequence of `n` already-honestly-decodable factor bytes, running `nikeDH` once against the
 target then `n` more times against each factor in turn (`createHeader`'s inner loop, exactly)
@@ -304,16 +340,14 @@ reproduces `NIKE.telescopeSecret`'s value at `n`. Pure induction on `n` using `n
 each step — no new algebra beyond what that lemma already gives. -/
 private theorem nikeDH_innerLoop_bridge (nike : NIKE) (baseSk targetSk : nike.PrivateKey)
     (pkBytes : ByteArray) (hpk : pkBytes = ofVector (nike.encodePublicKey (nike.derivePublicKey targetSk)))
-    (factorBytes : Nat → ByteArray) (f : Nat → nike.PrivateKey)
-    (hf : ∀ k, nike.decodePrivateKey (toVecN nike.privateKeySize (factorBytes k)) = some (f k))
-    (n : Nat) (finalSS : ByteArray)
-    (hfinal : (do
-        let ss0 ← nikeDH nike baseSk pkBytes
-        forIn (List.range' 0 n) ss0 (fun k acc => do
-          let fj ← nikeDecodePrivateKey nike (factorBytes k)
-          ForInStep.yield <$> nikeDH nike fj acc) : Except String ByteArray) = Except.ok finalSS) :
+    (factorBytes : Nat → ByteArray) (f : Nat → nike.PrivateKey) (n : Nat)
+    (hf : ∀ k, k < n → nike.decodePrivateKey (toVecN nike.privateKeySize (factorBytes k)) = some (f k))
+    (ss0 finalSS : ByteArray)
+    (hss0 : nikeDH nike baseSk pkBytes = Except.ok ss0)
+    (hfinal : forIn (List.range' 0 n) ss0 (fun k acc => do
+        let fj ← nikeDecodePrivateKey nike (factorBytes k)
+        ForInStep.yield <$> nikeDH nike fj acc) = Except.ok finalSS) :
     finalSS = ofVector (nike.encodeSharedSecret (telescopeSecret nike baseSk targetSk f n).1) := by
-  obtain ⟨ss0, hss0, hfinal⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hfinal
   have hss0' : ss0 = ofVector (nike.encodeSharedSecret (telescopeSecret nike baseSk targetSk f 0).1) := by
     rw [hpk] at hss0
     rw [nikeDH_bridge nike baseSk (nike.derivePublicKey targetSk) (nike.derive_safe targetSk)] at hss0
@@ -349,7 +383,7 @@ private theorem nikeDH_innerLoop_bridge (nike : NIKE) (baseSk targetSk : nike.Pr
           simp only [pure, Except.pure, Except.ok.injEq] at hfj
           exact congrArg some hfj
       have hfjeq : fj = f k := by
-        rw [hf k] at hfjeq0; injection hfjeq0 with hfjeq0; exact hfjeq0.symm
+        rw [hf k hk'] at hfjeq0; injection hfjeq0 with hfjeq0; exact hfjeq0.symm
       have hik := ih (by omega)
       rw [hfjeq, hik, ← nike.encodePublicKey_reinterpret] at hy'
       rw [nikeDH_bridge nike (f k) (nike.reinterpret (telescopeSecret nike baseSk targetSk f k).1)
@@ -360,6 +394,241 @@ private theorem nikeDH_innerLoop_bridge (nike : NIKE) (baseSk targetSk : nike.Pr
   have hmain := main n (le_refl n)
   rw [htn] at hmain
   exact hmain
+
+set_option maxHeartbeats 4000000 in
+/-- **`createHeader`'s outer group-element/key-derivation loop, fully bridged**: given that every
+hop's own public key really is the honest `derivePublicKey` of a known private key (`targetSk`),
+the actual `groupElements`/`keys` arrays `createHeader` builds decode to exactly
+`NIKE.telescopeElem`/`NIKE.telescopeSecret`'s values at every hop index. -/
+private theorem createHeader_loop1_bridge (nike : NIKE) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry)
+    (clientPrivateKey : ByteArray) (filler : ByteArray) (path : Array PathHop)
+    (hdr : ByteArray) (sprpKeys : Array SPRPKey)
+    (h : createHeader nike macS kdfS streamS geom clientPrivateKey filler path = .ok (hdr, sprpKeys))
+    (targetSk : Nat → nike.PrivateKey)
+    (htarget : ∀ i (hi : i < path.size), (path[i]!).publicKey
+      = ofVector (nike.encodePublicKey (nike.derivePublicKey (targetSk i)))) :
+    ∃ (clientSk : nike.PrivateKey) (f : Nat → nike.PrivateKey)
+      (groupElements : Array ByteArray) (keys : Array HopKeys),
+      groupElements.size = path.size ∧ keys.size = path.size ∧
+      nikeSelfPublicKeyBytes nike clientPrivateKey
+        = ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)) ∧
+      (∀ i (hi : i < path.size),
+        groupElements[i]! = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f i).1) ∧
+        keys[i]! = deriveHopKeys kdfS
+          (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk i) f i).1)) ∧
+        nike.decodePrivateKey (toVecN nike.privateKeySize (keys[i]!).blindingFactor) = some (f i)) := by
+  unfold createHeader at h
+  dsimp only at h
+  split at h
+  case isTrue =>
+    have h' : (Except.error "sphinx: invalid path" : Except String (ByteArray × Array SPRPKey)) =
+        Except.ok (hdr, sprpKeys) := h
+    injection h'
+  case isFalse =>
+    split at h
+    case isTrue =>
+      have h' : (Except.error "sphinx: invalid filler length" : Except String (ByteArray × Array SPRPKey)) =
+          Except.ok (hdr, sprpKeys) := h
+      injection h'
+    case isFalse =>
+      rename_i h1 h2
+      simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+        Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl,
+        ite_pure_yield, pure_bind, bind_pure_comp] at h
+      obtain ⟨clientSk, hSk, hA⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+      clear h
+      obtain ⟨hop0, hHop0, hB⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hA
+      clear hA
+      obtain ⟨loop1Final, hLoop1, hC⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hB
+      clear hB hC
+      obtain ⟨s, hs0, hsl, hstep⟩ := CryptWalker.Sphinx.Common.List.forIn_exists_trace _ _
+        (by
+          intro a a' i hi hgb
+          obtain ⟨ss, -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
+          obtain ⟨y', -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hgb
+          exact absurd hgb (by simp))
+        _ _ hLoop1
+      clear hLoop1
+      have hpos : 0 < path.size := by
+        simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at h1
+        omega
+      have hlen1 : (List.range' 1 (path.size - 1)).length = path.size - 1 := by simp
+      have hself : nikeSelfPublicKeyBytes nike clientPrivateKey =
+          ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)) := by
+        have hSk' : nike.decodePrivateKey (toVecN nike.privateKeySize clientPrivateKey) = some clientSk := by
+          unfold nikeDecodePrivateKey at hSk
+          match hd : nike.decodePrivateKey (toVecN nike.privateKeySize clientPrivateKey), hSk with
+          | none, hSk => injection hSk
+          | some sk, hSk =>
+            simp only [pure, Except.pure, Except.ok.injEq] at hSk
+            exact congrArg some hSk
+        unfold nikeSelfPublicKeyBytes
+        rw [hSk']
+      obtain ⟨f, hf⟩ :
+          ∃ f : Nat → nike.PrivateKey, ∀ j,
+            nike.decodePrivateKey (toVecN nike.privateKeySize ((s j).2.1[j]!).blindingFactor) = some (f j) :=
+        ⟨fun j => (nike.decodePrivateKey_total (toVecN nike.privateKeySize ((s j).2.1[j]!).blindingFactor)).choose,
+          fun j => (nike.decodePrivateKey_total (toVecN nike.privateKeySize ((s j).2.1[j]!).blindingFactor)).choose_spec⟩
+      have hsize : ∀ j, j ≤ path.size - 1 → (s j).2.1.size = j + 1 := by
+        intro j
+        induction j with
+        | zero =>
+          intro _
+          rw [hs0]
+          rfl
+        | succ j ih =>
+          intro hj
+          have hj' : j < (List.range' 1 (path.size - 1)).length := by rw [hlen1]; omega
+          obtain ⟨sharedSecret0, -, hrest⟩ :=
+            CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok (hstep j hj')
+          obtain ⟨finalSS, -, hyieldEq⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hrest
+          injection hyieldEq with hyieldEq
+          have hkeyseq : (s (j+1)).2.1 = (s j).2.1.push (deriveHopKeys kdfS finalSS) :=
+            (congrArg (fun p => p.2.1) hyieldEq).symm
+          rw [hkeyseq, Array.size_push, ih (by omega)]
+      have hpush : ∀ j, j < path.size - 1 → ∃ x, (s (j+1)).2.1 = (s j).2.1.push x := by
+        intro j hj
+        have hj' : j < (List.range' 1 (path.size - 1)).length := by rw [hlen1]; omega
+        obtain ⟨sharedSecret0, -, hrest⟩ :=
+          CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok (hstep j hj')
+        obtain ⟨finalSS, -, hyieldEq⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hrest
+        injection hyieldEq with hyieldEq
+        exact ⟨deriveHopKeys kdfS finalSS, (congrArg (fun p => p.2.1) hyieldEq).symm⟩
+      have hsetG : ∀ j, j < path.size - 1 → ∃ x, (s (j+1)).1 = (s j).1.set! (j+1) x := by
+        intro j hj
+        have hj' : j < (List.range' 1 (path.size - 1)).length := by rw [hlen1]; omega
+        have hstepj := hstep j hj'
+        rw [List.getElem_range'_1 j hj', Nat.add_comm] at hstepj
+        obtain ⟨sharedSecret0, -, hrest⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hstepj
+        obtain ⟨finalSS, -, hyieldEq⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hrest
+        injection hyieldEq with hyieldEq
+        exact ⟨nikeBlind nike (s j).2.2 ((s j).2.1.push (deriveHopKeys kdfS finalSS))[j]!.blindingFactor,
+          (congrArg (fun p => p.1) hyieldEq).symm⟩
+      -- `groupElements[i]!` is written exactly once (transitioning into `s i`) and never touched
+      -- again, since every later step's `.set!` targets a strictly larger index.
+      have hfreezeG : ∀ i m, i ≤ m → m ≤ path.size - 1 → (s m).1[i]! = (s i).1[i]! := by
+        intro i m him hmn
+        induction m with
+        | zero => have : i = 0 := by omega
+                  rw [this]
+        | succ m ih =>
+          rcases Nat.lt_or_ge i (m + 1) with h | h
+          · obtain ⟨x, hx⟩ := hsetG m (by omega)
+            rw [hx, Array.getElem!_set!_ne _ _ _ _ (by omega)]
+            exact ih (by omega) (by omega)
+          · have : i = m + 1 := by omega
+            rw [this]
+      -- `groupElements` is only ever `.set!`'d, never resized, so its size stays `path.size`
+      -- throughout — needed to apply `getElem!_set!_self` at the freshly-written index.
+      have hsizeG : ∀ j, j ≤ path.size - 1 → (s j).1.size = path.size := by
+        intro j
+        induction j with
+        | zero => intro _; rw [hs0]; exact Array.size_replicate
+        | succ j ih =>
+          intro hj
+          have hj' : j < (List.range' 1 (path.size - 1)).length := by rw [hlen1]; omega
+          have hstepj := hstep j hj'
+          rw [List.getElem_range'_1 j hj', Nat.add_comm] at hstepj
+          obtain ⟨sharedSecret0, -, hrest⟩ :=
+            CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hstepj
+          obtain ⟨finalSS, -, hyieldEq⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hrest
+          injection hyieldEq with hyieldEq
+          have hEeq0 : (s (j+1)).1 = (s j).1.set! (j+1)
+              (nikeBlind nike (s j).2.2 ((s j).2.1.push (deriveHopKeys kdfS finalSS))[j]!.blindingFactor) :=
+            (congrArg (fun p => p.1) hyieldEq).symm
+          rw [hEeq0, Array.size_set!, ih (by omega)]
+      have main0 : (s 0).1[0]! = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f 0).1) ∧
+          (s 0).2.1[0]! = deriveHopKeys kdfS
+            (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk 0) f 0).1)) ∧
+          (s 0).2.2 = (s 0).1[0]! := by
+        rw [hs0]
+        dsimp only
+        refine ⟨?_, ?_, ?_⟩
+        · rw [getElem!_pos _ 0 (by simpa using hpos), Array.getElem_replicate]
+          rfl
+        · have heq : hop0 = ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk 0) f 0).1) := by
+            rw [htarget 0 hpos] at hHop0
+            rw [nikeDH_bridge nike clientSk (nike.derivePublicKey (targetSk 0)) (nike.derive_safe (targetSk 0))]
+              at hHop0
+            injection hHop0 with hHop0
+            exact hHop0.symm
+          rw [getElem!_pos _ 0 (by simp)]
+          exact congrArg (deriveHopKeys kdfS) heq
+        · rw [getElem!_pos _ 0 (by simpa using hpos), Array.getElem_replicate]
+      have main : ∀ m, m < path.size →
+          (s m).1[m]! = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f m).1) ∧
+          (s m).2.1[m]! = deriveHopKeys kdfS
+            (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk m) f m).1)) ∧
+          (s m).2.2 = (s m).1[m]! := by
+        intro m
+        induction m with
+        | zero => intro _; exact main0
+        | succ m ih =>
+          intro hm
+          have hm' : m < path.size := by omega
+          obtain ⟨ihE, ihS, ihP⟩ := ih hm'
+          have hj' : m < (List.range' 1 (path.size - 1)).length := by rw [hlen1]; omega
+          have hstepm := hstep m hj'
+          rw [List.getElem_range'_1 m hj', Nat.add_comm] at hstepm
+          obtain ⟨sharedSecret0, hss0, hrest⟩ :=
+            CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hstepm
+          obtain ⟨finalSS, hfinalSS, hyieldEq⟩ :=
+            CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hrest
+          injection hyieldEq with hyieldEq
+          have hEeq : (s (m + 1)).1 = (s m).1.set! (m + 1)
+              (nikeBlind nike (s m).2.2 ((s m).2.1.push (deriveHopKeys kdfS finalSS))[m]!.blindingFactor) :=
+            (congrArg (fun p => p.1) hyieldEq).symm
+          have hSeq : (s (m + 1)).2.1 = (s m).2.1.push (deriveHopKeys kdfS finalSS) :=
+            (congrArg (fun p => p.2.1) hyieldEq).symm
+          have hPeq : (s (m + 1)).2.2 = nikeBlind nike (s m).2.2
+              ((s m).2.1.push (deriveHopKeys kdfS finalSS))[m]!.blindingFactor :=
+            (congrArg (fun p => p.2.2) hyieldEq).symm
+          have hfactor_eq : ∀ k (hk : k < m + 1),
+              nike.decodePrivateKey (toVecN nike.privateKeySize ((s m).2.1[k]!).blindingFactor)
+                = some (f k) := by
+            intro k hk
+            rw [Array.getElem!_stable_from_pushes (fun j => (s j).2.1) (path.size - 1) hpush hsize k m
+              (by omega) (by omega)]
+            exact hf k
+          have htarget' : path[m + 1]!.publicKey
+              = ofVector (nike.encodePublicKey (nike.derivePublicKey (targetSk (m + 1)))) :=
+            htarget (m + 1) (by omega)
+          have hfinalSS_eq := nikeDH_innerLoop_bridge nike clientSk (targetSk (m + 1)) path[m + 1]!.publicKey
+            htarget' (fun k => ((s m).2.1[k]!).blindingFactor) f (m + 1) hfactor_eq sharedSecret0 finalSS
+            hss0 hfinalSS
+          -- The blinding factor `nikeBlind` uses to compute hop `m+1`'s group element is hop
+          -- `m`'s own key — already present *before* this step's push, hence untouched by it.
+          have hstableKeyEq : ((s m).2.1.push (deriveHopKeys kdfS finalSS))[m]! = (s m).2.1[m]! :=
+            CryptWalker.Sphinx.Common.Array.getElem!_push_stable _ _ _ (by rw [hsize m (by omega)]; omega)
+          have hX : nikeBlind nike (s m).2.2 ((s m).2.1.push (deriveHopKeys kdfS finalSS))[m]!.blindingFactor
+              = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f (m + 1)).1) := by
+            rw [hstableKeyEq, ihP, ihE]
+            exact nikeBlind_bridge nike (telescopeElem nike clientSk f m).1 (f m)
+              (telescopeElem nike clientSk f m).2 _ (hf m)
+          have hpushedEq : ((s m).2.1.push (deriveHopKeys kdfS finalSS))[m + 1]! = deriveHopKeys kdfS finalSS := by
+            have hsz : (s m).2.1.size = m + 1 := hsize m (by omega)
+            rw [← hsz, getElem!_pos _ _ (by rw [Array.size_push]; omega), Array.getElem_push_eq]
+          refine ⟨?_, ?_, ?_⟩
+          · rw [hEeq, Array.getElem!_set!_self _ _ _ (by rw [hsizeG m (by omega)]; omega), hX]
+          · rw [hSeq, hpushedEq, ← hfinalSS_eq]
+          · rw [hPeq, hX, hEeq, Array.getElem!_set!_self _ _ _ (by rw [hsizeG m (by omega)]; omega), hX]
+      have hsl' : s (path.size - 1) = loop1Final := by rw [hlen1] at hsl; exact hsl
+      refine ⟨clientSk, f, loop1Final.1, loop1Final.2.1, ?_, ?_, hself, ?_⟩
+      · rw [← hsl']; exact hsizeG (path.size - 1) (le_refl _)
+      · rw [← hsl']; rw [hsize (path.size - 1) (le_refl _)]; omega
+      · intro i hi
+        obtain ⟨mE, mS, -⟩ := main i hi
+        have hE : loop1Final.1[i]! = (s i).1[i]! := by
+          rw [← hsl']; exact hfreezeG i (path.size - 1) (by omega) (le_refl _)
+        have hS : loop1Final.2.1[i]! = (s i).2.1[i]! := by
+          rw [← hsl']
+          exact Array.getElem!_stable_from_pushes (fun j => (s j).2.1)
+            (path.size - 1) hpush hsize i (path.size - 1) (by omega) (le_refl _)
+        refine ⟨?_, ?_, ?_⟩
+        · rw [hE]; exact mE
+        · rw [hS]; exact mS
+        · rw [hS]; exact hf i
 
 set_option maxHeartbeats 1000000 in
 /-- `createHeader`'s header always starts with `v0AD ++ groupElements[0]!`, and
