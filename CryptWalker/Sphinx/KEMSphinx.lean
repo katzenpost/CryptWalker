@@ -9,7 +9,7 @@ import CryptWalker.Sphinx.Commands
 import CryptWalker.Sphinx.Types
 import CryptWalker.Sphinx.Interface
 import CryptWalker.Sphinx.Common
-import CryptWalker.Sphinx.NIKESphinx
+import CryptWalker.Sphinx.nike_sphinx_theorems
 import CryptWalker.Sphinx.SURB
 import CryptWalker.Sphinx.Crypto.Stream
 import CryptWalker.WideBlockCipher.WideBlockCipher

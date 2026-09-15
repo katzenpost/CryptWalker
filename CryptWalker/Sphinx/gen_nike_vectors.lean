@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Lean.Data.Json
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.NIKESphinx
+import CryptWalker.Sphinx.nike_sphinx_theorems
 import CryptWalker.Sphinx.SURB
 import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.Util.newhex
