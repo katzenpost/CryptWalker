@@ -952,6 +952,162 @@ private theorem createHeader_loop3_never_done (nike : NIKE) (macS : MAC) (geom :
   split at hstep <;> injection hstep with hstep <;> injection hstep
 
 set_option maxHeartbeats 1000000 in
+/-- **The full trace of `createHeader`'s third loop.** As `createHeader_loop3_step` for a single
+step, packaged (via `List.forIn_exists_trace`, ruled non-`.done` by `createHeader_loop3_never_done`)
+into the whole sequence of `(routingInfo, macBytes)` pairs, one per hop — the content-level fact
+`unwrapNIKE`'s peeling side needs, mirroring `KEMSphinx.createKEMHeader_loop3_trace`. -/
+private theorem createHeader_loop3_trace (nike : NIKE) (macS : MAC) (geom : Geometry)
+    (path : Array PathHop)
+    (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
+    (nrHops : Nat) (init final : ByteArray × ByteArray)
+    (hfinal :
+      forIn (List.range' 0 nrHops) init
+        (fun iRev (st : ByteArray × ByteArray) =>
+          (do
+            let i := nrHops - 1 - iRev
+            let isTerminal := i == nrHops - 1
+            let hop := path[i]!
+            let budget := if isTerminal then geom.perHopRoutingInfoLength
+              else geom.perHopRoutingInfoLength - geom.nextNodeHopLength
+            let mut riFragment ← commandsToBytes budget hop.commands
+            if !isTerminal then
+              let next := path[i + 1]!
+              riFragment := riFragment ++ (RoutingCommand.nextNodeHop next.id (toVec32 st.2)).toBytes
+            let routingInfo := zeroPadTo geom.perHopRoutingInfoLength riFragment ++ st.1
+            let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
+            let mPreimage := v0AD ++ groupElements[i]! ++ routingInfo
+              ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
+            let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
+            pure (ForInStep.yield (routingInfo, macBytes)) :
+              Except String (ForInStep (ByteArray × ByteArray)))) = Except.ok final) :
+    ∃ s : Nat → ByteArray × ByteArray, s 0 = init ∧ s nrHops = final ∧
+      ∀ j (hj : j < nrHops), ∃ riFragment0,
+        commandsToBytes
+          (if (nrHops - 1 - j) == nrHops - 1 then geom.perHopRoutingInfoLength
+           else geom.perHopRoutingInfoLength - geom.nextNodeHopLength)
+          (path[nrHops - 1 - j]!).commands = Except.ok riFragment0 ∧
+        (s (j + 1)).1 = xorBytes (zeroPadTo geom.perHopRoutingInfoLength
+            (if (nrHops - 1 - j) == nrHops - 1 then riFragment0
+             else riFragment0 ++ (RoutingCommand.nextNodeHop (path[nrHops - 1 - j + 1]!).id
+               (toVec32 (s j).2)).toBytes) ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+          (v0AD ++ groupElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+            ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty))) := by
+  have hnd : ∀ (b : Nat) (a a' : ByteArray × ByteArray), b ∈ List.range' 0 nrHops →
+      (fun iRev (st : ByteArray × ByteArray) =>
+        (do
+          let i := nrHops - 1 - iRev
+          let isTerminal := i == nrHops - 1
+          let hop := path[i]!
+          let budget := if isTerminal then geom.perHopRoutingInfoLength
+            else geom.perHopRoutingInfoLength - geom.nextNodeHopLength
+          let mut riFragment ← commandsToBytes budget hop.commands
+          if !isTerminal then
+            let next := path[i + 1]!
+            riFragment := riFragment ++ (RoutingCommand.nextNodeHop next.id (toVec32 st.2)).toBytes
+          let routingInfo := zeroPadTo geom.perHopRoutingInfoLength riFragment ++ st.1
+          let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
+          let mPreimage := v0AD ++ groupElements[i]! ++ routingInfo
+            ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
+          let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
+          pure (ForInStep.yield (routingInfo, macBytes)) :
+            Except String (ForInStep (ByteArray × ByteArray)))) b a
+        ≠ Except.ok (ForInStep.done a') := by
+    intro b a a' _hb hcontra
+    exact createHeader_loop3_never_done nike macS geom path keys groupElements riKeyStream riPadding
+      nrHops b a.1 a.2 a' hcontra
+  obtain ⟨s, hs0, hsl, hstep⟩ := CryptWalker.Sphinx.Common.List.forIn_exists_trace
+    (List.range' 0 nrHops) _ hnd init final hfinal
+  refine ⟨s, hs0, by simpa using hsl, ?_⟩
+  intro j hj
+  have hj' : j < (List.range' 0 nrHops).length := by simpa using hj
+  have hstepj := hstep j hj'
+  simp only [List.getElem_range', Nat.one_mul, Nat.zero_add] at hstepj
+  obtain ⟨riFragment0, hriFragment0, hstepj⟩ := Except.eq_ok_of_bind_eq_ok hstepj
+  by_cases hterm : nrHops - 1 - j = nrHops - 1
+  · have hcond : (nrHops - 1 - j == nrHops - 1) = true := by simp [hterm]
+    have hcond' : (!(nrHops - 1 - j == nrHops - 1)) = false := by simp [hterm]
+    simp only [hcond'] at hstepj
+    simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
+      Bool.false_eq_true, reduceIte] at hstepj
+    simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
+    have h1 : (s (j + 1)).1 = xorBytes (zeroPadTo geom.perHopRoutingInfoLength riFragment0
+        ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) := (congrArg Prod.fst hstepj).symm
+    have h2 : (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+        (v0AD ++ groupElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+          ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty))) := by
+      rw [h1]; exact (congrArg Prod.snd hstepj).symm
+    refine ⟨riFragment0, hriFragment0, ?_, h2⟩
+    simpa only [hcond, decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
+      Bool.false_eq_true, reduceIte] using h1
+  · have hcond : (nrHops - 1 - j == nrHops - 1) = false := by simp [hterm]
+    have hcond' : (!(nrHops - 1 - j == nrHops - 1)) = true := by simp [hterm]
+    simp only [hcond'] at hstepj
+    simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
+      Bool.false_eq_true, reduceIte] at hstepj
+    simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
+    have h1 : (s (j + 1)).1 = xorBytes (zeroPadTo geom.perHopRoutingInfoLength
+        (riFragment0 ++ (RoutingCommand.nextNodeHop (path[nrHops - 1 - j + 1]!).id
+          (toVec32 (s j).2)).toBytes) ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) :=
+      (congrArg Prod.fst hstepj).symm
+    have h2 : (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+        (v0AD ++ groupElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+          ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty))) := by
+      rw [h1]; exact (congrArg Prod.snd hstepj).symm
+    refine ⟨riFragment0, hriFragment0, ?_, h2⟩
+    simpa only [hcond, decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
+      Bool.false_eq_true, reduceIte] using h1
+
+/-- **Sizes along the `createHeader_loop3_trace` trace**: `(s j).1` grows by exactly one
+`perHopRoutingInfoLength` per step (`zeroPadTo`'s output width, by `commandsToBytes_size_le` +
+`zeroPadTo_size`), and `(s j).2` — once at least one step has run — is always exactly
+`macS.tagSize` wide, by the type of `macS.mac` alone. Mirrors `KEMSphinx.createKEMHeader_s_size`. -/
+private theorem createHeader_s_size (nike : NIKE) (macS : MAC) (geom : Geometry)
+    (path : Array PathHop) (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
+    (hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
+    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
+    (nrHops : Nat) (s : Nat → ByteArray × ByteArray)
+    (hstep : ∀ j (hj : j < nrHops), ∃ riFragment0,
+        commandsToBytes
+          (if (nrHops - 1 - j) == nrHops - 1 then geom.perHopRoutingInfoLength
+           else geom.perHopRoutingInfoLength - geom.nextNodeHopLength)
+          (path[nrHops - 1 - j]!).commands = Except.ok riFragment0 ∧
+        (s (j + 1)).1 = xorBytes (zeroPadTo geom.perHopRoutingInfoLength
+            (if (nrHops - 1 - j) == nrHops - 1 then riFragment0
+             else riFragment0 ++ (RoutingCommand.nextNodeHop (path[nrHops - 1 - j + 1]!).id
+               (toVec32 (s j).2)).toBytes) ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+          (v0AD ++ groupElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+            ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty)))) :
+    ∀ j (hj : j ≤ nrHops), (s j).1.size = (s 0).1.size + j * geom.perHopRoutingInfoLength ∧
+      (0 < j → (s j).2.size = macS.tagSize) := by
+  intro j hj
+  induction j with
+  | zero => simp
+  | succ j ih =>
+    obtain ⟨ih1, -⟩ := ih (by omega)
+    obtain ⟨riFragment0, hriFragment0, h1, h2⟩ := hstep j (by omega)
+    have hfullsize : (if (nrHops - 1 - j) == nrHops - 1 then riFragment0
+        else riFragment0 ++ (RoutingCommand.nextNodeHop (path[nrHops - 1 - j + 1]!).id
+          (toVec32 (s j).2)).toBytes).size ≤ geom.perHopRoutingInfoLength := by
+      by_cases hterm : nrHops - 1 - j = nrHops - 1
+      · have hcond : ((nrHops - 1 - j) == nrHops - 1) = true := by simp [hterm]
+        rw [hcond] at hriFragment0 ⊢
+        simp only [if_true]
+        exact commandsToBytes_size_le hriFragment0
+      · have hcond : ((nrHops - 1 - j) == nrHops - 1) = false := by simp [hterm]
+        rw [hcond] at hriFragment0 ⊢
+        simp only [Bool.false_eq_true, if_false]
+        have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength - geom.nextNodeHopLength :=
+          commandsToBytes_size_le hriFragment0
+        simp only [ByteArray.size_append, RoutingCommand.nextNodeHop_toBytes_size]
+        rw [hnnh] at hle0 hperhop
+        omega
+    refine ⟨?_, fun _ => ?_⟩
+    · rw [h1, size_xorBytes, ByteArray.size_append, zeroPadTo_size hfullsize, ih1]; ring
+    · rw [h2]; exact Util.Bytes.size_ofVector _
+
+set_option maxHeartbeats 1000000 in
 /-- **`createHeader`**'s `hdr.size`: `2 + nike.publicKeySize + geom.routingInfoLength +
 macLength`, matching `geom.headerLength` whenever `geom` was actually built for `nike` (the
 `hcompat`-style hypotheses below spell out exactly what that means, rather than assuming it
