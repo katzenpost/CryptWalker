@@ -870,7 +870,7 @@ round trip (`nike_vectors_test`; `nike_selftest`'s `runRound`/`runAbstractWrapRo
 `runAbstractSURBRound`), but not proved here for the reason the size axioms above aren't: real
 work, through `createHeader`'s blinding chain and `unwrapNIKE`'s cipher/MAC composition, out of
 scope for this pass. Generic in the wide-block cipher/MAC/KDF/stream cipher, matching
-`wrapKEM_unwrapKEM_complete`. -/
+`KEMSphinx.wrapKEM_unwrapKEM_complete_valid`, its real, axiom-free KEM-Sphinx counterpart. -/
 axiom wrapNIKE_unwrapNIKE_complete (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : List PathHop)
     (privKeys : List ByteArray) (filler : ByteArray)

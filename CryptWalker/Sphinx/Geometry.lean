@@ -186,4 +186,18 @@ theorem ofKEM_validForKEM (kemSchemeName : String) (userForwardPayloadLength : N
   subst h
   exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
+/-- `payloadTagLength` is a pure protocol constant (`Constants.payloadTagLength`, the width of the
+all-zero tag a correctly-decrypted payload ends in) — `buildKEM` sets it the same way regardless
+of which `kem` resolved, so unlike `ValidForKEM` this needs no `byName` witness at all. Lets a
+caller holding only `ofKEM`'s success proof (not which specific `KEM` it resolved to) discharge
+`wrapKEM_unwrapKEM_complete_valid`'s `h16` hypothesis. -/
+theorem ofKEM_payloadTagLength (kemSchemeName : String) (userForwardPayloadLength : Nat)
+    (withSURB : Bool) (nrHops : Nat) (geom : Geometry)
+    (h : ofKEM kemSchemeName userForwardPayloadLength withSURB nrHops = .ok geom) :
+    geom.payloadTagLength = CryptWalker.Sphinx.Constants.payloadTagLength := by
+  unfold ofKEM at h
+  split at h
+  · injection h
+  · injection h with h; subst h; rfl
+
 end CryptWalker.Sphinx.Geometry

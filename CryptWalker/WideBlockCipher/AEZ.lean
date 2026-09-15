@@ -403,8 +403,9 @@ theorem aezTiny_size (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) 
 
 /-! ## Toward round-trip correctness: `aezTinyLR`'s abstract Feistel-style ladder
 
-`decipher (encipher m) = m` (the fact `wrapNIKE_unwrapNIKE_complete`/`wrapKEM_unwrapKEM_complete`
-ultimately need) is real cryptographic-construction correctness, not the loop-invariant/size
+`decipher (encipher m) = m` (the fact `wrapNIKE_unwrapNIKE_complete`/`wrapKEM_unwrapKEM_complete_valid`
+ultimately need, via `WideBlockCipher.roundTrip`) is real cryptographic-construction correctness,
+not the loop-invariant/size
 bookkeeping the rest of this file's proofs are — a categorically different, larger undertaking.
 This section proves the algebraic crux of the `aezTiny` half of it (the `< 32`-byte path):
 `aezTinyLR`'s `for _ in [0:rounds/2] do ...` loop, run forward (`d = 0`, ascending counters

@@ -2703,33 +2703,17 @@ private theorem wrapKEM_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MA
       rw [hw] at h
       injection h
 
-/-- As `NIKESphinx.wrapNIKE_unwrapNIKE_complete`: `KEMSphinxScheme`'s witness for
-`Sphinx.Interface.unwrap_complete`. Generic over the wide-block cipher/MAC/KDF/stream cipher, not
-just the `KEM` — never AEZ/HMAC-SHA256/HKDF/AES-CTR specifics, only `cipher`/`macS`/`kdfS`/
-`streamS`'s own fields, as `wrapKEM`/`unwrapKEM` themselves now are. -/
-axiom wrapKEM_unwrapKEM_complete (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
-    (streamS : StreamCipher) (geom : Geometry) (path : List PathHop)
-    (privKeys : List ByteArray) (filler : ByteArray)
-    (payload : Vector UInt8 geom.forwardPayloadLength) (st : SeedStream)
-    (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream) :
-    path ≠ [] →
-    path.map (·.publicKey) = privKeys.map (kemSelfPublicKeyBytes kem) →
-    (∀ hop ∈ path, ∀ c ∈ hop.commands, c ≠ .null ∧ (∀ id m, c ≠ .nextNodeHop id m)) →
-    (∀ c ∈ (path[path.length - 1]!).commands, ∀ id, c ≠ .surbReply id) →
-    wrapKEM kem cipher macS kdfS streamS geom path filler payload st = .ok pkt st' →
-    unwrapChainAux (unwrapKEM kem cipher macS kdfS streamS geom) privKeys (ofVector pkt)
-      = .ok (some (ofVector payload))
-
-/-- **The real, hypothesis-honest completeness theorem.** As `wrapKEM_unwrapKEM_complete` above,
-but as an actual proof rather than an axiom — at the cost of two extra hypotheses the axiom
-(deliberately kept unconstrained, to match `Sphinx.Interface.Sphinx.unwrap_complete`'s fixed
-signature — the interface has no `kem`-specific `ValidForKEM` slot to thread this through,
-so satisfying `KEMSphinxScheme.unwrap_complete` for the totally generic `kemSphinxSchemeOf`
-genuinely needs the axiom above) leaves implicit: `geom.ValidForKEM kem` (the geometry's numeric
-fields actually agree with `kem.ciphertextSize` the way every concrete `Geometry.ofKEM` output
+/-- **The real completeness theorem**: `KEMSphinxScheme`'s witness for
+`Sphinx.Interface.unwrap_complete`, no axiom involved. Generic over the wide-block cipher/MAC/KDF/
+stream cipher, not just the `KEM` — never AEZ/HMAC-SHA256/HKDF/AES-CTR specifics, only `cipher`/
+`macS`/`kdfS`/`streamS`'s own fields, as `wrapKEM`/`unwrapKEM` themselves now are. Two hypotheses
+beyond what `wrap`/`unwrap`'s own use requires: `geom.ValidForKEM kem` (the geometry's numeric
+fields actually agree with `kem.ciphertextSize`, the way every concrete `Geometry.ofKEM` output
 does) and `16 ≤ geom.payloadTagLength + geom.forwardPayloadLength` (without it, `cipher.roundTrip`
 simply doesn't apply — a real precondition of the underlying wide-block cipher, not a proof
-artifact). Assembles `wrapKEM_unfold` (what a successful `wrapKEM` run drew and computed),
+artifact). `kemSphinxSchemeOf` takes both as explicit parameters and passes them straight through
+here, so nothing forces this fact back into an axiom the way an earlier version of this file did.
+Assembles `wrapKEM_unfold` (what a successful `wrapKEM` run drew and computed),
 `newKEMPacket_unfold`/`createKEMHeader_unfold` (what that computation's own trace looked like),
 and `unwrapChain_hopPacket` (the multi-hop induction) into one call. -/
 theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
@@ -2901,12 +2885,17 @@ structure KEMSphinxScheme extends CryptWalker.Sphinx.Interface.Sphinx where
       ∃ raw : ByteArray, xorBytes raw (stream.keystream key iv target.size) = target :=
     fun key iv target => xorBytes_achieves_any_target (stream.keystream key iv target.size) target
 
-/-- Build a `KEMSphinxScheme` from any `KEM` at all — total, no `Except`. Fully generic in the
-wide-block cipher/MAC/KDF/stream cipher too: nothing here picks a concrete instance of any of the
-four, matching `wrapKEM`/`unwrapKEM`'s own genericity. `kemSphinxScheme` below is the one place
-that does pick concrete defaults, for callers who only know a KEM's registered name. -/
+/-- Build a `KEMSphinxScheme` from any `KEM` at all — no axiom: `unwrap_complete` is
+`wrapKEM_unwrapKEM_complete_valid`, the real theorem, given the two extra facts it needs beyond
+what `wrap`/`unwrap` themselves require. Still total in the sense that matters (no `Except`) —
+`hvalid`/`hmactag`/`h16` are ordinary hypotheses a caller supplies, decidable and free to check at
+the one place (`kemSphinxScheme` below) that doesn't already have them in hand. Fully generic in
+the wide-block cipher/MAC/KDF/stream cipher too: nothing here picks a concrete instance of any of
+the four, matching `wrapKEM`/`unwrapKEM`'s own genericity. -/
 def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
-    (streamS : StreamCipher) (geom : Geometry) : KEMSphinxScheme :=
+    (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (hmactag : macS.tagSize = macLength)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : KEMSphinxScheme :=
   { State := SeedStream
     PrivateKey := ByteArray
     Command := RoutingCommand
@@ -2922,7 +2911,9 @@ def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS 
     newSURB := wrapKEMSURB kem macS kdfS streamS geom
     newPacketFromSURB := fun surb payload =>
       CryptWalker.Sphinx.SURB.newPacketFromSURB cipher geom (ofVector surb) payload
-    unwrap_complete := wrapKEM_unwrapKEM_complete kem cipher macS kdfS streamS geom
+    unwrap_complete := fun path privKeys filler payload st pkt st' hpath hpriv hcmds hsurb hwrap =>
+      wrapKEM_unwrapKEM_complete_valid kem cipher macS kdfS streamS geom hvalid hmactag h16
+        path privKeys filler payload st pkt st' hpath hpriv hcmds hsurb hwrap
     kem := kem
     not_wrap_resistant := fun key iv target =>
       xorBytes_achieves_any_target (streamS.keystream key iv target.size) target }
@@ -2931,6 +2922,13 @@ def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS 
 `CryptWalker.KEM.byName` — the same registry `Geometry.ofKEM` resolves its ciphertext size
 against. Genuinely agnostic to *which* registered KEM this is: no NIKE, no PRF, nothing but the
 `KEM` value itself and a `Geometry`.
+
+`hvalid`/`hmactag`/`h16` (`kemSphinxSchemeOf`'s three completeness hypotheses) are all decidable
+`Nat`-equality/inequality facts, so they're checked here rather than assumed — any `geom` actually
+obtained from `Geometry.ofKEM name ...` for this same `name` satisfies all three (`ofKEM_validForKEM`/
+`ofKEM_payloadTagLength`, and `hmacSha256MAC.tagSize = macLength` unconditionally), and a mismatched
+`geom` is rejected explicitly, the same way `nikeSphinxScheme` already rejects one that fails
+`ValidForNIKE`.
 
 The one place that picks a concrete cryptographic stack: AEZ/HMAC-SHA256/HKDF-SHA256-Expand/
 AES-256-CTR, matching this codebase's `sphinx_kem_vectors.json` — `kemSphinxSchemeOf` underneath
@@ -2942,10 +2940,17 @@ def kemSphinxScheme (geom : Geometry) : Except String KEMSphinxScheme :=
   | .inr name =>
     match CryptWalker.KEM.byName name with
     | none => throw s!"sphinx: KEM scheme {name} not implemented"
-    | some kem => pure (kemSphinxSchemeOf kem CryptWalker.WideBlockCipher.AEZ.aez
-        CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
-        CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
-        CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR geom)
+    | some kem =>
+      if hvalid : geom.ValidForKEM kem then
+        if hmactag : CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC.tagSize = macLength then
+          if h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength then
+            pure (kemSphinxSchemeOf kem CryptWalker.WideBlockCipher.AEZ.aez
+              CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+              CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+              CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR geom hvalid hmactag h16)
+          else throw s!"sphinx: geometry's payload tag/forward payload too short for scheme {name}"
+        else throw "sphinx: internal error: hmacSha256MAC.tagSize ≠ macLength"
+      else throw s!"sphinx: geometry is not valid for KEM scheme {name}"
 
 /-! ## Wrap-resistance fails
 
