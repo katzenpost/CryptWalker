@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.nike_sphinx_theorems
-import CryptWalker.Sphinx.KEMSphinx
+import CryptWalker.Sphinx.kem_sphinx_theorems
 import CryptWalker.NIKE.Schemes
 import CryptWalker.KEM.Schemes
 
