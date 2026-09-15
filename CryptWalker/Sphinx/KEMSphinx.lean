@@ -2921,7 +2921,7 @@ def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS 
     unwrap := unwrapKEM kem cipher macS kdfS streamS geom
     newSURB := wrapKEMSURB kem macS kdfS streamS geom
     newPacketFromSURB := fun surb payload =>
-      CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
+      CryptWalker.Sphinx.SURB.newPacketFromSURB cipher geom (ofVector surb) payload
     unwrap_complete := wrapKEM_unwrapKEM_complete kem cipher macS kdfS streamS geom
     kem := kem
     not_wrap_resistant := fun key iv target =>

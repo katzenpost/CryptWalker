@@ -999,7 +999,7 @@ def nikeSphinxCore (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS :
   unwrap := unwrapNIKE nike cipher macS kdfS streamS geom
   newSURB := wrapNIKESURB nike macS kdfS streamS geom
   newPacketFromSURB := fun surb payload =>
-    CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
+    CryptWalker.Sphinx.SURB.newPacketFromSURB cipher geom (ofVector surb) payload
   unwrap_complete := fun path privKeys filler payload st pkt st' hpath hkeys _hcmds _hsurb hwrap =>
     wrapNIKE_unwrapNIKE_complete nike cipher macS kdfS streamS geom path privKeys filler payload
       st pkt st' hpath hkeys hwrap

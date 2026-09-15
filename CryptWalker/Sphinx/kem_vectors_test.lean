@@ -96,7 +96,7 @@ def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   let geom := if withSurb then geomSurb else geomNoSurb
   let mut ok := true
   if withSurb then
-    match newPacketFromSURB geom v.surb v.payload with
+    match newPacketFromSURB wbCipher geom v.surb v.payload with
     | .error e =>
       IO.eprintln s!"    newPacketFromSURB failed: {e}"
       ok := false
@@ -151,7 +151,7 @@ def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
               IO.eprintln s!"    hop {i}: expected terminal payload, got forwarding"
               ok := false
             | some p =>
-              match decryptSURBPayload geom v.surbKeys p with
+              match decryptSURBPayload wbCipher geom v.surbKeys p with
               | .error e =>
                 IO.eprintln s!"    hop {i}: DecryptSURBPayload failed: {e}"
                 ok := false

@@ -105,7 +105,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
     | .error e => throw (IO.userError s!"newNIKESURB failed: {e}")
     | .ok (s, k) =>
       surb := s; surbKeys := k
-      match newPacketFromSURB geom surb payload with
+      match newPacketFromSURB wbCipher geom surb payload with
       | .error e => throw (IO.userError s!"newPacketFromSURB failed: {e}")
       | .ok (p, firstHop) =>
         if byteArrayToHex (ofVector firstHop) ≠ byteArrayToHex (ofVector nodes[0]!.id) then
@@ -134,7 +134,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
         | none => throw (IO.userError s!"hop {i}: expected terminal payload")
         | some p =>
           if withSURB then
-            match decryptSURBPayload geom surbKeys p with
+            match decryptSURBPayload wbCipher geom surbKeys p with
             | .error e => throw (IO.userError s!"decryptSURBPayload failed: {e}")
             | .ok final => finalPayload := final
           else

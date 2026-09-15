@@ -239,7 +239,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
                 IO.eprintln s!"hop {i}: expected terminal payload"
                 ok := false
               | some p =>
-                match CryptWalker.Sphinx.SURB.decryptSURBPayload geom surbKeys p with
+                match CryptWalker.Sphinx.SURB.decryptSURBPayload wbCipher geom surbKeys p with
                 | .error e =>
                   IO.eprintln s!"decryptSURBPayload failed: {e}"
                   ok := false
@@ -268,7 +268,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
       pure false
     else
     let payload ← randomBytes geom.forwardPayloadLength
-    match CryptWalker.Sphinx.SURB.newPacketFromSURB geom surb payload with
+    match CryptWalker.Sphinx.SURB.newPacketFromSURB wbCipher geom surb payload with
     | .error e =>
       IO.eprintln s!"newPacketFromSURB failed: {e}"
       pure false
@@ -304,7 +304,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
                 IO.eprintln s!"hop {i}: expected terminal payload"
                 ok := false
               | some p =>
-                match CryptWalker.Sphinx.SURB.decryptSURBPayload geom surbKeys p with
+                match CryptWalker.Sphinx.SURB.decryptSURBPayload wbCipher geom surbKeys p with
                 | .error e =>
                   IO.eprintln s!"decryptSURBPayload failed: {e}"
                   ok := false
