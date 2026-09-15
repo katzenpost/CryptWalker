@@ -39,7 +39,8 @@ open CryptWalker.Sphinx.Crypto.GenericKDF (KDF)
 open CryptWalker.Sphinx.Crypto.StreamCipher (StreamCipher)
 open CryptWalker.NIKE.NIKE (NIKE telescopeElem telescopeSecret telescope_agree)
 open CryptWalker.Hash.Sha512 (sha512_256)
-open CryptWalker.Util.Bytes (ofVector)
+open CryptWalker.Util.Bytes (ofVector extract_append_le extract_append_of_le extract_append_of_ge
+  extract_append_left extract_append_right append_extract)
 
 /-! # NIKE-Sphinx
 
@@ -1517,6 +1518,135 @@ private theorem hopPacket_size (nike : NIKE) (macS : MAC) (geom : Geometry) (pat
     rw [hkeq0] at hnrHmul ⊢
     simp only [Nat.sub_zero, Nat.zero_mul, Nat.add_zero] at hnrHmul ⊢
     omega
+
+/-- **`hopPacket`'s five wire-format slices**, spelled out at the exact byte offsets `unwrapNIKE`
+reads them at (`geOff = 2`, `riOff = geOff + nike.publicKeySize`, `macOff = riOff +
+routingInfoLength`, `payloadOff = macOff + macLength`) — the fact `unwrapNIKE`'s own extracts need
+to match against a packet built by `hopPacket`, one slice at a time. Shares `hopPacket_size`'s
+hypotheses and its proof's opening moves. Mirrors `KEMSphinx.hopPacket_slices`. -/
+private theorem hopPacket_slices (nike : NIKE) (macS : MAC) (geom : Geometry) (path : Array PathHop)
+    (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
+    (sprpKeys : Array SPRPKey)
+    (nrHops : Nat) (s : Nat → ByteArray × ByteArray) (t : Nat → ByteArray)
+    (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
+    (hs0size : (s 0).1.size = (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength)
+    (hstep : ∀ j (hj : j < nrHops), ∃ riFragment0,
+        commandsToBytes
+          (if (nrHops - 1 - j) == nrHops - 1 then geom.perHopRoutingInfoLength
+           else geom.perHopRoutingInfoLength - geom.nextNodeHopLength)
+          (path[nrHops - 1 - j]!).commands = Except.ok riFragment0 ∧
+        (s (j + 1)).1 = xorBytes (zeroPadTo geom.perHopRoutingInfoLength
+            (if (nrHops - 1 - j) == nrHops - 1 then riFragment0
+             else riFragment0 ++ (RoutingCommand.nextNodeHop (path[nrHops - 1 - j + 1]!).id
+               (toVec32 (s j).2)).toBytes) ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+          (v0AD ++ groupElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+            ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty))))
+    (hgnsize : groupElements.size = nrHops)
+    (hgesize : ∀ j (hj : j < groupElements.size), (groupElements[j]'hj).size = nike.publicKeySize)
+    (hpadsize : ∀ i (hi : i < nrHops), riPadding[i]!.size = (i + 1) * geom.perHopRoutingInfoLength)
+    (htsize : ∀ j (hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
+    (ht0size : (t 0).size = geom.payloadTagLength + geom.forwardPayloadLength)
+    (hsprp : sprpKeys.size = nrHops) (hgen : nrHops ≤ geom.nrHops) (k : Nat) (hk : k < nrHops) :
+    (hopPacket groupElements riPadding s t nrHops k).extract 0 2 = v0AD ∧
+    (hopPacket groupElements riPadding s t nrHops k).extract 2 (2 + nike.publicKeySize)
+      = groupElements[k]! ∧
+    (hopPacket groupElements riPadding s t nrHops k).extract (2 + nike.publicKeySize)
+        (2 + nike.publicKeySize + geom.routingInfoLength)
+      = (s (nrHops - k)).1 ++ (if k > 0 then riPadding[k - 1]! else ByteArray.empty) ∧
+    (hopPacket groupElements riPadding s t nrHops k).extract
+        (2 + nike.publicKeySize + geom.routingInfoLength)
+        (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+      = (s (nrHops - k)).2 ∧
+    (hopPacket groupElements riPadding s t nrHops k).extract
+        (2 + nike.publicKeySize + geom.routingInfoLength + macLength)
+        (hopPacket groupElements riPadding s t nrHops k).size
+      = t (nrHops - k) := by
+  obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
+  have hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength := by omega
+  have hssize := createHeader_s_size nike macS geom path keys groupElements riKeyStream riPadding
+    hperhop hnnh nrHops s hstep
+  have hR : (s (nrHops - k)).1.size
+      = (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength + (nrHops - k) * geom.perHopRoutingInfoLength :=
+    hs0size ▸ (hssize (nrHops - k) (by omega)).1
+  have hM : (s (nrHops - k)).2.size = macS.tagSize := (hssize (nrHops - k) (by omega)).2 (by omega)
+  have hcts : groupElements[k]!.size = nike.publicKeySize := by
+    rw [getElem!_pos groupElements k (by omega)]; exact hgesize k (by omega)
+  have hv0 : v0AD.size = 2 := rfl
+  have hcombine : (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
+      + nrHops * geom.perHopRoutingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops := by
+    rw [← Nat.add_mul, Nat.sub_add_cancel hgen, Nat.mul_comm]
+  have hnrHmul : (nrHops - k) * geom.perHopRoutingInfoLength + k * geom.perHopRoutingInfoLength
+      = nrHops * geom.perHopRoutingInfoLength := by
+    rw [← Nat.add_mul]; congr 1; omega
+  -- The routing-info slot's total width is always exactly `geom.routingInfoLength`, regardless
+  -- of `k` — the same arithmetic `hopPacket_size` needs, extracted here as its own fact.
+  have hRPsize : (s (nrHops - k)).1.size
+      + (if k > 0 then riPadding[k - 1]! else ByteArray.empty).size = geom.routingInfoLength := by
+    rw [hrouting, hR]
+    split
+    · next hk0 =>
+      rw [hpadsize (k - 1) (by omega), show (k - 1 + 1) = k from by omega]
+      omega
+    · next hk0 =>
+      simp only [byteArray_empty_size]
+      have hkeq0 : k = 0 := by omega
+      rw [hkeq0] at hnrHmul ⊢
+      simp only [Nat.sub_zero, Nat.zero_mul, Nat.add_zero] at hnrHmul ⊢
+      omega
+  unfold hopPacket
+  generalize hRPeq : (s (nrHops - k)).1 ++ (if k > 0 then riPadding[k - 1]! else ByteArray.empty) = RP
+  have hRPsize' : RP.size = geom.routingInfoLength := by
+    rw [← hRPeq, ByteArray.size_append]; exact hRPsize
+  generalize hCTeq : groupElements[k]! = CT at hcts ⊢
+  generalize hM2eq : (s (nrHops - k)).2 = M2 at hM ⊢
+  generalize hT2eq : t (nrHops - k) = T2
+  have hABsize : (v0AD ++ CT).size = 2 + nike.publicKeySize := by
+    simp only [ByteArray.size_append]; rw [hv0, hcts]
+  have hABCsize : (v0AD ++ CT ++ RP).size = 2 + nike.publicKeySize + geom.routingInfoLength := by
+    simp only [ByteArray.size_append]; rw [hv0, hcts, hRPsize']
+  have hABCDsize : (v0AD ++ CT ++ RP ++ M2).size
+      = 2 + nike.publicKeySize + geom.routingInfoLength + macLength := by
+    simp only [ByteArray.size_append]; rw [hv0, hcts, hRPsize', hM, hmactag]
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · rw [extract_append_of_le _ _ (by omega : (2 : Nat) ≤ (v0AD ++ CT ++ RP ++ M2).size),
+      extract_append_of_le _ _ (by omega : (2 : Nat) ≤ (v0AD ++ CT ++ RP).size),
+      extract_append_of_le _ _ (by omega : (2 : Nat) ≤ (v0AD ++ CT).size),
+      extract_append_of_le _ _ (by rw [hv0] : (2 : Nat) ≤ v0AD.size)]
+    exact ByteArray.extract_zero_size
+  · rw [extract_append_of_le _ _ (by omega : 2 + nike.publicKeySize ≤ (v0AD ++ CT ++ RP ++ M2).size),
+      extract_append_of_le _ _ (by omega : 2 + nike.publicKeySize ≤ (v0AD ++ CT ++ RP).size),
+      extract_append_of_le _ _ (by omega : 2 + nike.publicKeySize ≤ (v0AD ++ CT).size),
+      extract_append_of_ge _ _ (by rw [hv0] : v0AD.size ≤ 2),
+      show (2 : Nat) - v0AD.size = 0 from by rw [hv0],
+      show 2 + nike.publicKeySize - v0AD.size = nike.publicKeySize from by rw [hv0]; omega]
+    rw [← hcts]
+    exact ByteArray.extract_zero_size
+  · rw [extract_append_of_le _ _ (by omega : 2 + nike.publicKeySize + geom.routingInfoLength
+        ≤ (v0AD ++ CT ++ RP ++ M2).size),
+      extract_append_of_le _ _ (by omega : 2 + nike.publicKeySize + geom.routingInfoLength
+        ≤ (v0AD ++ CT ++ RP).size),
+      extract_append_of_ge _ _ (by omega : (v0AD ++ CT).size ≤ 2 + nike.publicKeySize),
+      show 2 + nike.publicKeySize - (v0AD ++ CT).size = 0 from by omega,
+      show 2 + nike.publicKeySize + geom.routingInfoLength - (v0AD ++ CT).size
+        = RP.size from by omega]
+    exact ByteArray.extract_zero_size
+  · rw [extract_append_of_le _ _ (by omega : 2 + nike.publicKeySize + geom.routingInfoLength + macLength
+        ≤ (v0AD ++ CT ++ RP ++ M2).size),
+      extract_append_of_ge _ _ (by omega : (v0AD ++ CT ++ RP).size
+        ≤ 2 + nike.publicKeySize + geom.routingInfoLength),
+      show 2 + nike.publicKeySize + geom.routingInfoLength - (v0AD ++ CT ++ RP).size = 0
+        from by omega,
+      show 2 + nike.publicKeySize + geom.routingInfoLength + macLength - (v0AD ++ CT ++ RP).size
+        = M2.size from by omega]
+    exact ByteArray.extract_zero_size
+  · rw [extract_append_of_ge _ _ (by omega :
+        (v0AD ++ CT ++ RP ++ M2).size ≤ 2 + nike.publicKeySize + geom.routingInfoLength + macLength),
+      show 2 + nike.publicKeySize + geom.routingInfoLength + macLength - (v0AD ++ CT ++ RP ++ M2).size
+        = 0 from by omega,
+      show (v0AD ++ CT ++ RP ++ M2 ++ T2).size - (v0AD ++ CT ++ RP ++ M2).size = T2.size
+        from by simp only [ByteArray.size_append]; omega]
+    exact ByteArray.extract_zero_size
 
 open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
 
