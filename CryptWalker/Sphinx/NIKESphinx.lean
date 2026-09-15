@@ -3230,6 +3230,49 @@ theorem wrapNIKE_envelope_indep (nike : NIKE) (cipher : WideBlockCipher) (macS :
     wrapNIKE_bytesPub nike cipher macS kdfS streamS geom (hop1 :: rest1) filler1 payload1 i str
       pkt1 st1' hvalid hmactag h1]
 
+/-- **`wrapNIKE`, fully unfolded to content.** A successful `wrapNIKE` run drew one seed (via
+`nextSeed`, which never fails) and then `newNIKEPacket` succeeded on it, producing exactly `pkt`'s
+own bytes. Mirrors `KEMSphinx.wrapKEM_unfold` (simpler: `wrapNIKE` draws a single client-key seed,
+not an array of per-hop seeds). -/
+private theorem wrapNIKE_unfold (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (path : List PathHop) (filler : ByteArray)
+    (payload : Vector UInt8 geom.forwardPayloadLength) (i : Nat) (str : Nat → Vector UInt8 32)
+    (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream)
+    (h : wrapNIKE nike cipher macS kdfS streamS geom path filler payload (i, str) = .ok pkt st') :
+    newNIKEPacket nike cipher macS kdfS streamS geom (ofVector (str i)) filler path.toArray
+      (ofVector payload) = Except.ok (ofVector pkt) := by
+  rcases hX : newNIKEPacket nike cipher macS kdfS streamS geom (ofVector (str i)) filler
+      path.toArray (ofVector payload) with e | raw
+  · exfalso
+    have hw : wrapNIKE nike cipher macS kdfS streamS geom path filler payload (i, str)
+        = .error e (i + 1, str) := by
+      simp only [wrapNIKE, Bind.bind, EStateM.bind, nextSeed]
+      match newNIKEPacket nike cipher macS kdfS streamS geom (ofVector (str i)) filler path.toArray
+          (ofVector payload), hX with
+      | _, rfl => rfl
+    rw [hw] at h; injection h
+  · by_cases hsz : raw.size = geom.packetLength
+    · have hw : wrapNIKE nike cipher macS kdfS streamS geom path filler payload (i, str)
+          = .ok ⟨raw.data, hsz⟩ (i + 1, str) := by
+        simp only [wrapNIKE, Bind.bind, EStateM.bind, nextSeed]
+        match newNIKEPacket nike cipher macS kdfS streamS geom (ofVector (str i)) filler path.toArray
+            (ofVector payload), hX with
+        | _, rfl => simp [dif_pos hsz, EStateM.pure, pure]
+      rw [hw] at h
+      injection h with h
+      congr 1
+      rw [← h]
+      rfl
+    · exfalso
+      have hw : wrapNIKE nike cipher macS kdfS streamS geom path filler payload (i, str)
+          = .error "sphinx: internal error: newNIKEPacket produced a wrong-sized packet"
+            (i + 1, str) := by
+        simp only [wrapNIKE, Bind.bind, EStateM.bind, nextSeed]
+        match newNIKEPacket nike cipher macS kdfS streamS geom (ofVector (str i)) filler path.toArray
+            (ofVector payload), hX with
+        | _, rfl => dsimp only; rw [dif_neg hsz]; rfl
+      rw [hw] at h; injection h
+
 /-- A `Sphinx` scheme whose header carries a re-blindable public-key element: `Envelope` is that
 element's type (`parseEnvelope` extracts it from a packet), `Factor` is the space a fresh
 blinding value is drawn from, and `blind` is the re-blinding action. `wrap_resistant` needs no
