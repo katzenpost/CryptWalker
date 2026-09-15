@@ -19,7 +19,7 @@ namespace CryptWalker.Sphinx.Common
 open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Crypto.HMAC (hmacSha256)
-open CryptWalker.Util.Bytes (ofVector extract_append_le extract_append_of_le)
+open CryptWalker.Util.Bytes (ofVector size_ofVector extract_append_le extract_append_of_le)
 
 def v0AD : ByteArray := ⟨#[0, 0]⟩
 
@@ -42,6 +42,31 @@ actually has in hand. -/
   show (ofVector v).get! i = v[i]
   show v.toArray[i]! = v[i]
   simp [getElem!_pos, hi]
+
+/-- `ofVector` undoes `toVecN`, the other direction from `toVecN_ofVector`: reinterpreting a
+byte string of exactly the right width as a fixed-size vector and back is the identity. Bridges
+`unwrapKEM`'s `nextCiphertext := ofVector (toVecN kem.ciphertextSize ...)` back into a bare
+`ByteArray` equality. -/
+theorem ofVector_toVecN {n : Nat} (X : ByteArray) (h : X.size = n) : ofVector (toVecN n X) = X := by
+  apply ByteArray.ext_getElem
+  · show (Array.ofFn (fun i : Fin n => X.get! i.val)).size = X.size
+    rw [Array.size_ofFn, h]
+  · intro i hi hi'
+    rw [size_ofVector] at hi
+    have hi2 : i < (Array.ofFn (fun i : Fin n => X.get! i.val)).size := by
+      rw [Array.size_ofFn]; exact hi
+    show (Array.ofFn (fun i : Fin n => X.get! i.val))[i]'hi2 = X[i]'hi'
+    rw [Array.getElem_ofFn]
+    obtain ⟨bs⟩ := X
+    show bs[i]! = (⟨bs⟩ : ByteArray)[i]'hi'
+    rw [getElem!_pos bs i hi']
+    rfl
+
+theorem toVec32_eq_toVecN (a : ByteArray) : toVec32 a = toVecN 32 a := rfl
+
+/-- As `ofVector_toVecN`, at the fixed 32-byte width `toVec32` uses. -/
+theorem ofVector_toVec32 (X : ByteArray) (h : X.size = 32) : ofVector (toVec32 X) = X := by
+  rw [toVec32_eq_toVecN]; exact ofVector_toVecN X h
 
 def xorBytes (a b : ByteArray) : ByteArray := ⟨a.data.mapIdx fun i x => x ^^^ b.data.getD i 0⟩
 
