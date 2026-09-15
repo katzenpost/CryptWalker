@@ -538,6 +538,8 @@ def Scheme : NIKE where
   reinterpret        := id
   reinterpret_safe   := groupActionX_safe
   groupAction_comm   := groupActionX_comm
+  publicKeySize_eq_sharedSecretSize := rfl
+  encodePublicKey_reinterpret := fun _ => rfl
 
 /-- A u-coordinate as 32 little-endian bytes. -/
 def uBytes (P : Point) : Vector UInt8 32 := encodeFieldChecked (xCoord P)

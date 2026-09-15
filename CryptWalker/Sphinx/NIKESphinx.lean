@@ -135,6 +135,38 @@ private def nikeBlind (nike : NIKE) (pk factor : ByteArray) : ByteArray :=
   unfold nikeBlind
   exact Util.Bytes.size_ofVector _
 
+/-- **`nikeDH`, bridged to the typed group action**: given an honestly-encoded, `Safe` public key,
+`nikeDH` computes exactly `groupAction sk pk h`, re-encoded. The byte-level `decodePublicKey`
+round trip is `decode_encode_pub`; nothing else in `nikeDH`'s definition depends on the caller's
+bytes once they decode to `pk`. The atomic byte-level fact `NIKE.telescope_agree`'s abstract
+argument needs threaded through `createHeader`/`unwrapNIKE`'s actual `ByteArray` calls. -/
+theorem nikeDH_bridge (nike : NIKE) (sk : nike.PrivateKey) (pk : nike.PublicKey)
+    (h : nike.Safe pk) :
+    nikeDH nike sk (ofVector (nike.encodePublicKey pk))
+      = .ok (ofVector (nike.encodeSharedSecret (nike.groupAction sk pk h))) := by
+  unfold nikeDH
+  rw [toVecN_ofVector, nike.decode_encode_pub]
+  dsimp only
+  rw [dif_pos h]
+  rfl
+
+/-- **`nikeBlind`, bridged to the typed re-blinding action**: given an honestly-encoded, `Safe`
+envelope and an honestly-encoded factor, `nikeBlind` computes exactly `reinterpret (groupAction
+sk pk h)`, re-encoded — despite never calling `reinterpret` itself (see `nikeBlind`'s own doc
+comment): `NIKE.encodePublicKey_reinterpret` is exactly what closes that gap, once `nikeDH_bridge`
+identifies the DH output. -/
+theorem nikeBlind_bridge (nike : NIKE) (pk : nike.PublicKey) (sk : nike.PrivateKey)
+    (h : nike.Safe pk) :
+    nikeBlind nike (ofVector (nike.encodePublicKey pk)) (ofVector (nike.encodePrivateKey sk))
+      = ofVector (nike.encodePublicKey (nike.reinterpret (nike.groupAction sk pk h))) := by
+  unfold nikeBlind
+  rw [toVecN_ofVector, nike.decode_encode_priv]
+  dsimp only
+  rw [nikeDH_bridge nike sk pk h]
+  dsimp only [Except.toOption, Option.getD]
+  rw [Util.Bytes.size_ofVector, ← nike.encodePublicKey_reinterpret]
+  exact ofVector_toVecN _ (Util.Bytes.size_ofVector _)
+
 /-- As `nikeBlind`, but on decoded `NIKE` values rather than raw bytes — what
 `NIKESphinxScheme.blind` (the abstract re-blindable-envelope interface `wrap_resistant` is stated
 against) actually needs. -/

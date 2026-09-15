@@ -2,7 +2,11 @@
 SPDX-FileCopyrightText: Copyright (C) 2024 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
  -/
+import CryptWalker.Util.Bytes
+
 namespace CryptWalker.NIKE.NIKE
+
+open CryptWalker.Util.Bytes (ofVector)
 
 
 structure NIKE where
@@ -74,6 +78,24 @@ structure NIKE where
   groupAction_comm : ∀ sk₁ sk₂ pk (h : Safe pk),
     groupAction sk₁ (reinterpret (groupAction sk₂ pk h)) (reinterpret_safe sk₂ pk h)
       = groupAction sk₂ (reinterpret (groupAction sk₁ pk h)) (reinterpret_safe sk₁ pk h)
+
+  /-- A Diffie-Hellman-style NIKE's public keys and shared secrets are the same kind of group
+  element, just tagged by type — what actually lets `reinterpret` make sense as "the bytes are
+  already the right shape, just re-decode them." True for both `NIKE`s this project builds
+  (`32 = 32`/`keySize = keySize`), by `rfl` for each. -/
+  publicKeySize_eq_sharedSecretSize : publicKeySize = sharedSecretSize
+
+  /-- **`reinterpret`, at the byte level**: encoding a reinterpreted shared secret gives the same
+  bytes as encoding the shared secret directly. `NIKESphinx.nikeBlind` never actually calls
+  `reinterpret` (a typed operation) — it only ever has raw bytes in hand, so it re-blinds by
+  encoding the DH output and reinterpreting *those bytes* directly as a public-key-shaped byte
+  string (`ofVector (toVecN pk.size ...)`, sized to `publicKeySize`, matching
+  `publicKeySize_eq_sharedSecretSize` above). This law is what proves that byte-level maneuver
+  actually computes the same thing `reinterpret` does — true for both `NIKE`s this project builds
+  (`reinterpret := id`/`fun ss => ⟨ss.data⟩`, and `encodePublicKey`/`encodeSharedSecret` are
+  literally the same extraction either way), by `rfl` for each. -/
+  encodePublicKey_reinterpret : ∀ ss : SharedSecret,
+    ofVector (encodePublicKey (reinterpret ss)) = ofVector (encodeSharedSecret ss)
 
 attribute [instance] NIKE.decSafe
 

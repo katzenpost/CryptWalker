@@ -206,5 +206,7 @@ def LadderScheme : NIKE where
   reinterpret        := fun ss => ⟨ss.data⟩
   reinterpret_safe   := fun sk pk _ => curve25519_safe sk pk
   groupAction_comm   := fun sk₁ sk₂ pk _ => congrArg SharedSecret.mk (curve25519_comm_gen sk₁ sk₂ pk.data)
+  publicKeySize_eq_sharedSecretSize := rfl
+  encodePublicKey_reinterpret := fun _ => rfl
 
 end CryptWalker.NIKE.X25519_montgomery_ladder
