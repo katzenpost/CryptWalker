@@ -37,7 +37,7 @@ open CryptWalker.WideBlockCipher (WideBlockCipher)
 open CryptWalker.Sphinx.Crypto.MAC (MAC)
 open CryptWalker.Sphinx.Crypto.GenericKDF (KDF)
 open CryptWalker.Sphinx.Crypto.StreamCipher (StreamCipher)
-open CryptWalker.NIKE.NIKE (NIKE)
+open CryptWalker.NIKE.NIKE (NIKE telescopeElem telescopeSecret telescope_agree)
 open CryptWalker.Hash.Sha512 (sha512_256)
 open CryptWalker.Util.Bytes (ofVector)
 
@@ -296,6 +296,70 @@ private theorem ite_pure_yield {α : Type} (c : Prop) [Decidable c] (a b : α) :
 @[simp] private theorem byteArray_empty_size : (ByteArray.empty : ByteArray).size = 0 := rfl
 
 @[simp] private theorem byteArray_mk_size (a : Array UInt8) : (⟨a⟩ : ByteArray).size = a.size := rfl
+
+/-- **The inner "keep DH-ing" loop, bridged**: given an honestly-encoded `Safe` target public key
+and a sequence of `n` already-honestly-decodable factor bytes, running `nikeDH` once against the
+target then `n` more times against each factor in turn (`createHeader`'s inner loop, exactly)
+reproduces `NIKE.telescopeSecret`'s value at `n`. Pure induction on `n` using `nikeDH_bridge` at
+each step — no new algebra beyond what that lemma already gives. -/
+private theorem nikeDH_innerLoop_bridge (nike : NIKE) (baseSk targetSk : nike.PrivateKey)
+    (pkBytes : ByteArray) (hpk : pkBytes = ofVector (nike.encodePublicKey (nike.derivePublicKey targetSk)))
+    (factorBytes : Nat → ByteArray) (f : Nat → nike.PrivateKey)
+    (hf : ∀ k, nike.decodePrivateKey (toVecN nike.privateKeySize (factorBytes k)) = some (f k))
+    (n : Nat) (finalSS : ByteArray)
+    (hfinal : (do
+        let ss0 ← nikeDH nike baseSk pkBytes
+        forIn (List.range' 0 n) ss0 (fun k acc => do
+          let fj ← nikeDecodePrivateKey nike (factorBytes k)
+          ForInStep.yield <$> nikeDH nike fj acc) : Except String ByteArray) = Except.ok finalSS) :
+    finalSS = ofVector (nike.encodeSharedSecret (telescopeSecret nike baseSk targetSk f n).1) := by
+  obtain ⟨ss0, hss0, hfinal⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hfinal
+  have hss0' : ss0 = ofVector (nike.encodeSharedSecret (telescopeSecret nike baseSk targetSk f 0).1) := by
+    rw [hpk] at hss0
+    rw [nikeDH_bridge nike baseSk (nike.derivePublicKey targetSk) (nike.derive_safe targetSk)] at hss0
+    injection hss0 with hss0
+    exact hss0.symm
+  obtain ⟨t, ht0, htn, htstep⟩ := CryptWalker.Sphinx.Common.List.forIn_exists_trace _ _
+    (by
+      intro k a a' hk hgb
+      obtain ⟨fj, -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
+      obtain ⟨y', -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hgb
+      exact absurd hgb (by simp))
+    _ _ hfinal
+  have hlen : (List.range' 0 n).length = n := by simp
+  rw [hlen] at htn
+  have main : ∀ k (hk : k ≤ n), t k = ofVector (nike.encodeSharedSecret (telescopeSecret nike baseSk targetSk f k).1) := by
+    intro k
+    induction k with
+    | zero => intro _; rw [ht0]; exact hss0'
+    | succ k ih =>
+      intro hk
+      have hk' : k < n := by omega
+      have hkl : k < (List.range' 0 n).length := by rw [hlen]; exact hk'
+      have hstep := htstep k hkl
+      rw [List.getElem_range'_1 k hkl, Nat.zero_add] at hstep
+      obtain ⟨fj, hfj, hstep⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hstep
+      obtain ⟨y', hy', hstep⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hstep
+      injection hstep with stepEq
+      have hfjeq0 : nike.decodePrivateKey (toVecN nike.privateKeySize (factorBytes k)) = some fj := by
+        unfold nikeDecodePrivateKey at hfj
+        match hd : nike.decodePrivateKey (toVecN nike.privateKeySize (factorBytes k)), hfj with
+        | none, hfj => injection hfj
+        | some sk, hfj =>
+          simp only [pure, Except.pure, Except.ok.injEq] at hfj
+          exact congrArg some hfj
+      have hfjeq : fj = f k := by
+        rw [hf k] at hfjeq0; injection hfjeq0 with hfjeq0; exact hfjeq0.symm
+      have hik := ih (by omega)
+      rw [hfjeq, hik, ← nike.encodePublicKey_reinterpret] at hy'
+      rw [nikeDH_bridge nike (f k) (nike.reinterpret (telescopeSecret nike baseSk targetSk f k).1)
+        (telescopeSecret nike baseSk targetSk f k).2] at hy'
+      injection hy' with hy'
+      rw [← stepEq, ← hy']
+      rfl
+  have hmain := main n (le_refl n)
+  rw [htn] at hmain
+  exact hmain
 
 set_option maxHeartbeats 1000000 in
 /-- `createHeader`'s header always starts with `v0AD ++ groupElements[0]!`, and
