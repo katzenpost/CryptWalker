@@ -32,6 +32,16 @@ Provably Secure Mix Format*, IEEE S&P 2009 — <https://eprint.iacr.org/2008/475
 Cited elsewhere here as "Danezis–Goldberg" or "the paper"; a bare `§n.m` is that paper's own
 section numbering. Not re-cited file by file.
 
+The paper states four security properties for a mix format; this project formalizes all four:
+
+* **Completeness** — `unwrap_complete` below: any packet `wrap` builds, `unwrap` correctly undoes.
+* **Integrity** (§4.2) — the `integrity` field below, via `Integrity.integrity_bound`.
+* **Indistinguishability** (§4.4) — the `indistinguishable` field below, via
+  `Indistinguishability.advantage_le`.
+* **Wrap-resistance** (§4.3) — stated only on `NIKESphinxScheme.wrap_resistant` (`nike_sphinx.lean`),
+  not here on the base `Sphinx` structure: it needs a re-blindable public-key element a KEM-based
+  scheme has no analogue of. `uniformHit_eq` below is its scheme-independent mathematical core.
+
 A packet scheme: private-key/command types, `wrap`/`unwrap`, `newSURB`/`newPacketFromSURB`, and
 a completeness law relating them.
 

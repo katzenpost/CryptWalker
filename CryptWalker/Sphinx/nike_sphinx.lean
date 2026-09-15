@@ -7,7 +7,7 @@ import CryptWalker.Sphinx.constants
 import CryptWalker.Sphinx.geometry
 import CryptWalker.Sphinx.commands
 import CryptWalker.Sphinx.types
-import CryptWalker.Sphinx.interface
+import CryptWalker.Sphinx.sphinx
 import CryptWalker.Sphinx.common
 import CryptWalker.Sphinx.surb
 import CryptWalker.Sphinx.Crypto.kdf
