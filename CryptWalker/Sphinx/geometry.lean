@@ -9,6 +9,10 @@ import CryptWalker.KEM.Schemes
 
 namespace CryptWalker.Sphinx.Geometry
 
+-- `Geometry` repeats the namespace, as `NIKE`/`KEM`/`Sphinx` do theirs; harmless (see
+-- `sphinx.lean`'s own suppression of this same linter).
+set_option linter.dupNamespace false
+
 open CryptWalker.Sphinx.Constants
 
 /-! # Sphinx packet geometry

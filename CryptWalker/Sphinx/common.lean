@@ -123,7 +123,7 @@ theorem xorBytes_append (a1 a2 b1 b2 : ByteArray) (h : a1.size = b1.size)
       rw [ByteArray.getElem_append_left h1, dif_pos h1bb, ByteArray.getElem_append_left h1']
       have hi1' : i < (xorBytes a1 b1).size := by simpa using h1
       rw [ByteArray.getElem_append_left hi1', xorBytes_getElem a1 b1 i h1, dif_pos h1']
-    · push_neg at h1
+    · push Not at h1
       have h1'' : b1.size ≤ i := by rw [← h]; omega
       have hi2a : i < a1.size + a2.size := by simpa [ByteArray.size_append] using hi2
       have h1bb : i < (b1 ++ b2).size := by
@@ -369,7 +369,7 @@ theorem List.forIn_exists_trace {α β ε : Type} (l : List β) (f : β → α �
     cases r with
     | done a' => exact absurd hr (hnd hd init a' List.mem_cons_self)
     | yield a =>
-      simp only [Except.pure] at hfinal2
+      simp only [] at hfinal2
       have hnd' : ∀ (b : β) (a a' : α), b ∈ tl → f b a ≠ Except.ok (ForInStep.done a') :=
         fun b a a' hb => hnd b a a' (List.mem_cons_of_mem hd hb)
       obtain ⟨s, hs0, hsl, hstep⟩ := ih hnd' a final hfinal2
@@ -526,14 +526,14 @@ theorem commandsToBytes_append_singleton {budget budget' : Nat} {cmds : List Rou
   rw [hfold]
   have hle : ¬ (b ++ c.toBytes).size > budget := by
     rw [ByteArray.size_append]; omega
-  simp only [hle, if_false, Bool.false_eq_true, pure, Except.pure]
+  simp only [hle, if_false, pure, Except.pure]
 
 /-- **`parseAll` undoes `commandsToBytes`/`zeroPadTo`**: real commands serialized under a budget
 and zero-padded to `n` bytes parse back to exactly the same list. Reduces to
 `Commands.parseAll_append_zeros`, needing only that no command in `cmds` is itself `.null`. -/
 theorem parseAll_commandsToBytes (n budget : Nat) (cmds : List RoutingCommand)
     (hn : ∀ c ∈ cmds, c ≠ .null) (b : ByteArray)
-    (hcb : commandsToBytes budget cmds = .ok b) (hble : b.size ≤ n) :
+    (hcb : commandsToBytes budget cmds = .ok b) (_hble : b.size ≤ n) :
     parseAll (zeroPadTo n b) = .ok cmds := by
   have hbeq : b = cmds.foldl (fun acc c => acc ++ c.toBytes) ByteArray.empty := by
     unfold commandsToBytes at hcb

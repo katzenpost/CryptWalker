@@ -382,12 +382,11 @@ private theorem aezTinyLR_size (e : EState) (delta : Block) (inArr : ByteArray) 
   simp only [Std.Legacy.Range.forIn_eq_forIn_range', List.forIn_pure_yield_eq_foldl, pure_bind]
   repeat' split
   all_goals
-    simp only [Id.run, pure, bind, zero16, Array.size_replicate, foldl_set!_size,
-      Array.size_set!]
+    simp only [Id.run, pure, zero16]
   all_goals
     exact foldl_pair16_size _ _ (fun _ _ => xor16_size ..) (fun _ _ => xor16_size ..) _
-      (by simp only [zero16, Array.size_replicate, foldl_set!_size, Array.size_set!])
-      (by simp only [zero16, Array.size_replicate, foldl_set!_size, Array.size_set!])
+      (by simp only [Array.size_replicate, foldl_set!_size, Array.size_set!])
+      (by simp only [Array.size_replicate, foldl_set!_size, Array.size_set!])
 
 set_option maxHeartbeats 8000000 in
 theorem aezTiny_size (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) :
@@ -398,8 +397,8 @@ theorem aezTiny_size (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat) 
   simp only [Std.Legacy.Range.forIn_eq_forIn_range', List.forIn_pure_yield_eq_foldl, pure_bind]
   repeat' split
   all_goals
-    simp only [Id.run, pure, bind, ByteArray.size, ByteArray.set!, ByteArray.get!, zero16,
-      foldl_set!_size, Array.size_replicate, Array.size_set!, ByteArray.size_set!, hL, hR]
+    simp only [Id.run, pure, ByteArray.size, ByteArray.set!, ByteArray.get!, zero16,
+      foldl_set!_size, Array.size_replicate, Array.size_set!]
 
 /-! ## Toward round-trip correctness: `aezTinyLR`'s abstract Feistel-style ladder
 
@@ -545,7 +544,7 @@ private theorem pass1_size (e : EState) (inArr : ByteArray) (nChunks : Nat) :
   unfold pass1
   simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
     Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind, ite_pure_yield]
-  simp only [Id.run, pure, bind]
+  simp only [Id.run, pure]
   rw [show (32 * nChunks : Nat)
       = (ByteArray.empty : ByteArray).size + 32 * (List.range' 0 nChunks).length by
     simp [List.length_range']]
@@ -584,7 +583,7 @@ private theorem pass2_size (e : EState) (pass1Out : ByteArray) (s : Block) (nChu
   unfold pass2
   simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
     Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind, ite_pure_yield]
-  simp only [Id.run, pure, bind]
+  simp only [Id.run, pure]
   rw [show (32 * nChunks : Nat)
       = (ByteArray.empty : ByteArray).size + 32 * (List.range' 0 nChunks).length by
     simp [List.length_range']]
@@ -674,15 +673,14 @@ set_option maxHeartbeats 1000000 in
 theorem aezCore_size (e : EState) (delta : Block) (inArr : ByteArray) (d : Nat)
     (h : 32 ≤ inArr.size) : (aezCore e delta inArr d).size = inArr.size := by
   unfold aezCore
-  simp only [Id.run, pure, bind]
+  simp only [Id.run, pure]
   by_cases h64 : inArr.size ≥ 64 <;>
     by_cases h16 : inArr.size % 32 ≥ 16 <;>
       by_cases hgt : inArr.size % 32 > 0 <;>
-        simp only [h64, h16, hgt, if_true, if_false, ite_true, ite_false] <;>
+        simp only [h64, h16, hgt, if_true, if_false] <;>
         simp only [ByteArray.size_append] <;>
-        (try simp only [pass1_size, pass2_size]) <;>
-        simp only [byteArray_mk_size, byteArray_empty_size, xor16_size, xor4_size, aes4_size',
-          aes10_size', ofFn_size] <;>
+        (try simp only [pass2_size]) <;>
+        simp only [byteArray_mk_size, byteArray_empty_size, xor16_size, xor4_size, ofFn_size] <;>
         omega
 
 /-! ## Top-level dispatch, matching `encipher`/`decipher`/`SPRPEncrypt`/`SPRPDecrypt` -/

@@ -160,6 +160,9 @@ def buildFromKeys (α0 : G) (seed : Seed) (kmu : KeyMu) (kpi : KeyPi) (c : Choic
   let δ0 := S.πenc kpi c.deltaPt
   (α0, β0, γ0, δ0)
 
+omit [Field F] [AddCommGroup G] [Module F G] [SampleableType F] [SampleableType Seed]
+  [SampleableType KeyMu] [SampleableType KeyPi] [SampleableType (Seed × KeyMu × KeyPi)]
+  [Finite F] in
 @[simp] lemma buildFrom_eq_buildFromKeys (α0 s0 : G) (c : Choice Beta Delta) :
     buildFrom S α0 s0 c = buildFromKeys S α0 (S.hρ s0) (S.hμ s0) (S.hπ s0) c := rfl
 
@@ -190,6 +193,8 @@ def jointAdversaryOf
   let guess ← A (buildFromKeys S (x • S.g) p.1 p.2.1 p.2.2 (if b then c1 else c0))
   return (b == guess)
 
+omit [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi]
+  [SampleableType (Seed × KeyMu × KeyPi)] [Finite F] in
 /-- `prgRealExp (jointKeyPRG) (jointAdversaryOf ... x)` reconstructs `game2` exactly. -/
 theorem probTrue_game2_eq_prgRealExp_joint
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
@@ -201,6 +206,7 @@ theorem probTrue_game2_eq_prgRealExp_joint
   unfold game2 prgRealExp jointKeyPRG jointAdversaryOf
   rfl
 
+omit [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi] [Finite F] in
 /-- `prgIdealExp (jointAdversaryOf ... x)` reconstructs `game2'` up to reordering the independent
 `b`/`p` samples (`probOutput_bind_bind_swap`). -/
 theorem probTrue_game2'_eq_prgIdealExp_joint
@@ -243,6 +249,8 @@ def combinedAdversaryOf
     (x : F) (b : Bool) : PRGAdversary (Beta × Gamma × Delta) := fun t =>
   A (x • S.g, t.1, t.2.1, t.2.2) >>= fun guess => pure (b == guess)
 
+omit [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi] [SampleableType Beta]
+  [SampleableType Gamma] [SampleableType Delta] [SampleableType (Beta × Gamma × Delta)] in
 theorem probTrue_game2'_eq_prgRealExp_combined
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
@@ -257,13 +265,16 @@ theorem probTrue_game2'_eq_prgRealExp_combined
 /-- **Game `G3`**: `β0, γ0, δ0` all replaced by an independent fresh uniform triple — the paper's
 final hybrid, where the challenge tuple carries no information about `b`. -/
 def game3 (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
-    (c0 c1 : Choice Beta Delta) : ProbComp Bool := do
+    (_c0 _c1 : Choice Beta Delta) : ProbComp Bool := do
   let x ← $ᵗ F
   let b ← $ᵗ Bool
   let t ← $ᵗ (Beta × Gamma × Delta)
   let guess ← A (x • S.g, t.1, t.2.1, t.2.2)
   return (b == guess)
 
+omit [AddCommGroup Beta] [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi]
+  [SampleableType Beta] [SampleableType Gamma] [SampleableType Delta]
+  [SampleableType (Seed × KeyMu × KeyPi)] in
 theorem probTrue_game3_eq_prgIdealExp_combined
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
@@ -275,6 +286,9 @@ theorem probTrue_game3_eq_prgIdealExp_combined
   unfold game3 prgIdealExp combinedAdversaryOf
   rfl
 
+omit [AddCommGroup Beta] [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi]
+  [SampleableType Beta] [SampleableType Gamma] [SampleableType Delta]
+  [SampleableType (Seed × KeyMu × KeyPi)] in
 /-- **Proved outright**: in `G3` the tuple handed to the adversary is fresh and uniform,
 independent of `b`, so a well-formed (`NeverFail`) adversary guesses correctly with probability
 exactly `1/2` — the paper's baseline. -/
@@ -324,6 +338,7 @@ variable [SampleableType F] [SampleableType Seed] [SampleableType KeyMu] [Sample
   [SampleableType Beta] [SampleableType Gamma] [SampleableType Delta]
   [SampleableType (Seed × KeyMu × KeyPi)] [Finite F]
 
+omit [Finite F] [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi] in
 /-- **Main theorem (§4.4)**: the adversary's advantage is bounded by three gaps, one per hybrid
 step (`G ⇒ G2`, `G2 ⇒ G2'`, `G2' ⇒ G3`), each a genuine computational assumption:
 
