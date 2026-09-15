@@ -2539,6 +2539,118 @@ theorem unwrapNIKE_hopPacket_terminal (nike : NIKE) (cipher : WideBlockCipher) (
     rwa [htagsize] at this
   simp only [pure, Except.pure, hpayloadEq, Bool.false_eq_true, if_false]
 
+set_option maxHeartbeats 1000000 in
+/-- **The multi-hop completeness induction.** Starting `unwrapChainAux` at any hop `k < nrHops` on
+`hopPacket ... k`, given exactly the remaining `nrHops - k` private keys (each decoding to
+`targetSk (k+i)`, matching `path[k+i]!` by construction of the whole model), always recovers
+`payload` — by downward induction on `privKeys`, repeatedly applying
+`unwrapNIKE_hopPacket_nonterminal` to peel one hop (each producing `hopPacket ... (k+1)`, which
+`unwrapChainAux`'s own recursion re-enters on `rest`) until `unwrapNIKE_hopPacket_terminal` closes
+the last one. Mirrors `KEMSphinx.unwrapChain_hopPacket`. -/
+theorem unwrapChain_hopPacket (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
+    (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : Array PathHop)
+    (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
+    (sprpKeys : Array SPRPKey) (nrHops : Nat) (s : Nat → ByteArray × ByteArray) (t : Nat → ByteArray)
+    (clientSk : nike.PrivateKey) (f targetSk : Nat → nike.PrivateKey)
+    (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
+    (hs0size : (s 0).1.size = (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength)
+    (hstep : ∀ j (hj : j < nrHops), ∃ riFragment0,
+        commandsToBytes
+          (if (nrHops - 1 - j) == nrHops - 1 then geom.perHopRoutingInfoLength
+           else geom.perHopRoutingInfoLength - geom.nextNodeHopLength)
+          (path[nrHops - 1 - j]!).commands = Except.ok riFragment0 ∧
+        (s (j + 1)).1 = xorBytes (zeroPadTo geom.perHopRoutingInfoLength
+            (if (nrHops - 1 - j) == nrHops - 1 then riFragment0
+             else riFragment0 ++ (RoutingCommand.nextNodeHop (path[nrHops - 1 - j + 1]!).id
+               (toVec32 (s j).2)).toBytes) ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+          (v0AD ++ groupElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+            ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty))))
+    (hgnsize : groupElements.size = nrHops)
+    (hgesize : ∀ j (hj : j < groupElements.size), (groupElements[j]'hj).size = nike.publicKeySize)
+    (hgcontent : ∀ i (hi : i < nrHops),
+        groupElements[i]! = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f i).1) ∧
+        keys[i]! = deriveHopKeys kdfS
+          (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk i) f i).1)) ∧
+        nike.decodePrivateKey (toVecN nike.privateKeySize (keys[i]!).blindingFactor) = some (f i))
+    (hpadsize : ∀ i (hi : i < nrHops), riPadding[i]!.size = (i + 1) * geom.perHopRoutingInfoLength)
+    (hriKScontent : ∀ i (hi : i < nrHops),
+        riKeyStream[i]! = (streamS.keystream (ofVector (keys[i]!).headerEncryption)
+            (ofVector (keys[i]!).headerEncryptionIV)
+            (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
+          ((geom.routingInfoLength + geom.perHopRoutingInfoLength)
+            - (i + 1) * geom.perHopRoutingInfoLength))
+    (hriPadcontent : ∀ i (hi : i < nrHops), riPadding[i]! =
+      (let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
+       let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+         (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
+       let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
+       let thisPad0 := ks.extract ksLen totalRiLen
+       if i > 0 then
+         xorBytes (thisPad0.extract 0 riPadding[i - 1]!.size) riPadding[i - 1]!
+           ++ thisPad0.extract riPadding[i - 1]!.size thisPad0.size
+       else thisPad0))
+    (htsize : ∀ j (hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
+    (ht0size : (t 0).size = geom.payloadTagLength + geom.forwardPayloadLength)
+    (htstep : ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j)
+    (hsprpkey : ∀ i (hi : i < sprpKeys.size), (sprpKeys[i]'hi).key = keys[i]!.payloadEncryption ∧
+        (sprpKeys[i]'hi).iv = keys[i]!.headerEncryptionIV)
+    (hsprp : sprpKeys.size = nrHops) (hgen : nrHops ≤ geom.nrHops)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (hcmdnn : ∀ i (hi : i < nrHops), ∀ c ∈ (path[i]!).commands, c ≠ RoutingCommand.null)
+    (hcmdnh : ∀ i (hi : i < nrHops), ∀ c ∈ (path[i]!).commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
+    (hcmdsurb : ∀ c ∈ (path[nrHops - 1]!).commands, ∀ id, c ≠ RoutingCommand.surbReply id)
+    (payload : ByteArray) (hpayloadsize : payload.size = geom.forwardPayloadLength)
+    (ht0content : t 0 = (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload) :
+    ∀ (k : Nat) (privKeys : List ByteArray) (hk : k < nrHops)
+      (hprivlen : privKeys.length = nrHops - k)
+      (hpp : ∀ i (hi : i < privKeys.length),
+        nike.decodePrivateKey (toVecN nike.privateKeySize privKeys[i]!) = some (targetSk (k + i))),
+      unwrapChainAux (unwrapNIKE nike cipher macS kdfS streamS geom) privKeys
+          (hopPacket groupElements riPadding s t nrHops k)
+        = Except.ok (some payload) := by
+  intro k privKeys
+  induction privKeys generalizing k with
+  | nil => intro hk hprivlen _; simp only [List.length_nil] at hprivlen; omega
+  | cons sk rest ih =>
+    intro hk hprivlen hpp
+    have hpp0 : nike.decodePrivateKey (toVecN nike.privateKeySize sk) = some (targetSk k) := by
+      have h0 := hpp 0 (by simp)
+      rwa [List.getElem!_cons_zero, show k + 0 = k from by omega] at h0
+    unfold unwrapChainAux
+    dsimp only
+    by_cases hterm : k + 1 = nrHops
+    · rw [unwrapNIKE_hopPacket_terminal nike cipher macS kdfS streamS geom path keys groupElements
+        riKeyStream riPadding sprpKeys nrHops s t clientSk f targetSk hvalid hmactag hs0size hstep
+        hgnsize hgesize hgcontent hpadsize hriKScontent htsize ht0size htstep hsprpkey hsprp hgen
+        h16 k hterm (hcmdnn k hk) (hcmdnh k hk)
+        (by rw [show k = nrHops - 1 from by omega]; exact hcmdsurb)
+        payload hpayloadsize ht0content sk hpp0]
+      dsimp only [Bind.bind, Except.bind]
+      rfl
+    · have hklt : k + 1 < nrHops := by omega
+      obtain ⟨replayTag, cmds, hnewsize, heq, hcmdseq⟩ := unwrapNIKE_hopPacket_nonterminal nike cipher
+        macS kdfS streamS geom path keys groupElements riKeyStream riPadding sprpKeys nrHops s t
+        clientSk f targetSk hvalid hmactag hs0size hstep hgnsize hgesize hgcontent hpadsize
+        hriKScontent hriPadcontent htsize ht0size htstep hsprpkey hsprp hgen h16 k hklt
+        (hcmdnn k (by omega)) (hcmdnh k (by omega)) sk hpp0
+      rw [heq]
+      dsimp only [Bind.bind, Except.bind]
+      have hrestlen : rest.length = nrHops - (k + 1) := by
+        simp only [List.length_cons] at hprivlen; omega
+      have hrest : ∀ i (hi : i < rest.length),
+          nike.decodePrivateKey (toVecN nike.privateKeySize rest[i]!) = some (targetSk ((k + 1) + i)) := by
+        intro i hi
+        have hi' := hpp (i + 1) (by simp only [List.length_cons]; omega)
+        rw [List.getElem!_cons_succ] at hi'
+        rwa [show k + (i + 1) = k + 1 + i from by omega] at hi'
+      have hind := ih (k + 1) hklt hrestlen hrest
+      have hofv : ofVector (⟨(hopPacket groupElements riPadding s t nrHops (k + 1)).data, hnewsize⟩ :
+          Vector UInt8 (hopPacket groupElements riPadding s t nrHops k).size)
+          = hopPacket groupElements riPadding s t nrHops (k + 1) := rfl
+      rw [hofv]
+      exact hind
+
 /-- **Completeness**: `NIKESphinxScheme`'s witness for `Sphinx.Interface.unwrap_complete` — the
 claim that Sphinx onion-decrypts correctly, checked empirically by every vector and self-test
 round trip (`nike_vectors_test`; `nike_selftest`'s `runRound`/`runAbstractWrapRound`/
