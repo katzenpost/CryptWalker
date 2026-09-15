@@ -2255,6 +2255,313 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
     hnewsize_pf, ?_, rfl⟩
   simp only [pure, Except.pure, hpkteq]
 
+set_option maxHeartbeats 4000000 in
+/-- **The single-hop agreement theorem, terminal case.** `unwrapKEM` applied to the packet
+`hopPacket ... k` arriving at the terminal hop `k` (`k + 1 = nrHops`) recovers the original
+`payload` exactly, given the honest KEM pairing and that `path[k]!`'s own commands never
+already contain a `null`, `nextNodeHop`, or `surbReply` (the well-formedness a real recipient
+hop satisfies — no forwarding, no reply commands of its own), plus that the payload-encryption
+trace's base case `t 0` is exactly `newKEMPacket`'s own starting buffer: a zero tag of
+`geom.payloadTagLength` bytes followed by `payload`. Assembles the same pieces as
+`unwrapKEM_hopPacket_nonterminal` for the routing-info/MAC portion, then `kemRiFragment_content_terminal`
+and `newKEMPacket_payload_content` for the payload, closing with the zero-tag check. -/
+theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
+    (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : Array PathHop)
+    (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
+    (sprpKeys : Array SPRPKey) (nrHops : Nat) (s : Nat → ByteArray × ByteArray) (t : Nat → ByteArray)
+    (hvalid : geom.ValidForKEM kem) (hmactag : macS.tagSize = macLength)
+    (hs0 : s 0 = (if geom.nrHops > nrHops then
+        (⟨Array.replicate ((geom.nrHops - nrHops) * geom.perHopRoutingInfoLength) 0⟩ : ByteArray)
+      else ByteArray.empty, ByteArray.empty))
+    (hstep : ∀ j (hj : j < nrHops), ∃ riFragment,
+        kemRiFragment kem geom path kemElements (s j).2 nrHops (nrHops - 1 - j) = Except.ok riFragment ∧
+        (s (j + 1)).1 = xorBytes (riFragment ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+          (v0AD ++ kemElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+            ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty))))
+    (hknsize : kemElements.size = nrHops)
+    (hksize : ∀ j (hj : j < kemElements.size), (kemElements[j]'hj).size = kem.ciphertextSize)
+    (hpadsize : ∀ i (hi : i < nrHops), riPadding[i]!.size = (i + 1) * geom.perHopRoutingInfoLength)
+    (hriKScontent : ∀ i (hi : i < nrHops),
+        riKeyStream[i]! = (streamS.keystream (ofVector (keys[i]!).headerEncryption)
+            (ofVector (keys[i]!).headerEncryptionIV)
+            (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
+          ((geom.routingInfoLength + geom.perHopRoutingInfoLength)
+            - (i + 1) * geom.perHopRoutingInfoLength))
+    (hriPadcontent : ∀ i (hi : i < nrHops), riPadding[i]! =
+      (let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
+       let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+         (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
+       let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
+       let thisPad0 := ks.extract ksLen totalRiLen
+       if i > 0 then
+         xorBytes (thisPad0.extract 0 riPadding[i - 1]!.size) riPadding[i - 1]!
+           ++ thisPad0.extract riPadding[i - 1]!.size thisPad0.size
+       else thisPad0))
+    (hkeyscontent : ∀ i (hi : i < nrHops), ∃ seed ss,
+        kemEncap kem (path[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
+        keys[i]! = deriveHopKeysG kdfS ss)
+    (htsize : ∀ j (hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
+    (ht0size : (t 0).size = geom.payloadTagLength + geom.forwardPayloadLength)
+    (htstep : ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j)
+    (hsprpkey : ∀ i (hi : i < sprpKeys.size), (sprpKeys[i]'hi).key = keys[i]!.payloadEncryption ∧
+        (sprpKeys[i]'hi).iv = keys[i]!.headerEncryptionIV)
+    (hsprp : sprpKeys.size = nrHops) (hgen : nrHops ≤ geom.nrHops)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (k : Nat) (hk : k + 1 = nrHops)
+    (hcmdnn : ∀ c ∈ (path[k]!).commands, c ≠ RoutingCommand.null)
+    (hcmdnh : ∀ c ∈ (path[k]!).commands, ∀ id m, c ≠ RoutingCommand.nextNodeHop id m)
+    (hcmdsurb : ∀ c ∈ (path[k]!).commands, ∀ id, c ≠ RoutingCommand.surbReply id)
+    (payload : ByteArray) (hpayloadsize : payload.size = geom.forwardPayloadLength)
+    (ht0content : t 0 = (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
+    (privKey : ByteArray) (hpp : kemSelfPublicKeyBytes kem privKey = (path[k]!).publicKey) :
+    unwrapKEM kem cipher macS kdfS streamS geom privKey
+        (hopPacket kemElements riPadding s t nrHops k)
+      = Except.ok (some payload, sha512_256 kemElements[k]!, (path[k]!).commands, none) := by
+  obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
+  have hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by omega
+  -- The honest KEM round trip at hop `k`.
+  obtain ⟨seed, ss, hencap, hkeyseq⟩ := hkeyscontent k (by omega)
+  have hdecap : kemDecap kem privKey kemElements[k]! = Except.ok ss :=
+    kemEncap_kemDecap_of_honest kem privKey seed kemElements[k]! ss (by rw [hpp]; exact hencap)
+  -- The loop3 trace's step at hop `k` (`j := nrHops - 1 - k = 0`).
+  have hj1 : nrHops - 1 - k < nrHops := by omega
+  obtain ⟨riFragment, hriFragment0, hR1, hM1⟩ := hstep (nrHops - 1 - k) hj1
+  have hidx : nrHops - 1 - (nrHops - 1 - k) = k := by omega
+  rw [hidx] at hriFragment0 hR1 hM1
+  have hidx2 : nrHops - 1 - k + 1 = nrHops - k := by omega
+  rw [hidx2] at hR1 hM1
+  -- `kemRiFragment`'s content at hop `k`, terminal.
+  have hterm : k = nrHops - 1 := by omega
+  have hcle : kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by omega
+  obtain ⟨hcmdEq, hzeroTail⟩ := kemRiFragment_content_terminal kem geom path kemElements
+    (s (nrHops - 1 - k)).2 nrHops k (by omega) hterm hcle hcmdnn riFragment hriFragment0
+  have hrfsize : riFragment.size = geom.perHopRoutingInfoLength :=
+    kemRiFragment_size kem geom path kemElements (s (nrHops - 1 - k)).2 nrHops k (by omega)
+      hperhop hnnh hknsize hksize riFragment hriFragment0
+  -- Sizes needed for `cascading_xor_step`.
+  have hs0size : (s 0).1.size = (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength := by
+    rw [hs0]
+    split
+    · simp
+    · next hc =>
+      simp only [byteArray_empty_size]
+      rw [show geom.nrHops - nrHops = 0 from by omega, Nat.zero_mul]
+  have hssize := createKEMHeader_s_size kem macS geom path keys kemElements riKeyStream riPadding
+    nrHops s hperhop hnnh hknsize hksize hstep
+  have hRk1size : (s (nrHops - 1 - k)).1.size
+      = (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
+        + (nrHops - 1 - k) * geom.perHopRoutingInfoLength :=
+    hs0size ▸ (hssize (nrHops - 1 - k) (by omega)).1
+  have hprevPadsize : (if k > 0 then riPadding[k - 1]! else ByteArray.empty).size
+      = k * geom.perHopRoutingInfoLength := by
+    split
+    · next hk0 => rw [hpadsize (k - 1) (by omega)]; congr 1; omega
+    · next hk0 =>
+      simp only [byteArray_empty_size]
+      rw [show k = 0 from by omega, Nat.zero_mul]
+  have hkssize : (streamS.keystream (ofVector keys[k]!.headerEncryption)
+      (ofVector keys[k]!.headerEncryptionIV)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength)).size
+      = geom.routingInfoLength + geom.perHopRoutingInfoLength := streamS.keystream_size _ _ _
+  have hcombine : (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
+      + nrHops * geom.perHopRoutingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops := by
+    rw [← Nat.add_mul, Nat.sub_add_cancel hgen, Nat.mul_comm]
+  have hdist1 : (k + 1) * geom.perHopRoutingInfoLength
+      = k * geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength := by ring
+  have hdist2 : (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
+      + (nrHops - 1 - k) * geom.perHopRoutingInfoLength
+      = (geom.nrHops - 1 - k) * geom.perHopRoutingInfoLength := by
+    rw [← Nat.add_mul]; congr 1; omega
+  have hkle : k * geom.perHopRoutingInfoLength ≤ geom.perHopRoutingInfoLength * geom.nrHops := by
+    rw [Nat.mul_comm geom.perHopRoutingInfoLength geom.nrHops]
+    exact Nat.mul_le_mul_right _ (by omega)
+  have hks_hyp : (streamS.keystream (ofVector keys[k]!.headerEncryption)
+      (ofVector keys[k]!.headerEncryptionIV)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength)).size
+      = ((geom.routingInfoLength + geom.perHopRoutingInfoLength)
+          - (k + 1) * geom.perHopRoutingInfoLength)
+        + (if k > 0 then riPadding[k - 1]! else ByteArray.empty).size
+        + geom.perHopRoutingInfoLength := by
+    rw [hkssize, hprevPadsize, hdist1, hrouting]
+    omega
+  have hRk1_hyp : riFragment.size + (s (nrHops - 1 - k)).1.size
+      = (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+        - (k + 1) * geom.perHopRoutingInfoLength := by
+    rw [hrfsize, hRk1size, hdist1, hdist2, hrouting, ← hcombine]
+    have hdist3 : (geom.nrHops - 1 - k) * geom.perHopRoutingInfoLength
+        + (k * geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength)
+        = (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
+          + nrHops * geom.perHopRoutingInfoLength := by
+      rw [show k * geom.perHopRoutingInfoLength + geom.perHopRoutingInfoLength
+          = (k + 1) * geom.perHopRoutingInfoLength from by ring,
+        ← Nat.add_mul, ← Nat.add_mul]
+      congr 1
+      omega
+    omega
+  have hxor := cascading_xor_step
+    (streamS.keystream (ofVector keys[k]!.headerEncryption)
+      (ofVector keys[k]!.headerEncryptionIV)
+      (geom.routingInfoLength + geom.perHopRoutingInfoLength))
+    riFragment (s (nrHops - 1 - k)).1 (if k > 0 then riPadding[k - 1]! else ByteArray.empty)
+    ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (k + 1) * geom.perHopRoutingInfoLength)
+    geom.perHopRoutingInfoLength hks_hyp hRk1_hyp
+  rw [hriKScontent k (by omega)] at hR1
+  -- `R(k)` is the routing-info+padding slot the receiver actually reads off `hopPacket ... k`.
+  set ks := streamS.keystream (ofVector keys[k]!.headerEncryption)
+    (ofVector keys[k]!.headerEncryptionIV) (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+    with hksdef
+  set ksLen := (geom.routingInfoLength + geom.perHopRoutingInfoLength)
+    - (k + 1) * geom.perHopRoutingInfoLength with hksLendef
+  set prevPad := (if k > 0 then riPadding[k - 1]! else ByteArray.empty) with hprevPaddef
+  -- The receiver's own XOR-decrypted buffer `b`.
+  set b := xorBytes ((s (nrHops - k)).1 ++ prevPad
+      ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)) ks with hbdef
+  rw [← hR1] at hxor
+  have hcmdBuf : b.extract 0 (geom.perHopRoutingInfoLength - kem.ciphertextSize)
+      = riFragment.extract 0 (geom.perHopRoutingInfoLength - kem.ciphertextSize) := by
+    have h1 : (b.extract 0 ksLen).extract 0 (geom.perHopRoutingInfoLength - kem.ciphertextSize)
+        = b.extract 0 (geom.perHopRoutingInfoLength - kem.ciphertextSize) := by
+      rw [ByteArray.extract_extract]
+      congr 1
+      omega
+    rw [← h1, hxor.1, extract_append_of_le riFragment _ (by omega : geom.perHopRoutingInfoLength
+      - kem.ciphertextSize ≤ riFragment.size)]
+  have hRsize : (s (nrHops - k)).1.size = ksLen := by
+    rw [hR1, size_xorBytes, ByteArray.size_append]; omega
+  have hRawSize : ((s (nrHops - k)).1 ++ prevPad
+      ++ (⟨Array.replicate geom.perHopRoutingInfoLength 0⟩ : ByteArray)).size
+      = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
+    simp only [ByteArray.size_append, byteArray_mk_size, Array.size_replicate]
+    rw [hRsize, ← hkssize, hks_hyp]
+  have hbsize : b.size = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
+    rw [hbdef, size_xorBytes, hRawSize]
+  -- The packet's own wire-format slices.
+  have hslices := hopPacket_slices kem macS geom path keys kemElements riKeyStream riPadding
+    cipher sprpKeys nrHops s t hvalid hmactag hs0 hstep hknsize hksize hpadsize htsize ht0size
+    hsprp hgen k (by omega)
+  obtain ⟨hslice0, hslice1, hslice2, hslice3, hslice4⟩ := hslices
+  -- The MAC-check preimage: `pkt.extract 0 macOff` is exactly `hM1`'s own `mPreimage`.
+  have hpreimage : (hopPacket kemElements riPadding s t nrHops k).extract 0
+      (2 + kem.ciphertextSize + geom.routingInfoLength)
+      = v0AD ++ kemElements[k]! ++ (s (nrHops - k)).1 ++ prevPad := by
+    rw [ByteArray.extract_eq_extract_append_extract (2 + kem.ciphertextSize) (by omega) (by omega),
+      ByteArray.extract_eq_extract_append_extract 2 (by omega) (by omega),
+      hslice0, hslice1, hslice2, ← hprevPaddef]
+    simp only [ByteArray.append_assoc]
+  have hgotMac : ofVector (macS.mac (ofVector keys[k]!.headerMAC)
+      ((hopPacket kemElements riPadding s t nrHops k).extract 0
+        (2 + kem.ciphertextSize + geom.routingInfoLength)))
+      = (s (nrHops - k)).2 := by
+    rw [hpreimage]; exact hM1.symm
+  -- The overall packet size and the truncation/version checks.
+  have hpktsize : (hopPacket kemElements riPadding s t nrHops k).size = geom.packetLength :=
+    hopPacket_size kem macS geom path keys kemElements riKeyStream riPadding cipher sprpKeys
+      nrHops s t hvalid hmactag hs0 hstep hknsize hksize hpadsize htsize ht0size hsprp hgen k
+      (by omega)
+  obtain ⟨hnnh', hperhopEq', hrouting', hheader', hpacket', -⟩ := id hvalid
+  have hadL : adLength = 2 := rfl
+  have hmacL : macLength = 32 := rfl
+  have hpayoff : 2 + kem.ciphertextSize + geom.routingInfoLength + macLength = geom.headerLength := by
+    rw [hheader']; omega
+  have hnottrunc : ¬ (hopPacket kemElements riPadding s t nrHops k).size
+      < 2 + kem.ciphertextSize + geom.routingInfoLength + macLength := by
+    rw [hpktsize, hpayoff, hpacket']; omega
+  unfold unwrapKEM
+  dsimp only
+  rw [dif_neg hnottrunc]
+  have hversion : ¬ (((hopPacket kemElements riPadding s t nrHops k).extract 0 2).data
+      ≠ v0AD.data) := by rw [hslice0]; simp
+  rw [if_neg hversion, hslice1]
+  dsimp only [Bind.bind, Except.bind]
+  rw [hdecap]
+  dsimp only
+  simp only [← hkeyseq]
+  have hmacpass : ¬ ((ofVector (macS.mac (ofVector keys[k]!.headerMAC)
+      ((hopPacket kemElements riPadding s t nrHops k).extract 0
+        (2 + kem.ciphertextSize + geom.routingInfoLength)))).data
+      ≠ ((hopPacket kemElements riPadding s t nrHops k).extract
+          (2 + kem.ciphertextSize + geom.routingInfoLength)
+          (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)).data) := by
+    rw [hgotMac, hslice3]; simp
+  rw [if_neg hmacpass]
+  simp only [hslice2, ← hprevPaddef, hRawSize, ← hksdef, ← hbdef, hcmdBuf, hcmdEq]
+  have hfindnone : (path[k]!).commands.findSome? (fun c => match c with
+      | RoutingCommand.nextNodeHop id m => some (id, m) | _ => none) = none := by
+    rw [List.findSome?_eq_none_iff]
+    intro c hc
+    cases c with
+    | nextNodeHop id m => exact absurd rfl (hcmdnh _ hc id m)
+    | recipient _ => rfl
+    | surbReply _ => rfl
+    | nodeDelay _ => rfl
+    | null => rfl
+  have hnosurb : (path[k]!).commands.any (fun c => match c with
+      | RoutingCommand.surbReply _ => true | _ => false) = false := by
+    rw [List.any_eq_false]
+    intro c hc
+    cases c with
+    | nextNodeHop _ _ => simp
+    | recipient _ => simp
+    | surbReply id => exact absurd rfl (hcmdsurb _ hc id)
+    | nodeDelay _ => simp
+    | null => simp
+  simp only [hfindnone, hnosurb]
+  -- The payload SPRP layering: the terminal hop peels its last encryption layer, exposing `t 0`.
+  have hpayloadstep := newKEMPacket_payload_content cipher sprpKeys t htstep k (by omega)
+  have hsprpkeyk : sprpKeys[k]!.key = keys[k]!.payloadEncryption
+      ∧ sprpKeys[k]!.iv = keys[k]!.headerEncryptionIV := by
+    rw [getElem!_pos sprpKeys k (by omega)]
+    exact hsprpkey k (by omega)
+  rw [hsprp, hsprpkeyk.1, hsprpkeyk.2] at hpayloadstep
+  rw [show nrHops - (k + 1) = 0 from by omega] at hpayloadstep
+  have ht1size : (t (nrHops - k)).size = geom.payloadTagLength + geom.forwardPayloadLength := by
+    rw [htsize (nrHops - k) (by omega), ht0size]
+  have hx0size16 : 16 ≤ (t 0).size := by rw [ht0size]; omega
+  have hdecEq : cipher.decrypt keys[k]!.payloadEncryption.toArray (ofVector keys[k]!.headerEncryptionIV)
+      (t (nrHops - k)) = t 0 := by
+    rw [hpayloadstep, cipher.roundTrip _ _ _ hx0size16]
+  have hpos1 : 0 < (t (nrHops - k)).size := by rw [ht1size]; omega
+  have hdecPayloadEq : (if ((hopPacket kemElements riPadding s t nrHops k).extract
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+        (hopPacket kemElements riPadding s t nrHops k).size).size > 0
+      then cipher.decrypt keys[k]!.payloadEncryption.toArray (ofVector keys[k]!.headerEncryptionIV)
+        ((hopPacket kemElements riPadding s t nrHops k).extract
+          (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+          (hopPacket kemElements riPadding s t nrHops k).size)
+      else (hopPacket kemElements riPadding s t nrHops k).extract
+        (2 + kem.ciphertextSize + geom.routingInfoLength + macLength)
+        (hopPacket kemElements riPadding s t nrHops k).size) = t 0 := by
+    rw [hslice4, if_pos hpos1, hdecEq]
+  simp only [hdecPayloadEq, ht0content]
+  have htagsize : (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray).size
+      = geom.payloadTagLength := Array.size_replicate
+  have htruncFalse : ¬ (((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray)
+      ++ payload).size < geom.payloadTagLength) := by
+    rw [ByteArray.size_append, htagsize, hpayloadsize]; omega
+  rw [if_neg htruncFalse]
+  have htagEq : ((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray)
+      ++ payload).extract 0 geom.payloadTagLength
+      = (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) := by
+    have h := extract_append_left (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) payload
+    rwa [htagsize] at h
+  have htagAllZero : ¬ (!(((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray)
+      ++ payload).extract 0 geom.payloadTagLength).data.all (· == 0)) = true := by
+    rw [htagEq]
+    simp only [Bool.not_eq_true, Bool.not_eq_false']
+    rw [Array.all_eq_true]
+    intro i hi
+    simp [Array.getElem_replicate]
+  rw [if_neg htagAllZero]
+  have hpayloadEq : ((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray)
+      ++ payload).extract geom.payloadTagLength
+      (((⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) ++ payload)).size
+      = payload := by
+    rw [ByteArray.size_append, htagsize]
+    have := extract_append_right (⟨Array.replicate geom.payloadTagLength (0 : UInt8)⟩ : ByteArray) payload
+    rwa [htagsize] at this
+  simp only [pure, Except.pure, hpayloadEq, Bool.false_eq_true, if_false]
+
 /-- As `NIKESphinx.wrapNIKE_unwrapNIKE_complete`: `KEMSphinxScheme`'s witness for
 `Sphinx.Interface.unwrap_complete`. Generic over the wide-block cipher/MAC/KDF/stream cipher, not
 just the `KEM` — never AEZ/HMAC-SHA256/HKDF/AES-CTR specifics, only `cipher`/`macS`/`kdfS`/
