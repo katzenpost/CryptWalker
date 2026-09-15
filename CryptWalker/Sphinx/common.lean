@@ -244,18 +244,6 @@ theorem cascading_xor_step (ks riFragment Rk1 prevPad : ByteArray) (ksLen perHop
     rw [← hpadsizeeq]
     exact ByteArray.extract_zero_size
 
-/-- A `List.foldl` step that leaves some projection `φ` of the accumulator alone at every element
-of `l` leaves `φ` alone overall — the general shape behind `createHeader`'s "this loop never
-touches `groupElements[0]!`" invariant. -/
-theorem foldl_congr_of_forall_mem {α β γ : Type} (l : List β) (g : α → β → α) (φ : α → γ)
-    (h : ∀ a b, b ∈ l → φ (g a b) = φ a) (init : α) :
-    φ (l.foldl g init) = φ init := by
-  induction l generalizing init with
-  | nil => rfl
-  | cons b bs ih =>
-    rw [List.foldl_cons, ih (fun a b' hb' => h a b' (List.mem_cons_of_mem b hb'))]
-    exact h init b List.mem_cons_self
-
 theorem Except.eq_ok_of_map_eq_ok {ε α β : Type} {f : α → β} {e : Except ε α} {b : β}
     (h : f <$> e = Except.ok b) : ∃ a, e = Except.ok a ∧ f a = b := by
   cases e with
@@ -268,51 +256,10 @@ theorem Except.eq_ok_of_bind_eq_ok {ε α β : Type} {e : Except ε α} {f : α 
   | error _ => injection h
   | ok a => exact ⟨a, rfl, h⟩
 
-/-- As `foldl_congr_of_forall_mem`, for an `Except`-monadic fold: if every step that *succeeds*
-adds a fixed `k` to `φ`, and the whole fold succeeds, `φ` grew by `l.length * k` overall. This is
-what lets a `for`-loop that can fail (like `createHeader`'s routing-info assembly, via
-`commandsToBytes`) still support an exact size bound once it's known to have succeeded. -/
-theorem foldlM_add_of_forall_mem {α β ε : Type} (l : List β) (g : α → β → Except ε α) (φ : α → ℕ)
-    (k : ℕ) (h : ∀ (a a' : α) (b : β), b ∈ l → g a b = Except.ok a' → φ a' = φ a + k) :
-    ∀ (init final : α), l.foldlM g init = Except.ok final → φ final = φ init + l.length * k := by
-  induction l with
-  | nil =>
-    intro init final hfinal
-    simp only [List.foldlM_nil] at hfinal
-    injection hfinal with hfinal
-    simp [← hfinal]
-  | cons b bs ih =>
-    intro init final hfinal
-    rw [List.foldlM_cons] at hfinal
-    obtain ⟨a', ha', hfinal'⟩ := Except.eq_ok_of_bind_eq_ok hfinal
-    rw [ih (fun a a' b' hb' hgb' => h a a' b' (List.mem_cons_of_mem b hb') hgb') a' final hfinal',
-      h init a' b List.mem_cons_self ha', List.length_cons]
-    ring
-
-/-- As `foldl_congr_of_forall_mem`, for an `Except`-monadic fold: if every step that *succeeds*
-leaves `φ` unchanged, and the whole fold succeeds, `φ` is unchanged overall — regardless of
-whatever else that step does or how it can fail. This is what lets a loop whose body now has a
-new failure path (e.g. a NIKE decode/safety check) still support an invariant that never actually
-depended on that path. -/
-theorem foldlM_congr_of_forall_mem {α β ε γ : Type} (l : List β) (g : α → β → Except ε α) (φ : α → γ)
-    (h : ∀ (a a' : α) (b : β), b ∈ l → g a b = Except.ok a' → φ a' = φ a) :
-    ∀ (init final : α), l.foldlM g init = Except.ok final → φ final = φ init := by
-  induction l with
-  | nil =>
-    intro init final hfinal
-    simp only [List.foldlM_nil] at hfinal
-    injection hfinal with hfinal
-    simp [← hfinal]
-  | cons b bs ih =>
-    intro init final hfinal
-    rw [List.foldlM_cons] at hfinal
-    obtain ⟨a', ha', hfinal'⟩ := Except.eq_ok_of_bind_eq_ok hfinal
-    rw [ih (fun a a' b' hb' hgb' => h a a' b' (List.mem_cons_of_mem b hb') hgb') a' final hfinal',
-      h init a' b List.mem_cons_self ha']
-
-/-- As `foldlM_congr_of_forall_mem`, directly for a `for`-loop (`List.forIn`) rather than a
-`foldlM` — lets a loop whose step can `.done`-exit early (none of this project's loops do, but the
-general `forIn` shape allows it) still support an invariant that doesn't depend on that path. -/
+/-- A `for`-loop (`List.forIn`) step that leaves some projection `φ` of the accumulator alone at
+every element of `l` leaves `φ` alone overall — lets a loop whose step can `.done`-exit early
+(none of this project's loops do, but the general `forIn` shape allows it) still support an
+invariant that doesn't depend on that path. -/
 theorem List.forIn_congr_of_forall_mem {α β ε γ : Type} (l : List β)
     (f : β → α → Except ε (ForInStep α)) (φ : α → γ)
     (hyield : ∀ (a a' : α) (b : β), b ∈ l → f b a = Except.ok (ForInStep.yield a') → φ a' = φ a)
@@ -534,24 +481,6 @@ theorem replicate_extract (k lo hi : Nat) (h : hi ≤ k) :
     simp only [ByteArray.getElem_extract]
     show (Array.replicate k (0:UInt8))[lo + i]'hik = (Array.replicate (hi - lo) (0:UInt8))[i]'hij
     rw [Array.getElem_replicate, Array.getElem_replicate]
-
-/-- Padding to a wider target and then taking a prefix that still reaches or exceeds the original
-content is the same as padding to that narrower width directly — what lets `kemRiFragment`'s
-terminal-hop fragment (zero-padded to the full per-hop budget) still support extracting just its
-leading `perHopRoutingInfoLength - kem.ciphertextSize` bytes as if it had been padded to exactly
-that width. -/
-theorem zeroPadTo_extract_prefix {n m : Nat} (b : ByteArray) (h1 : b.size ≤ m) (h2 : m ≤ n) :
-    (zeroPadTo n b).extract 0 m = zeroPadTo m b := by
-  unfold zeroPadTo
-  by_cases hbn : b.size ≥ n
-  · have heqm : b.size = m := by omega
-    rw [if_pos hbn, if_pos (show b.size ≥ m by omega), ← heqm, ByteArray.extract_zero_size]
-  · by_cases hbm : b.size ≥ m
-    · have heqm : b.size = m := by omega
-      rw [if_neg hbn, if_pos hbm, ← heqm, extract_append_of_le b _ (le_refl b.size),
-        ByteArray.extract_zero_size]
-    · rw [if_neg hbn, if_neg hbm, extract_append_le b _ h1, replicate_extract _ _ _ (by omega)]
-      simp
 
 /-- Go's "leave spare room for one" check: `budget` is what's left of `perHopRoutingInfoLength`
 for the caller's *own* commands once whatever `createHeader`/`createKEMHeader` appends

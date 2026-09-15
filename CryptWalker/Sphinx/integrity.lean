@@ -111,9 +111,6 @@ structure Forgery (F G : Type) where
   privKeys : ℕ → F
   alpha0 : G
 
-/-- An integrity adversary: a probabilistic algorithm producing a `Forgery`. -/
-abbrev IntegrityAdversary (F G : Type) := ProbComp (Forgery F G)
-
 /-- The Problem P instance a successful `N`-hop forgery reduces to: `hρ` keys `ρ̂`'s domain and
 `f`'s family index off the honest chain's own shared secrets. -/
 def inducedInstance (ρhat0 : Seed → Kappa) (ρ0 : Seed → Idx) (f : Idx → Yy → Kappa) :

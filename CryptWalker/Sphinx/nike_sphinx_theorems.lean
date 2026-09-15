@@ -380,294 +380,6 @@ private theorem nikeDH_innerLoop_bridge (nike : NIKE) (baseSk targetSk : nike.Pr
   rw [htn] at hmain
   exact hmain
 
-set_option maxHeartbeats 4000000 in
-/-- **`createHeader`'s outer group-element/key-derivation loop, fully bridged**: given that every
-hop's own public key really is the honest `derivePublicKey` of a known private key (`targetSk`),
-the actual `groupElements`/`keys` arrays `createHeader` builds decode to exactly
-`NIKE.telescopeElem`/`NIKE.telescopeSecret`'s values at every hop index. -/
-private theorem createHeader_loop1_bridge (nike : NIKE) (macS : MAC) (kdfS : KDF)
-    (streamS : StreamCipher) (geom : Geometry)
-    (clientPrivateKey : ByteArray) (filler : ByteArray) (path : Array PathHop)
-    (hdr : ByteArray) (sprpKeys : Array SPRPKey)
-    (h : createHeader nike macS kdfS streamS geom clientPrivateKey filler path = .ok (hdr, sprpKeys))
-    (targetSk : Nat → nike.PrivateKey)
-    (htarget : ∀ i (hi : i < path.size), (path[i]!).publicKey
-      = ofVector (nike.encodePublicKey (nike.derivePublicKey (targetSk i)))) :
-    ∃ (clientSk : nike.PrivateKey) (f : Nat → nike.PrivateKey)
-      (groupElements : Array ByteArray) (keys : Array HopKeys),
-      groupElements.size = path.size ∧ keys.size = path.size ∧
-      nike.decodePrivateKey (toVecN nike.privateKeySize clientPrivateKey) = some clientSk ∧
-      nikeSelfPublicKeyBytes nike clientPrivateKey
-        = ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)) ∧
-      (∀ i (hi : i < path.size),
-        groupElements[i]! = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f i).1) ∧
-        keys[i]! = deriveHopKeys kdfS
-          (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk i) f i).1)) ∧
-        nike.decodePrivateKey (toVecN nike.privateKeySize (keys[i]!).blindingFactor) = some (f i)) := by
-  unfold createHeader at h
-  dsimp only at h
-  split at h
-  case isTrue =>
-    have h' : (Except.error "sphinx: invalid path" : Except String (ByteArray × Array SPRPKey)) =
-        Except.ok (hdr, sprpKeys) := h
-    injection h'
-  case isFalse =>
-    split at h
-    case isTrue =>
-      have h' : (Except.error "sphinx: invalid filler length" : Except String (ByteArray × Array SPRPKey)) =
-          Except.ok (hdr, sprpKeys) := h
-      injection h'
-    case isFalse =>
-      rename_i h1 h2
-      simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
-        Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl,
-        ite_pure_yield, pure_bind, bind_pure_comp] at h
-      obtain ⟨clientSk, hSk, hA⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
-      clear h
-      obtain ⟨hop0, hHop0, hB⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hA
-      clear hA
-      obtain ⟨loop1Final, hLoop1, hC⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hB
-      clear hB hC
-      obtain ⟨s, hs0, hsl, hstep⟩ := CryptWalker.Sphinx.Common.List.forIn_exists_trace _ _
-        (by
-          intro a a' i hi hgb
-          obtain ⟨ss, -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
-          obtain ⟨y', -, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hgb
-          exact absurd hgb (by simp))
-        _ _ hLoop1
-      clear hLoop1
-      have hpos : 0 < path.size := by
-        simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or] at h1
-        omega
-      have hlen1 : (List.range' 1 (path.size - 1)).length = path.size - 1 := by simp
-      have hSk' : nike.decodePrivateKey (toVecN nike.privateKeySize clientPrivateKey) = some clientSk := by
-        unfold nikeDecodePrivateKey at hSk
-        match hd : nike.decodePrivateKey (toVecN nike.privateKeySize clientPrivateKey), hSk with
-        | none, hSk => injection hSk
-        | some sk, hSk =>
-          simp only [pure, Except.pure, Except.ok.injEq] at hSk
-          exact congrArg some hSk
-      have hself : nikeSelfPublicKeyBytes nike clientPrivateKey =
-          ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)) := by
-        unfold nikeSelfPublicKeyBytes
-        rw [hSk']
-      obtain ⟨f, hf⟩ :
-          ∃ f : Nat → nike.PrivateKey, ∀ j,
-            nike.decodePrivateKey (toVecN nike.privateKeySize ((s j).2.1[j]!).blindingFactor) = some (f j) :=
-        ⟨fun j => (nike.decodePrivateKey_total (toVecN nike.privateKeySize ((s j).2.1[j]!).blindingFactor)).choose,
-          fun j => (nike.decodePrivateKey_total (toVecN nike.privateKeySize ((s j).2.1[j]!).blindingFactor)).choose_spec⟩
-      have hsize : ∀ j, j ≤ path.size - 1 → (s j).2.1.size = j + 1 := by
-        intro j
-        induction j with
-        | zero =>
-          intro _
-          rw [hs0]
-          rfl
-        | succ j ih =>
-          intro hj
-          have hj' : j < (List.range' 1 (path.size - 1)).length := by rw [hlen1]; omega
-          obtain ⟨sharedSecret0, -, hrest⟩ :=
-            CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok (hstep j hj')
-          obtain ⟨finalSS, -, hyieldEq⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hrest
-          injection hyieldEq with hyieldEq
-          have hkeyseq : (s (j+1)).2.1 = (s j).2.1.push (deriveHopKeys kdfS finalSS) :=
-            (congrArg (fun p => p.2.1) hyieldEq).symm
-          rw [hkeyseq, Array.size_push, ih (by omega)]
-      have hpush : ∀ j, j < path.size - 1 → ∃ x, (s (j+1)).2.1 = (s j).2.1.push x := by
-        intro j hj
-        have hj' : j < (List.range' 1 (path.size - 1)).length := by rw [hlen1]; omega
-        obtain ⟨sharedSecret0, -, hrest⟩ :=
-          CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok (hstep j hj')
-        obtain ⟨finalSS, -, hyieldEq⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hrest
-        injection hyieldEq with hyieldEq
-        exact ⟨deriveHopKeys kdfS finalSS, (congrArg (fun p => p.2.1) hyieldEq).symm⟩
-      have hsetG : ∀ j, j < path.size - 1 → ∃ x, (s (j+1)).1 = (s j).1.set! (j+1) x := by
-        intro j hj
-        have hj' : j < (List.range' 1 (path.size - 1)).length := by rw [hlen1]; omega
-        have hstepj := hstep j hj'
-        rw [List.getElem_range'_1 j hj', Nat.add_comm] at hstepj
-        obtain ⟨sharedSecret0, -, hrest⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hstepj
-        obtain ⟨finalSS, -, hyieldEq⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hrest
-        injection hyieldEq with hyieldEq
-        exact ⟨nikeBlind nike (s j).2.2 ((s j).2.1.push (deriveHopKeys kdfS finalSS))[j]!.blindingFactor,
-          (congrArg (fun p => p.1) hyieldEq).symm⟩
-      -- `groupElements[i]!` is written exactly once (transitioning into `s i`) and never touched
-      -- again, since every later step's `.set!` targets a strictly larger index.
-      have hfreezeG : ∀ i m, i ≤ m → m ≤ path.size - 1 → (s m).1[i]! = (s i).1[i]! := by
-        intro i m him hmn
-        induction m with
-        | zero => have : i = 0 := by omega
-                  rw [this]
-        | succ m ih =>
-          rcases Nat.lt_or_ge i (m + 1) with h | h
-          · obtain ⟨x, hx⟩ := hsetG m (by omega)
-            rw [hx, Array.getElem!_set!_ne _ _ _ _ (by omega)]
-            exact ih (by omega) (by omega)
-          · have : i = m + 1 := by omega
-            rw [this]
-      -- `groupElements` is only ever `.set!`'d, never resized, so its size stays `path.size`
-      -- throughout — needed to apply `getElem!_set!_self` at the freshly-written index.
-      have hsizeG : ∀ j, j ≤ path.size - 1 → (s j).1.size = path.size := by
-        intro j
-        induction j with
-        | zero => intro _; rw [hs0]; exact Array.size_replicate
-        | succ j ih =>
-          intro hj
-          have hj' : j < (List.range' 1 (path.size - 1)).length := by rw [hlen1]; omega
-          have hstepj := hstep j hj'
-          rw [List.getElem_range'_1 j hj', Nat.add_comm] at hstepj
-          obtain ⟨sharedSecret0, -, hrest⟩ :=
-            CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hstepj
-          obtain ⟨finalSS, -, hyieldEq⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hrest
-          injection hyieldEq with hyieldEq
-          have hEeq0 : (s (j+1)).1 = (s j).1.set! (j+1)
-              (nikeBlind nike (s j).2.2 ((s j).2.1.push (deriveHopKeys kdfS finalSS))[j]!.blindingFactor) :=
-            (congrArg (fun p => p.1) hyieldEq).symm
-          rw [hEeq0, Array.size_set!, ih (by omega)]
-      have main0 : (s 0).1[0]! = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f 0).1) ∧
-          (s 0).2.1[0]! = deriveHopKeys kdfS
-            (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk 0) f 0).1)) ∧
-          (s 0).2.2 = (s 0).1[0]! := by
-        rw [hs0]
-        dsimp only
-        refine ⟨?_, ?_, ?_⟩
-        · rw [getElem!_pos _ 0 (by simpa using hpos), Array.getElem_replicate]
-          rfl
-        · have heq : hop0 = ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk 0) f 0).1) := by
-            rw [htarget 0 hpos] at hHop0
-            rw [nikeDH_bridge nike clientSk (nike.derivePublicKey (targetSk 0)) (nike.derive_safe (targetSk 0))]
-              at hHop0
-            injection hHop0 with hHop0
-            exact hHop0.symm
-          rw [getElem!_pos _ 0 (by simp)]
-          exact congrArg (deriveHopKeys kdfS) heq
-        · rw [getElem!_pos _ 0 (by simpa using hpos), Array.getElem_replicate]
-      have main : ∀ m, m < path.size →
-          (s m).1[m]! = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f m).1) ∧
-          (s m).2.1[m]! = deriveHopKeys kdfS
-            (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk m) f m).1)) ∧
-          (s m).2.2 = (s m).1[m]! := by
-        intro m
-        induction m with
-        | zero => intro _; exact main0
-        | succ m ih =>
-          intro hm
-          have hm' : m < path.size := by omega
-          obtain ⟨ihE, ihS, ihP⟩ := ih hm'
-          have hj' : m < (List.range' 1 (path.size - 1)).length := by rw [hlen1]; omega
-          have hstepm := hstep m hj'
-          rw [List.getElem_range'_1 m hj', Nat.add_comm] at hstepm
-          obtain ⟨sharedSecret0, hss0, hrest⟩ :=
-            CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hstepm
-          obtain ⟨finalSS, hfinalSS, hyieldEq⟩ :=
-            CryptWalker.Sphinx.Common.Except.eq_ok_of_map_eq_ok hrest
-          injection hyieldEq with hyieldEq
-          have hEeq : (s (m + 1)).1 = (s m).1.set! (m + 1)
-              (nikeBlind nike (s m).2.2 ((s m).2.1.push (deriveHopKeys kdfS finalSS))[m]!.blindingFactor) :=
-            (congrArg (fun p => p.1) hyieldEq).symm
-          have hSeq : (s (m + 1)).2.1 = (s m).2.1.push (deriveHopKeys kdfS finalSS) :=
-            (congrArg (fun p => p.2.1) hyieldEq).symm
-          have hPeq : (s (m + 1)).2.2 = nikeBlind nike (s m).2.2
-              ((s m).2.1.push (deriveHopKeys kdfS finalSS))[m]!.blindingFactor :=
-            (congrArg (fun p => p.2.2) hyieldEq).symm
-          have hfactor_eq : ∀ k (hk : k < m + 1),
-              nike.decodePrivateKey (toVecN nike.privateKeySize ((s m).2.1[k]!).blindingFactor)
-                = some (f k) := by
-            intro k hk
-            rw [Array.getElem!_stable_from_pushes (fun j => (s j).2.1) (path.size - 1) hpush hsize k m
-              (by omega) (by omega)]
-            exact hf k
-          have htarget' : path[m + 1]!.publicKey
-              = ofVector (nike.encodePublicKey (nike.derivePublicKey (targetSk (m + 1)))) :=
-            htarget (m + 1) (by omega)
-          have hfinalSS_eq := nikeDH_innerLoop_bridge nike clientSk (targetSk (m + 1)) path[m + 1]!.publicKey
-            htarget' (fun k => ((s m).2.1[k]!).blindingFactor) f (m + 1) hfactor_eq sharedSecret0 finalSS
-            hss0 hfinalSS
-          -- The blinding factor `nikeBlind` uses to compute hop `m+1`'s group element is hop
-          -- `m`'s own key — already present *before* this step's push, hence untouched by it.
-          have hstableKeyEq : ((s m).2.1.push (deriveHopKeys kdfS finalSS))[m]! = (s m).2.1[m]! :=
-            CryptWalker.Sphinx.Common.Array.getElem!_push_stable _ _ _ (by rw [hsize m (by omega)]; omega)
-          have hX : nikeBlind nike (s m).2.2 ((s m).2.1.push (deriveHopKeys kdfS finalSS))[m]!.blindingFactor
-              = ofVector (nike.encodePublicKey (telescopeElem nike clientSk f (m + 1)).1) := by
-            rw [hstableKeyEq, ihP, ihE]
-            exact nikeBlind_bridge nike (telescopeElem nike clientSk f m).1 (f m)
-              (telescopeElem nike clientSk f m).2 _ (hf m)
-          have hpushedEq : ((s m).2.1.push (deriveHopKeys kdfS finalSS))[m + 1]! = deriveHopKeys kdfS finalSS := by
-            have hsz : (s m).2.1.size = m + 1 := hsize m (by omega)
-            rw [← hsz, getElem!_pos _ _ (by rw [Array.size_push]; omega), Array.getElem_push_eq]
-          refine ⟨?_, ?_, ?_⟩
-          · rw [hEeq, Array.getElem!_set!_self _ _ _ (by rw [hsizeG m (by omega)]; omega), hX]
-          · rw [hSeq, hpushedEq, ← hfinalSS_eq]
-          · rw [hPeq, hX, hEeq, Array.getElem!_set!_self _ _ _ (by rw [hsizeG m (by omega)]; omega), hX]
-      have hsl' : s (path.size - 1) = loop1Final := by rw [hlen1] at hsl; exact hsl
-      refine ⟨clientSk, f, loop1Final.1, loop1Final.2.1, ?_, ?_, hSk', hself, ?_⟩
-      · rw [← hsl']; exact hsizeG (path.size - 1) (le_refl _)
-      · rw [← hsl']; rw [hsize (path.size - 1) (le_refl _)]; omega
-      · intro i hi
-        obtain ⟨mE, mS, -⟩ := main i hi
-        have hE : loop1Final.1[i]! = (s i).1[i]! := by
-          rw [← hsl']; exact hfreezeG i (path.size - 1) (by omega) (le_refl _)
-        have hS : loop1Final.2.1[i]! = (s i).2.1[i]! := by
-          rw [← hsl']
-          exact Array.getElem!_stable_from_pushes (fun j => (s j).2.1)
-            (path.size - 1) hpush hsize i (path.size - 1) (by omega) (le_refl _)
-        refine ⟨?_, ?_, ?_⟩
-        · rw [hE]; exact mE
-        · rw [hS]; exact mS
-        · rw [hS]; exact hf i
-
-/-- `createHeader`'s second loop's one-step accumulator update — never fails, so its `forIn`
-collapses to a bare `List.foldl` under `List.forIn_pure_yield_eq_foldl`. Depends only on
-`streamS`/`geom`/`keys`, not on `nike` at all — identical in shape to `KEMSphinx`'s own
-`loop2Step` (both files build `riKeyStream`/`riPadding` the same way from `keys`). -/
-private def loop2Step (streamS : StreamCipher) (geom : Geometry) (keys : Array HopKeys)
-    (st : Array ByteArray × Array ByteArray) (i : Nat) : Array ByteArray × Array ByteArray :=
-  let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
-  let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
-    (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
-  let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
-  let thisPad0 := ks.extract ksLen totalRiLen
-  let thisPad := if i > 0 then
-      let prevPad := st.2[i - 1]!
-      xorBytes (thisPad0.extract 0 prevPad.size) prevPad ++ thisPad0.extract prevPad.size thisPad0.size
-    else thisPad0
-  (st.1.push (ks.extract 0 ksLen), st.2.push thisPad)
-
-/-- **The full trace of `createHeader`'s second loop**: the actual sequence of
-`(riKeyStream, riPadding)` array pairs, one per hop, built from the generic
-`List.foldl_exists_trace` rather than a bespoke induction. -/
-private theorem createHeader_loop2_trace (streamS : StreamCipher) (geom : Geometry)
-    (keys : Array HopKeys) (nrHops : Nat) :
-    ∃ s : Nat → Array ByteArray × Array ByteArray, s 0 = (#[], #[]) ∧
-      s nrHops = (List.range' 0 nrHops).foldl (loop2Step streamS geom keys) (#[], #[]) ∧
-      ∀ j (hj : j < nrHops), s (j + 1) = loop2Step streamS geom keys (s j) j := by
-  obtain ⟨s, hs0, hsl, hstep⟩ :=
-    CryptWalker.Sphinx.Common.List.foldl_exists_trace (List.range' 0 nrHops)
-      (loop2Step streamS geom keys) (#[], #[])
-  refine ⟨s, hs0, by simpa using hsl, ?_⟩
-  intro j hj
-  have hj' : j < (List.range' 0 nrHops).length := by simpa using hj
-  have := hstep j hj'
-  simpa using this
-
-/-- The trace's array sizes track the step index exactly, by a trivial induction on the pushes
-`loop2Step` performs every iteration. -/
-private theorem loop2_trace_size (streamS : StreamCipher) (geom : Geometry) (keys : Array HopKeys)
-    (nrHops : Nat) (s : Nat → Array ByteArray × Array ByteArray) (hs0 : s 0 = (#[], #[]))
-    (hstep : ∀ j (hj : j < nrHops), s (j + 1) = loop2Step streamS geom keys (s j) j) :
-    ∀ j (hj : j ≤ nrHops), (s j).1.size = j ∧ (s j).2.size = j := by
-  intro j hj
-  induction j with
-  | zero => simp [hs0]
-  | succ j ih =>
-    have hj' : j < nrHops := by omega
-    obtain ⟨ih1, ih2⟩ := ih (by omega)
-    rw [hstep j hj']
-    unfold loop2Step
-    dsimp only
-    simp only [Array.size_push, ih1, ih2]
-    trivial
-
 /-- `a.push x`'s new element, addressed via `!` at the array's own (pre-push) size — the
 `getElem!` counterpart of `Array.getElem_push_eq`. -/
 private theorem getElem!_push_eq {α : Type} [Inhabited α] (a : Array α) (x : α) :
@@ -681,61 +393,9 @@ private theorem getElem!_push_eq' {α : Type} [Inhabited α] (a : Array α) (x :
     (hi : i = a.size) : (a.push x)[i]! = x := by
   rw [hi]; exact getElem!_push_eq a x
 
-/-- **`createHeader`'s second loop, at the content level**: `riKeyStream[i]!` and `riPadding[i]!`
-spelled out exactly, the latter in terms of `riPadding[i-1]!` (already fixed by an earlier
-iteration) rather than unwound all the way back to hop `0` — precisely the one-step relationship
-`unwrapNIKE`'s own single XOR at hop `i` needs to match against. -/
-private theorem loop2_content (streamS : StreamCipher) (geom : Geometry) (keys : Array HopKeys)
-    (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
-    (hfinal : final = (List.range' 0 nrHops).foldl (loop2Step streamS geom keys) (#[], #[]))
-    (i : Nat) (hi : i < nrHops) :
-    final.1[i]! = (streamS.keystream (ofVector (keys[i]!).headerEncryption)
-        (ofVector (keys[i]!).headerEncryptionIV)
-        (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
-      ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength)
-    ∧ final.2[i]! =
-      (let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
-       let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
-         (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
-       let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
-       let thisPad0 := ks.extract ksLen totalRiLen
-       if i > 0 then
-         xorBytes (thisPad0.extract 0 final.2[i - 1]!.size) final.2[i - 1]!
-           ++ thisPad0.extract final.2[i - 1]!.size thisPad0.size
-       else thisPad0) := by
-  obtain ⟨s, hs0, hsl, hstep⟩ := createHeader_loop2_trace streamS geom keys nrHops
-  have hsize := loop2_trace_size streamS geom keys nrHops s hs0 hstep
-  have hstable1 := Array.getElem!_stable_of_pushes (fun j => (s j).1) nrHops
-    (fun j hj => ⟨_, congrArg Prod.fst (hstep j hj)⟩) (fun j hj => (hsize j hj).1)
-  have hstable2 := Array.getElem!_stable_of_pushes (fun j => (s j).2) nrHops
-    (fun j hj => ⟨_, congrArg Prod.snd (hstep j hj)⟩) (fun j hj => (hsize j hj).2)
-  have h1 : final.1[i]! = (s (i + 1)).1[i]! := by
-    rw [hfinal, ← hsl]; exact hstable1 i nrHops hi (le_refl _)
-  have h2 : final.2[i]! = (s (i + 1)).2[i]! := by
-    rw [hfinal, ← hsl]; exact hstable2 i nrHops hi (le_refl _)
-  have hpi : (s i).1.size = i := (hsize i (by omega)).1
-  have hpi2 : (s i).2.size = i := (hsize i (by omega)).2
-  rw [hstep i hi] at h1 h2
-  unfold loop2Step at h1 h2
-  dsimp only at h1 h2
-  rw [getElem!_push_eq' _ _ _ hpi.symm] at h1
-  rw [getElem!_push_eq' _ _ _ hpi2.symm] at h2
-  refine ⟨h1, ?_⟩
-  rcases Nat.eq_zero_or_pos i with hi0 | hi0
-  · subst hi0; simpa using h2
-  · have hfp : final.2[i - 1]! = (s i).2[i - 1]! := by
-      rw [hfinal, ← hsl]
-      have := hstable2 (i - 1) nrHops (by omega) (by omega)
-      rwa [show i - 1 + 1 = i from by omega] at this
-    dsimp only
-    rw [if_pos hi0] at ⊢
-    rw [if_pos hi0, ← hfp] at h2
-    exact h2
-
 /-- **`createHeader`'s second loop, at the content level — kept in its native `forIn`/`Except`
-shape.** As `loop2_content`, but proved directly against the loop's own `forIn` rather than the
-`List.foldl` form, since `createHeader`'s actual elaborated body distributes its `if i > 0`
-differently than `loop2Step`'s definition does. Mirrors `createKEMHeader_loop2_content`. -/
+shape**: `riKeyStream[i]!`/`riPadding[i]!` spelled out exactly, matching what `createHeader`'s
+actual elaborated body produces. Mirrors `createKEMHeader_loop2_content`. -/
 private theorem createHeader_loop2_content_native (streamS : StreamCipher) (geom : Geometry)
     (keys : Array HopKeys) (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
     (hfinal : forIn (List.range' 0 nrHops) (#[], #[])
@@ -858,10 +518,9 @@ private theorem createHeader_loop2_content_native (streamS : StreamCipher) (geom
     · dsimp only
       rw [if_neg hi0, h2, ← congrArg Prod.snd hstepi, getElem!_push_eq' _ _ _ hpi2.symm]
 
-
-/-- As `createHeader_loop2_padsize`, but taking the content facts directly (as produced by
-`createHeader_loop2_content_native`/`createHeader_unfold`) instead of `hfinal` — avoids re-deriving
-content from a `hfinal` this caller may not have in the `loop2Step`-foldl shape. -/
+/-- **`riPadding[i]!`'s byte size**: exactly `(i+1) * perHopRoutingInfoLength`, by induction on
+the content facts `createHeader_loop2_content_native`/`createHeader_unfold` produce. Needed for
+`hopPacket`'s overall size, since `riPadding[k-1]!` is one of its components. -/
 private theorem createHeader_loop2_padsize_of_content (streamS : StreamCipher) (geom : Geometry)
     (keys : Array HopKeys) (nrHops : Nat) (riKeyStream riPadding : Array ByteArray)
     (hriContent : ∀ i (hi : i < nrHops),
@@ -893,42 +552,6 @@ private theorem createHeader_loop2_padsize_of_content (streamS : StreamCipher) (
     omega
   | succ i ih =>
     obtain ⟨-, hval⟩ := hriContent (i + 1) hi
-    rw [hval]
-    dsimp only
-    rw [if_pos (by omega : i + 1 > 0)]
-    have hihsize := ih (by omega)
-    have hthis0size : ((streamS.keystream (ofVector (keys[i + 1]!).headerEncryption)
-        (ofVector (keys[i + 1]!).headerEncryptionIV)
-        (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract
-        (geom.routingInfoLength + geom.perHopRoutingInfoLength
-          - (i + 1 + 1) * geom.perHopRoutingInfoLength)
-        (geom.routingInfoLength + geom.perHopRoutingInfoLength)).size
-        = (i + 1 + 1) * geom.perHopRoutingInfoLength := by
-      rw [ByteArray.size_extract, streamS.keystream_size]
-      have := hle (i + 1) hi
-      omega
-    simp only [ByteArray.size_append, size_xorBytes, ByteArray.size_extract, Nat.add_sub_cancel] at *
-    omega
-
-/-- **`riPadding[i]!`'s byte size**: exactly `(i+1) * perHopRoutingInfoLength` — one `perHop` for
-every hop cascaded through so far, by induction on `loop2_content`'s own recursive value formula.
-Needed for `hopPacket`'s overall size, since `riPadding[k-1]!` is one of its components. -/
-private theorem createHeader_loop2_padsize (streamS : StreamCipher) (geom : Geometry)
-    (keys : Array HopKeys) (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
-    (hfinal : final = (List.range' 0 nrHops).foldl (loop2Step streamS geom keys) (#[], #[]))
-    (hle : ∀ i (hi : i < nrHops),
-        (i + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength + geom.perHopRoutingInfoLength) :
-    ∀ i (hi : i < nrHops), final.2[i]!.size = (i + 1) * geom.perHopRoutingInfoLength := by
-  intro i hi
-  induction i with
-  | zero =>
-    obtain ⟨-, hval⟩ := loop2_content streamS geom keys nrHops final hfinal 0 hi
-    rw [hval]
-    dsimp only
-    rw [if_neg (by omega), ByteArray.size_extract, streamS.keystream_size]
-    omega
-  | succ i ih =>
-    obtain ⟨-, hval⟩ := loop2_content streamS geom keys nrHops final hfinal (i + 1) hi
     rw [hval]
     dsimp only
     rw [if_pos (by omega : i + 1 > 0)]
@@ -1025,101 +648,10 @@ private theorem createHeader_hdr_bytesPub (nike : NIKE) (macS : MAC) (kdfS : KDF
       simpa [hv0, hpub] using CryptWalker.Util.Bytes.extract_append_right v0AD
         (ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)))
 
-/-- The per-iteration size growth of `createHeader`'s routing-info assembly loop (the third and
-final `for` loop): whatever the current fragment/budget/terminal-ness happen to be, a successful
-step always grows the accumulated `routingInfo` by exactly `geom.perHopRoutingInfoLength` bytes —
-`zeroPadTo` pads (never truncates, since the budget check bounds the fragment first) up to that
-width, and `xorBytes` afterward doesn't change the size. -/
-private theorem createHeader_loop3_step (nike : NIKE) (macS : MAC) (geom : Geometry)
-    (path : Array PathHop)
-    (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
-    (nrHops : Nat) (hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
-    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
-    (iRev : Nat) (hiRev : iRev < nrHops)
-    (ri mb ri' mb' : ByteArray)
-    (hstep :
-      (do
-        let i := nrHops - 1 - iRev
-        let isTerminal := i == nrHops - 1
-        let hop := path[i]!
-        let budget := if isTerminal then geom.perHopRoutingInfoLength
-          else geom.perHopRoutingInfoLength - geom.nextNodeHopLength
-        let mut riFragment ← commandsToBytes budget hop.commands
-        if !isTerminal then
-          let next := path[i + 1]!
-          riFragment := riFragment ++ (RoutingCommand.nextNodeHop next.id (toVec32 mb)).toBytes
-        let routingInfo := zeroPadTo geom.perHopRoutingInfoLength riFragment ++ ri
-        let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
-        let mPreimage := v0AD ++ groupElements[i]! ++ routingInfo
-          ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
-        let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
-        pure (ForInStep.yield (routingInfo, macBytes)) :
-          Except String (ForInStep (ByteArray × ByteArray))) = Except.ok (ForInStep.yield (ri', mb'))) :
-    ri'.size = ri.size + geom.perHopRoutingInfoLength := by
-  dsimp only at hstep
-  obtain ⟨riFragment0, hriFragment0, hstep⟩ := Except.eq_ok_of_bind_eq_ok hstep
-  by_cases hterm : nrHops - 1 - iRev = nrHops - 1
-  · have hcond : (nrHops - 1 - iRev == nrHops - 1) = true := by simp [hterm]
-    have hcond' : (!(nrHops - 1 - iRev == nrHops - 1)) = false := by simp [hterm]
-    simp only [hcond'] at hstep
-    simp only [hcond] at hriFragment0
-    simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
-      Bool.false_eq_true, reduceIte] at hstep hriFragment0
-    have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength := commandsToBytes_size_le hriFragment0
-    simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq, Prod.mk.injEq] at hstep
-    rw [← hstep.1, size_xorBytes, ByteArray.size_append, zeroPadTo_size hle0]; omega
-  · have hcond : (nrHops - 1 - iRev == nrHops - 1) = false := by simp [hterm]
-    have hcond' : (!(nrHops - 1 - iRev == nrHops - 1)) = true := by simp [hterm]
-    simp only [hcond'] at hstep
-    simp only [hcond] at hriFragment0
-    simp only [decide_eq_true_eq, eq_self_iff_true, if_true, if_false, ite_true, ite_false,
-      Bool.false_eq_true, reduceIte] at hstep hriFragment0
-    have hle0 : riFragment0.size ≤ geom.perHopRoutingInfoLength - geom.nextNodeHopLength :=
-      commandsToBytes_size_le hriFragment0
-    have hle1 : (riFragment0 ++ (RoutingCommand.nextNodeHop (path[nrHops - 1 - iRev + 1]!).id
-        (toVec32 mb)).toBytes).size ≤ geom.perHopRoutingInfoLength := by
-      simp only [ByteArray.size_append, RoutingCommand.nextNodeHop_toBytes_size]
-      omega
-    simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq, Prod.mk.injEq] at hstep
-    rw [← hstep.1, size_xorBytes, ByteArray.size_append, zeroPadTo_size hle1]; omega
-
-/-- The routing-info loop's step never exits via `.done` (no `break`) — companion to
-`createHeader_loop3_step`, split out as its own term-mode lemma (rather than an inline tactic
-block at the call site) so its `hstep` parameter's type can be unified from context lazily, the
-same way `createHeader_loop3_step`'s can — an inline `by`-tactic block there gets elaborated too
-eagerly, before the step function itself has been pinned down from `hLoop3`. -/
-private theorem createHeader_loop3_never_done (nike : NIKE) (macS : MAC) (geom : Geometry)
-    (path : Array PathHop)
-    (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
-    (nrHops : Nat) (iRev : Nat) (ri mb : ByteArray) (a' : ByteArray × ByteArray)
-    (hstep :
-      (do
-        let i := nrHops - 1 - iRev
-        let isTerminal := i == nrHops - 1
-        let hop := path[i]!
-        let budget := if isTerminal then geom.perHopRoutingInfoLength
-          else geom.perHopRoutingInfoLength - geom.nextNodeHopLength
-        let mut riFragment ← commandsToBytes budget hop.commands
-        if !isTerminal then
-          let next := path[i + 1]!
-          riFragment := riFragment ++ (RoutingCommand.nextNodeHop next.id (toVec32 mb)).toBytes
-        let routingInfo := zeroPadTo geom.perHopRoutingInfoLength riFragment ++ ri
-        let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
-        let mPreimage := v0AD ++ groupElements[i]! ++ routingInfo
-          ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
-        let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
-        pure (ForInStep.yield (routingInfo, macBytes)) :
-          Except String (ForInStep (ByteArray × ByteArray))) = Except.ok (ForInStep.done a')) :
-    False := by
-  dsimp only at hstep
-  obtain ⟨riFragment0, -, hstep⟩ := Except.eq_ok_of_bind_eq_ok hstep
-  split at hstep <;> injection hstep with hstep <;> injection hstep
-
 set_option maxHeartbeats 1000000 in
-/-- **The full trace of `createHeader`'s third loop.** As `createHeader_loop3_step` for a single
-step, packaged (via `List.forIn_exists_trace`, ruled non-`.done` by `createHeader_loop3_never_done`)
-into the whole sequence of `(routingInfo, macBytes)` pairs, one per hop — the content-level fact
-`unwrapNIKE`'s peeling side needs, mirroring `KEMSphinx.createKEMHeader_loop3_trace`. -/
+/-- **The full trace of `createHeader`'s third loop**: not just the per-iteration size growth but
+the actual sequence of `(routingInfo, macBytes)` pairs, one per hop — the content-level fact
+`unwrapNIKE`'s peeling side needs, mirroring `createKEMHeader_loop3_trace`. -/
 private theorem createHeader_loop3_trace (nike : NIKE) (macS : MAC) (geom : Geometry)
     (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
@@ -1354,7 +886,7 @@ theorem createHeader_hdr_size (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS :
           = nike.publicKeySize := Util.Bytes.size_ofVector _
       have hge0size : loop1Final.1[0]!.size = nike.publicKeySize := by
         rw [hidx0, getElem!_pos _ _ (by simpa using hpos), Array.getElem_replicate, hpub]
-      -- `loop3Final.1`'s size, by pushing `createHeader_loop3_step` through the loop.
+      -- `loop3Final.1`'s size, by pushing the per-iteration size growth through the loop.
       have hinit_size :
           (if geom.nrHops > path.size then filler else (ByteArray.empty : ByteArray)).size
             = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength := by
@@ -1839,7 +1371,7 @@ private theorem createHeader_unfold (nike : NIKE) (macS : MAC) (kdfS : KDF) (str
           · rw [hSeq, hpushedEq, ← hfinalSS_eq]
           · rw [hPeq, hX, hEeq, Array.getElem!_set!_self _ _ _ (by rw [hsizeG m (by omega)]; omega), hX]
       have hsl1' : s1 (path.size - 1) = loop1Final := by rw [hlen1] at hsl1; exact hsl1
-      -- Loop1's content, in terms of `loop1Final` directly — matches `createHeader_loop1_bridge`.
+      -- Loop1's content, in terms of `loop1Final` directly.
       have hgsize : loop1Final.1.size = path.size := by rw [← hsl1']; exact hsizeG (path.size - 1) (le_refl _)
       have hksize0 : loop1Final.2.1.size = path.size := by
         rw [← hsl1']; rw [hsize (path.size - 1) (le_refl _)]; omega
@@ -1861,7 +1393,7 @@ private theorem createHeader_unfold (nike : NIKE) (macS : MAC) (kdfS : KDF) (str
         · rw [hS]; exact mS
         · rw [hS]; exact hf i
       -- Loop2, using its own raw `forIn` directly (no `List.forIn_pure_yield_eq_foldl`
-      -- collapsing, since `loop2Step`'s term shape doesn't match what that collapse produces).
+      -- collapsing, since the elaborated term shape doesn't match what that collapse produces).
       have hloop2content : ∀ i (hi : i < path.size),
           loop2Final.1[i]! = (streamS.keystream (ofVector (loop1Final.2.1[i]!).headerEncryption)
               (ofVector (loop1Final.2.1[i]!).headerEncryptionIV)

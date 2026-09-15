@@ -267,9 +267,7 @@ private theorem createKEMHeader_loop1_size (kem : KEM) (kdfS : KDF) (path : Arra
 
 /-- `kemRiFragment` always produces exactly `geom.perHopRoutingInfoLength` bytes: padded directly
 in the terminal case, or padded and then partly overwritten with the embedded next-hop ciphertext
-(which doesn't change the size, only the content) otherwise. Kept separate from
-`createKEMHeader_loop3_step` for the same reason `kemRiFragment` itself is separate from
-`createKEMHeader`: so the loop step's own proof can treat this case split as an opaque fact. -/
+(which doesn't change the size, only the content) otherwise. -/
 private theorem kemRiFragment_size (kem : KEM) (geom : Geometry) (path : Array PathHop)
     (kemElements : Array ByteArray) (macBytes : ByteArray) (nrHops i : Nat) (hi : i < nrHops)
     (hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength)
@@ -428,60 +426,6 @@ theorem kemRiFragment_content_nonterminal (kem : KEM) (geom : Geometry) (path : 
     conv_rhs => rw [← ByteArray.extract_zero_size (b := kemElements[i+1]!)]
     rw [hctsBang]
 
-/-- The per-hop keystream/padding loop's one-step accumulator update: `ks`'s leading `ksLen` bytes
-feed `riKeyStream`, and `ks`'s trailing `(i+1)*perHop` bytes, cascaded against the previous hop's
-own padding (`prevPad`) when there is one, feed `riPadding`. This is the loop's whole body — it
-never `throw`s or binds `←`, so `List.forIn_pure_yield_eq_foldl` collapses its `forIn` to a bare
-`List.foldl` over this function, losing the `Except`-monadic structure `createKEMHeader_loop3_trace`
-needed `forIn_exists_trace` for. -/
-private def loop2Step (streamS : StreamCipher) (geom : Geometry) (keys : Array HopKeys)
-    (st : Array ByteArray × Array ByteArray) (i : Nat) : Array ByteArray × Array ByteArray :=
-  let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
-  let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
-    (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
-  let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
-  let thisPad0 := ks.extract ksLen totalRiLen
-  let thisPad := if i > 0 then
-      let prevPad := st.2[i - 1]!
-      xorBytes (thisPad0.extract 0 prevPad.size) prevPad ++ thisPad0.extract prevPad.size thisPad0.size
-    else thisPad0
-  (st.1.push (ks.extract 0 ksLen), st.2.push thisPad)
-
-/-- **The full trace of `createKEMHeader`'s second loop** (as `createKEMHeader_loop3_trace` for the
-third): the actual sequence of `(riKeyStream, riPadding)` array pairs, one per hop, built from the
-generic `List.foldl_exists_trace` rather than a bespoke induction. -/
-private theorem createKEMHeader_loop2_trace (streamS : StreamCipher) (geom : Geometry)
-    (keys : Array HopKeys) (nrHops : Nat) :
-    ∃ s : Nat → Array ByteArray × Array ByteArray, s 0 = (#[], #[]) ∧
-      s nrHops = (List.range' 0 nrHops).foldl (loop2Step streamS geom keys) (#[], #[]) ∧
-      ∀ j (hj : j < nrHops), s (j + 1) = loop2Step streamS geom keys (s j) j := by
-  obtain ⟨s, hs0, hsl, hstep⟩ :=
-    CryptWalker.Sphinx.Common.List.foldl_exists_trace (List.range' 0 nrHops)
-      (loop2Step streamS geom keys) (#[], #[])
-  refine ⟨s, hs0, by simpa using hsl, ?_⟩
-  intro j hj
-  have hj' : j < (List.range' 0 nrHops).length := by simpa using hj
-  have := hstep j hj'
-  simpa using this
-
-/-- The trace's array sizes track the step index exactly, by a trivial induction on the pushes
-`loop2Step` performs every iteration. -/
-private theorem loop2_trace_size (streamS : StreamCipher) (geom : Geometry) (keys : Array HopKeys)
-    (nrHops : Nat) (s : Nat → Array ByteArray × Array ByteArray) (hs0 : s 0 = (#[], #[]))
-    (hstep : ∀ j (hj : j < nrHops), s (j + 1) = loop2Step streamS geom keys (s j) j) :
-    ∀ j (hj : j ≤ nrHops), (s j).1.size = j ∧ (s j).2.size = j := by
-  intro j hj
-  induction j with
-  | zero => simp [hs0]
-  | succ j ih =>
-    have hj' : j < nrHops := by omega
-    obtain ⟨ih1, ih2⟩ := ih (by omega)
-    rw [hstep j hj']
-    unfold loop2Step
-    dsimp only
-    simp only [Array.size_push, ih1, ih2]
-    trivial
-
 /-- `a.push x`'s new element, addressed via `!` at the array's own (pre-push) size — the
 `getElem!` counterpart of `Array.getElem_push_eq`. -/
 private theorem getElem!_push_eq {α : Type} [Inhabited α] (a : Array α) (x : α) :
@@ -583,10 +527,9 @@ private theorem createKEMHeader_loop1_content (kem : KEM) (kdfS : KDF) (path : A
     · rw [h2, ← congrArg Prod.snd hstepi, getElem!_push_eq' _ _ _ hpi2.symm]
 
 /-- **`createKEMHeader`'s second loop, at the content level — kept in its native `forIn`/`Except`
-shape.** As `loop2_content`, but proved directly against the loop's own `forIn` rather than the
-`List.foldl` form: the assembled completeness proof's hypothesis names loop2's result as a
+shape**, since the assembled completeness proof's hypothesis names loop2's result as a
 freestanding `loop2Final`, referenced directly by loop3's step, never an inlined `List.foldl`
-term — this is the version that composes with that shape. -/
+term. -/
 private theorem createKEMHeader_loop2_content (streamS : StreamCipher) (geom : Geometry)
     (keys : Array HopKeys) (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
     (hfinal : forIn (List.range' 0 nrHops) (#[], #[])
@@ -713,139 +656,7 @@ private theorem createKEMHeader_loop2_content (streamS : StreamCipher) (geom : G
     · dsimp only
       rw [if_neg hi0, h2, ← congrArg Prod.snd hstepi, getElem!_push_eq' _ _ _ hpi2.symm]
 
-/-- **`riPadding[i]!`'s byte size**: exactly `(i+1) * perHopRoutingInfoLength` — one `perHop` for
-every hop cascaded through so far, by induction on `createKEMHeader_loop2_content`'s own recursive
-value formula. Needed for `hopPacket`'s overall size, since `riPadding[k-1]!` is one of its
-components. -/
-private theorem createKEMHeader_loop2_padsize (streamS : StreamCipher) (geom : Geometry)
-    (keys : Array HopKeys) (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
-    (hfinal : forIn (List.range' 0 nrHops) (#[], #[])
-        (fun i (st : Array ByteArray × Array ByteArray) =>
-          (do
-            let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
-              (ofVector (keys[i]!).headerEncryptionIV)
-              (geom.routingInfoLength + geom.perHopRoutingInfoLength)
-            let ksLen := (geom.routingInfoLength + geom.perHopRoutingInfoLength)
-              - (i + 1) * geom.perHopRoutingInfoLength
-            let mut thisPad := ks.extract ksLen (geom.routingInfoLength + geom.perHopRoutingInfoLength)
-            if i > 0 then
-              let prevPad := st.2[i - 1]!
-              thisPad := xorBytes (thisPad.extract 0 prevPad.size) prevPad
-                ++ thisPad.extract prevPad.size thisPad.size
-            pure (ForInStep.yield (st.1.push (ks.extract 0 ksLen), st.2.push thisPad)) :
-              Except String (ForInStep (Array ByteArray × Array ByteArray)))) = Except.ok final)
-    (hle : ∀ i (hi : i < nrHops),
-        (i + 1) * geom.perHopRoutingInfoLength ≤ geom.routingInfoLength + geom.perHopRoutingInfoLength) :
-    ∀ i (hi : i < nrHops), final.2[i]!.size = (i + 1) * geom.perHopRoutingInfoLength := by
-  intro i hi
-  induction i with
-  | zero =>
-    obtain ⟨-, hval⟩ := createKEMHeader_loop2_content streamS geom keys nrHops final hfinal 0 hi
-    rw [hval]
-    dsimp only
-    rw [if_neg (by omega), ByteArray.size_extract, streamS.keystream_size]
-    omega
-  | succ i ih =>
-    obtain ⟨-, hval⟩ := createKEMHeader_loop2_content streamS geom keys nrHops final hfinal (i + 1) hi
-    rw [hval]
-    dsimp only
-    rw [if_pos (by omega : i + 1 > 0)]
-    have hihsize := ih (by omega)
-    have hthis0size : ((streamS.keystream (ofVector (keys[i + 1]!).headerEncryption)
-        (ofVector (keys[i + 1]!).headerEncryptionIV)
-        (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract
-        (geom.routingInfoLength + geom.perHopRoutingInfoLength
-          - (i + 1 + 1) * geom.perHopRoutingInfoLength)
-        (geom.routingInfoLength + geom.perHopRoutingInfoLength)).size
-        = (i + 1 + 1) * geom.perHopRoutingInfoLength := by
-      rw [ByteArray.size_extract, streamS.keystream_size]
-      have := hle (i + 1) hi
-      omega
-    simp only [ByteArray.size_append, size_xorBytes, ByteArray.size_extract, Nat.add_sub_cancel] at *
-    omega
-
-/-- **`createKEMHeader`'s second loop, at the content level**: `riKeyStream[i]!` and `riPadding[i]!`
-spelled out exactly, the latter in terms of `riPadding[i-1]!` (already fixed by an earlier
-iteration) rather than unwound all the way back to hop `0` — precisely the one-step relationship
-`unwrapKEM`'s own single XOR at hop `i` needs to match against. -/
-private theorem loop2_content (streamS : StreamCipher) (geom : Geometry) (keys : Array HopKeys)
-    (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
-    (hfinal : final = (List.range' 0 nrHops).foldl (loop2Step streamS geom keys) (#[], #[]))
-    (i : Nat) (hi : i < nrHops) :
-    final.1[i]! = (streamS.keystream (ofVector (keys[i]!).headerEncryption)
-        (ofVector (keys[i]!).headerEncryptionIV)
-        (geom.routingInfoLength + geom.perHopRoutingInfoLength)).extract 0
-      ((geom.routingInfoLength + geom.perHopRoutingInfoLength) - (i + 1) * geom.perHopRoutingInfoLength)
-    ∧ final.2[i]! =
-      (let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
-       let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
-         (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
-       let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
-       let thisPad0 := ks.extract ksLen totalRiLen
-       if i > 0 then
-         xorBytes (thisPad0.extract 0 final.2[i - 1]!.size) final.2[i - 1]!
-           ++ thisPad0.extract final.2[i - 1]!.size thisPad0.size
-       else thisPad0) := by
-  obtain ⟨s, hs0, hsl, hstep⟩ := createKEMHeader_loop2_trace streamS geom keys nrHops
-  have hsize := loop2_trace_size streamS geom keys nrHops s hs0 hstep
-  have hstable1 := Array.getElem!_stable_of_pushes (fun j => (s j).1) nrHops
-    (fun j hj => ⟨_, congrArg Prod.fst (hstep j hj)⟩) (fun j hj => (hsize j hj).1)
-  have hstable2 := Array.getElem!_stable_of_pushes (fun j => (s j).2) nrHops
-    (fun j hj => ⟨_, congrArg Prod.snd (hstep j hj)⟩) (fun j hj => (hsize j hj).2)
-  have h1 : final.1[i]! = (s (i + 1)).1[i]! := by
-    rw [hfinal, ← hsl]; exact hstable1 i nrHops hi (le_refl _)
-  have h2 : final.2[i]! = (s (i + 1)).2[i]! := by
-    rw [hfinal, ← hsl]; exact hstable2 i nrHops hi (le_refl _)
-  have hpi : (s i).1.size = i := (hsize i (by omega)).1
-  have hpi2 : (s i).2.size = i := (hsize i (by omega)).2
-  rw [hstep i hi] at h1 h2
-  unfold loop2Step at h1 h2
-  dsimp only at h1 h2
-  rw [getElem!_push_eq' _ _ _ hpi.symm] at h1
-  rw [getElem!_push_eq' _ _ _ hpi2.symm] at h2
-  refine ⟨h1, ?_⟩
-  rcases Nat.eq_zero_or_pos i with hi0 | hi0
-  · subst hi0; simpa using h2
-  · have hfp : final.2[i - 1]! = (s i).2[i - 1]! := by
-      rw [hfinal, ← hsl]
-      have := hstable2 (i - 1) nrHops (by omega) (by omega)
-      rwa [show i - 1 + 1 = i from by omega] at this
-    dsimp only
-    rw [if_pos hi0] at ⊢
-    rw [if_pos hi0, ← hfp] at h2
-    exact h2
-
-private theorem createKEMHeader_loop3_step (kem : KEM) (macS : MAC) (geom : Geometry)
-    (path : Array PathHop)
-    (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
-    (nrHops : Nat)
-    (hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength)
-    (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
-    (hknsize : kemElements.size = nrHops)
-    (hksize : ∀ j (hj : j < kemElements.size), (kemElements[j]'hj).size = kem.ciphertextSize)
-    (iRev : Nat) (hiRev : iRev < nrHops)
-    (ri mb ri' mb' : ByteArray)
-    (hstep :
-      (do
-        let i := nrHops - 1 - iRev
-        let riFragment ← kemRiFragment kem geom path kemElements mb nrHops i
-        let routingInfo := riFragment ++ ri
-        let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
-        let mPreimage := v0AD ++ kemElements[i]! ++ routingInfo
-          ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
-        let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
-        pure (ForInStep.yield (routingInfo, macBytes)) :
-          Except String (ForInStep (ByteArray × ByteArray))) = Except.ok (ForInStep.yield (ri', mb'))) :
-    ri'.size = ri.size + geom.perHopRoutingInfoLength := by
-  dsimp only at hstep
-  obtain ⟨riFragment, hriFragment, hstep⟩ := Except.eq_ok_of_bind_eq_ok hstep
-  have hsize := kemRiFragment_size kem geom path kemElements mb nrHops (nrHops - 1 - iRev)
-    (by omega) hperhop hnnh hknsize hksize riFragment hriFragment
-  simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq, Prod.mk.injEq] at hstep
-  rw [← hstep.1, size_xorBytes, ByteArray.size_append, hsize]
-  omega
-
-/-- Companion to `createKEMHeader_loop3_step`: the loop never exits via `.done`. -/
+/-- `createKEMHeader`'s routing-info loop never exits via `.done` (no `break`). -/
 private theorem createKEMHeader_loop3_never_done (kem : KEM) (macS : MAC) (geom : Geometry)
     (path : Array PathHop)
     (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
@@ -867,10 +678,9 @@ private theorem createKEMHeader_loop3_never_done (kem : KEM) (macS : MAC) (geom 
   injection hstep with hstep
   injection hstep
 
-/-- **The full trace of `createKEMHeader`'s third loop.** Not just the size invariant
-(`createKEMHeader_loop3_step`) but the actual sequence of `(routingInfo, macBytes)` values, one
-per iteration (`s j = (R(nrHops - j), M(nrHops - j))`). Built from `List.forIn_exists_trace` plus
-`createKEMHeader_loop3_never_done`; no new induction needed. -/
+/-- **The full trace of `createKEMHeader`'s third loop**: the actual sequence of
+`(routingInfo, macBytes)` values, one per iteration (`s j = (R(nrHops - j), M(nrHops - j))`).
+Built from `List.forIn_exists_trace` plus `createKEMHeader_loop3_never_done`. -/
 private theorem createKEMHeader_loop3_trace (kem : KEM) (macS : MAC) (geom : Geometry)
     (path : Array PathHop)
     (keys : Array HopKeys) (kemElements riKeyStream riPadding : Array ByteArray)
@@ -1251,8 +1061,8 @@ def newKEMPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF
     b := cipher.encrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
-/-- `newKEMPacket`'s payload loop's one-step accumulator update — never fails, so (as with
-`loop2Step`) its `forIn` collapses to a bare `List.foldl` under `List.forIn_pure_yield_eq_foldl`. -/
+/-- `newKEMPacket`'s payload loop's one-step accumulator update — never fails, so its `forIn`
+collapses to a bare `List.foldl` under `List.forIn_pure_yield_eq_foldl`. -/
 private def payloadEncryptStep (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
     (b : ByteArray) (iRev : Nat) : ByteArray :=
   let k := sprpKeys[sprpKeys.size - 1 - iRev]!
