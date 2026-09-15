@@ -1604,79 +1604,9 @@ private theorem hopPacket_slices (kem : KEM) (macS : MAC) (geom : Geometry) (pat
       show (v0AD ++ CT ++ RP ++ M2 ++ T2).size - (v0AD ++ CT ++ RP ++ M2).size = T2.size
         from by simp only [ByteArray.size_append]; omega]
     exact ByteArray.extract_zero_size
-/-- **The cascading-padding argument, at the byte level.** The core mathematical crux of Sphinx's
-completeness (Danezis–Goldberg §3.2): given the sender's `Rk := xorBytes (riFragment ++ Rk1)
-riKeyStream` (where `riKeyStream` is the exact-length prefix `ks.extract 0 ksLen` of the full
-keystream `ks` requested at this hop), the *receiver*'s single XOR against the *whole* `ks`
-recovers `riFragment ++ Rk1` in its first `ksLen` bytes (`xorBytes_xorBytes` cancels the
-sender's own construction exactly) and reproduces `riPadding`'s own recursive definition
-term-for-term in its trailing bytes (`prevPad` cascaded against `ks`'s own tail, zeros left
-unchanged) — the two halves of `loop3`/`loop2`'s constructions the receiver's one XOR undoes at
-once. -/
-theorem cascading_xor_step (ks riFragment Rk1 prevPad : ByteArray) (ksLen perHop : Nat)
-    (hks : ks.size = ksLen + prevPad.size + perHop) (hRk1 : riFragment.size + Rk1.size = ksLen) :
-    (xorBytes (xorBytes (riFragment ++ Rk1) (ks.extract 0 ksLen) ++ prevPad
-        ++ (⟨Array.replicate perHop 0⟩ : ByteArray)) ks).extract 0 ksLen
-      = riFragment ++ Rk1 ∧
-    (xorBytes (xorBytes (riFragment ++ Rk1) (ks.extract 0 ksLen) ++ prevPad
-        ++ (⟨Array.replicate perHop 0⟩ : ByteArray)) ks).extract ksLen (ksLen + prevPad.size + perHop)
-      = xorBytes ((ks.extract ksLen ks.size).extract 0 prevPad.size) prevPad
-        ++ (ks.extract ksLen ks.size).extract prevPad.size (ks.extract ksLen ks.size).size := by
-  have hzsize : (⟨Array.replicate perHop 0⟩ : ByteArray).size = perHop := Array.size_replicate
-  have hRksize : (ks.extract 0 ksLen).size = ksLen := by rw [ByteArray.size_extract]; omega
-  have hthisPad0size : (ks.extract ksLen ks.size).size = prevPad.size + perHop := by
-    rw [ByteArray.size_extract]; omega
-  have hRk_def_size : (xorBytes (riFragment ++ Rk1) (ks.extract 0 ksLen)).size = ksLen := by
-    rw [size_xorBytes, ByteArray.size_append]; omega
-  have hprevpadle : prevPad.size ≤ (ks.extract ksLen ks.size).size := by rw [hthisPad0size]; omega
-  have hRfk1size : (riFragment ++ Rk1).size = ksLen := by rw [ByteArray.size_append]; omega
-  -- Abstract the two extracts as opaque values before touching `ks` itself, to avoid `rw`
-  -- re-substituting `ks` inside its own extract subterms (the term-blowup trap).
-  generalize hrKS : ks.extract 0 ksLen = riKeyStream at hRksize hRk_def_size ⊢
-  generalize htp : ks.extract ksLen ks.size = thisPad0 at hthisPad0size hprevpadle ⊢
-  have hks_eq : ks = riKeyStream ++ thisPad0 := by
-    rw [← hrKS, ← htp]; exact (append_extract ks ksLen (by omega)).symm
-  have hthisPad0_eq : thisPad0 = thisPad0.extract 0 prevPad.size
-      ++ thisPad0.extract prevPad.size thisPad0.size :=
-    (append_extract thisPad0 prevPad.size hprevpadle).symm
-  have hpad2 : xorBytes (prevPad ++ (⟨Array.replicate perHop 0⟩ : ByteArray)) thisPad0
-      = xorBytes (thisPad0.extract 0 prevPad.size) prevPad
-        ++ thisPad0.extract prevPad.size thisPad0.size := by
-    conv_lhs => rw [hthisPad0_eq]
-    rw [xorBytes_append prevPad (⟨Array.replicate perHop 0⟩ : ByteArray)
-        (thisPad0.extract 0 prevPad.size) (thisPad0.extract prevPad.size thisPad0.size)
-        (by rw [ByteArray.size_extract]; omega)
-        (by rw [hzsize, ByteArray.size_extract]; omega)]
-    rw [xorBytes_comm_of_size_eq prevPad (thisPad0.extract 0 prevPad.size)
-        (by rw [ByteArray.size_extract]; omega)]
-    rw [xorBytes_zero_left perHop (thisPad0.extract prevPad.size thisPad0.size)
-        (by rw [ByteArray.size_extract]; omega)]
-  have hxor : xorBytes (xorBytes (riFragment ++ Rk1) riKeyStream ++ prevPad
-      ++ (⟨Array.replicate perHop 0⟩ : ByteArray)) ks
-      = (riFragment ++ Rk1) ++ (xorBytes (thisPad0.extract 0 prevPad.size) prevPad
-        ++ thisPad0.extract prevPad.size thisPad0.size) := by
-    rw [hks_eq, ByteArray.append_assoc,
-      xorBytes_append (xorBytes (riFragment ++ Rk1) riKeyStream)
-        (prevPad ++ (⟨Array.replicate perHop 0⟩ : ByteArray)) riKeyStream thisPad0
-        (by rw [hRk_def_size, hRksize])
-        (by rw [ByteArray.size_append, hzsize, hthisPad0size])]
-    rw [xorBytes_xorBytes, hpad2]
-  refine ⟨?_, ?_⟩
-  · rw [hxor, extract_append_le (riFragment ++ Rk1) _ (by omega : (riFragment ++ Rk1).size ≤ ksLen)]
-    rw [show ksLen - (riFragment ++ Rk1).size = 0 from by omega, ByteArray.extract_same,
-      ByteArray.append_empty]
-  · rw [hxor, extract_append_of_ge (riFragment ++ Rk1) _
-      (by omega : (riFragment ++ Rk1).size ≤ ksLen)]
-    rw [show ksLen - (riFragment ++ Rk1).size = 0 from by omega,
-      show ksLen + prevPad.size + perHop - (riFragment ++ Rk1).size = prevPad.size + perHop
-        from by omega]
-    have hpadsizeeq : (xorBytes (thisPad0.extract 0 prevPad.size) prevPad
-        ++ thisPad0.extract prevPad.size thisPad0.size).size = prevPad.size + perHop := by
-      rw [ByteArray.size_append, size_xorBytes, ByteArray.size_extract, ByteArray.size_extract,
-        hthisPad0size]
-      omega
-    rw [← hpadsizeeq]
-    exact ByteArray.extract_zero_size
+
+-- `cascading_xor_step` (fully generic in the byte-level XOR/padding argument, no `KEM`
+-- dependence) now lives in `CryptWalker.Sphinx.Common`, shared with `NIKESphinx.lean`.
 
 open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
 
