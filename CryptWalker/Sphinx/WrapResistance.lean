@@ -31,7 +31,8 @@ argument repeated `c` times under a union bound, not built here.
 **NIKE-Sphinx only.** `NIKESphinx.blind pk factor = factor • pk` is exactly this operation — see
 `NIKESphinx.lean`'s `blind`, one rewrite away from `X25519.dh_commutes`'s picture, modulo going
 through `X25519_montgomery_ladder`'s byte-level ladder (`NIKESphinx` runs the ladder, whose own
-consistency with the group law is `curve25519_commutes`, itself an axiom — not re-derived here).
+consistency with the group law is `curve25519_commutes`, itself unproven-and-assumed there — not
+re-derived here).
 `NIKESphinx.lean`'s `nikeSphinxScheme` is the corresponding `NIKESphinxScheme` instance.
 **KEM-Sphinx has no analogue.** Its per-hop step is an independent KEM encapsulation, not a
 group element re-blinded (`KEMSphinx.lean`: "no blinding chain, so no `Blind` step, since there

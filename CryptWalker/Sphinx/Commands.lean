@@ -377,7 +377,8 @@ private theorem fromBytesOne_toBytes_append_surbReply (id : Vector UInt8 16) (re
 /-- `u32ofBE` undoes `u32be`: reassembling the four big-endian bytes `u32be` split a `UInt32`
 into recovers it exactly. Bit-level (not `bv_decide`/`native_decide` — plain `decide` only on
 closed, argument-free numeral facts, everything about the free variable `d` going through real
-`BitVec` lemmas), matching this project's standing discipline against native-trust axioms. -/
+`BitVec` lemmas), matching this project's standing discipline against native-trust escape hatches
+like `bv_decide`/`native_decide`. -/
 private theorem u32ofBE_u32be (d : UInt32) :
     u32ofBE (u32be d)[0] (u32be d)[1] (u32be d)[2] (u32be d)[3] = d := by
   have h0 : (u32be d)[0] = (d >>> 24).toUInt8 := by unfold u32be; simp

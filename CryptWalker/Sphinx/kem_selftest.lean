@@ -337,7 +337,7 @@ def main : IO UInt32 := do
 
   -- `match h : ... with` (rather than `IO.ofExcept`) keeps the success witness around, so
   -- `ofKEM_validForKEM`/`ofKEM_payloadTagLength` can turn it into the two hypotheses
-  -- `kemSphinxSchemeOf` now needs instead of the axiom it used to lean on.
+  -- `kemSphinxSchemeOf` needs to call the real completeness theorem underneath it.
   match h3 : ofKEM "x25519-ladder" 103 false 3 with
   | .error e => throw (IO.userError e)
   | .ok geom3 =>

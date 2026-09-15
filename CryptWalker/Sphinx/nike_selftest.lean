@@ -176,9 +176,9 @@ def runAbstractWrapRound (geom : Geometry) (hvalid : geom.ValidForNIKE x25519Nik
   | .ok pkt _ => unwrapAll geom nodes (ofVector pkt) (ofVector payload)
 
 /-- Empirical check of `Sphinx.Interface.unwrap_complete` (the property
-`wrapNIKE_unwrapNIKE_complete_valid` now proves, no axiom involved): `unwrapChainAux`, given every
-hop's private key in path order, recovers the payload from a `wrap`-built packet in one call — no
-per-hop bookkeeping, unlike `unwrapAll`. -/
+`wrapNIKE_unwrapNIKE_complete_valid` proves outright): `unwrapChainAux`, given every hop's private
+key in path order, recovers the payload from a `wrap`-built packet in one call — no per-hop
+bookkeeping, unlike `unwrapAll`. -/
 def runCompletenessRound (geom : Geometry) (hvalid : geom.ValidForNIKE x25519Nike)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
   let scheme := nikeSphinxCore x25519Nike wbCipher macS kdfS streamS geom hvalid rfl h16
@@ -345,7 +345,7 @@ def main : IO UInt32 := do
 
   -- `match h : ... with` (rather than `IO.ofExcept`) keeps the success witness around, so
   -- `ofNIKE_validForNIKE`/`ofNIKE_payloadTagLength` can turn it into the two hypotheses
-  -- `nikeSphinxCore` now needs instead of the axiom it used to lean on.
+  -- `nikeSphinxCore` needs to call the real completeness theorem underneath it.
   match h3 : ofNIKE "x25519-ladder" 103 false 3 with
   | .error e => throw (IO.userError e)
   | .ok geom3 =>

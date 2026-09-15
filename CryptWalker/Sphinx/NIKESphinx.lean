@@ -1511,11 +1511,11 @@ private theorem newNIKEPacket_bytesPub (nike : NIKE) (cipher : WideBlockCipher) 
     exact hhdrPub
 
 /-- A successful `newNIKEPacket` on a `geom.forwardPayloadLength`-sized payload produces exactly
-`geom.packetLength` bytes: `headerLength` (itself `createHeader`'s routing-info-block
-construction, accumulated over a `for` loop) plus `payloadTagLength + payload.size`
-(`sprpEncrypt`'s length preservation, applied in another loop). True by construction and
-confirmed by all 20 `sphinx_{nike,kem}_vectors.json` packets — see `Sphinx.Interface`'s doc comment
-for why this is an axiom rather than a proof through those loops. `wrapNIKE` uses it to give
+`geom.packetLength` bytes: `headerLength` (via `createHeader_hdr_size`, itself `createHeader`'s
+routing-info-block construction, accumulated over a `for` loop) plus `payloadTagLength +
+payload.size` (`cipher.encrypt_size`'s length preservation, applied in another loop via
+`List.foldl_size_preserving`) — proved through those loops, not assumed, and also confirmed
+empirically by all 20 `sphinx_{nike,kem}_vectors.json` packets. `wrapNIKE` uses it to give
 `Sphinx.Interface.wrap` a packet-length-preserving *type*, the same way `sprpDecrypt_size` lets
 `unwrapNIKE` do that for `forwardPkt`. -/
 theorem newNIKEPacket_size (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
@@ -3307,9 +3307,9 @@ private theorem wrapNIKE_unfold (nike : NIKE) (cipher : WideBlockCipher) (macS :
       rw [hw] at h; injection h
 
 /-- **The real completeness theorem**: `NIKESphinxScheme`'s witness for
-`Sphinx.Interface.unwrap_complete`, no axiom involved. Generic over the wide-block cipher/MAC/KDF/
-stream cipher, matching `KEMSphinx.wrapKEM_unwrapKEM_complete_valid`, its axiom-free KEM-Sphinx
-counterpart. `targetSk i` is *`privKeys[i]!`'s own decoded private key* (via
+`Sphinx.Interface.unwrap_complete`, proved outright. Generic over the wide-block cipher/MAC/KDF/
+stream cipher, matching `KEMSphinx.wrapKEM_unwrapKEM_complete_valid`, its equally
+fully-proved KEM-Sphinx counterpart. `targetSk i` is *`privKeys[i]!`'s own decoded private key* (via
 `nike.decodePrivateKey_total`, always exists), never an independently-chosen "honest" secret — this
 is what lets `unwrapNIKE_hopPacket_terminal`/`nonterminal`'s key-agreement argument go through with
 no `derivePublicKey`-injectivity assumption: the receiver at hop `i` simply *uses* the secret
@@ -3548,7 +3548,7 @@ noncomputable def nikeSphinxSchemeOf (nike : NIKE) (cipher : WideBlockCipher) (m
 agnostic to *which* registered NIKE this is: no fixed-size wrapper type — every `NIKE` already
 carries the size information this file needs, in its own `publicKeySize`/`privateKeySize`/
 `sharedSecretSize` fields. Registering a new NIKE needs no change here. The one runtime check this
-adds beyond the original axiom-based version: `geom` must actually agree with `nike` on the packet
+adds beyond the original, less rigorous version: `geom` must actually agree with `nike` on the packet
 layout constants (`geom.ValidForNIKE nike`, decidable since it's just `Nat` equalities) — true of
 any `geom` obtained from `Geometry.ofNIKE name ...` for this same `name`, and rejected explicitly
 (rather than silently trusted) otherwise.

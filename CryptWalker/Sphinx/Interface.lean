@@ -36,11 +36,12 @@ a completeness law relating them.
 deterministic, so plain `Except`. `filler` stays a bare argument regardless — its *length* is
 public, unlike a key.
 
-`NIKESphinx`/`KEMSphinx` are the two witnesses. Both lean on axioms rather than proofs, for
-`newNIKEPacket_size` and friends (a successful `wrap`/`newSURB` produces exactly
-`packetLength`/`surbLength` bytes) and for `unwrap_complete` itself — real work through
-`createHeader`'s loops and blinding chain, out of scope for this pass; the vectors and
-self-tests check all of it empirically instead. `unwrap_complete` only pins down the forward
+`NIKESphinx`/`KEMSphinx` are the two witnesses. Both prove `unwrap_complete` outright
+(`wrapNIKE_unwrapNIKE_complete_valid`/`wrapKEM_unwrapKEM_complete_valid`, generic over the
+abstract `NIKE`/`KEM`/`WideBlockCipher`/`MAC`/`KDF`/`StreamCipher` types, no concrete instance
+touched), as well as `newNIKEPacket_size` and friends (a successful `wrap`/`newSURB` produces
+exactly `packetLength`/`surbLength` bytes) — the vectors and self-tests still check all of it
+empirically too, as an independent cross-check. `unwrap_complete` only pins down the forward
 payload so far, not `cmds`/`replayTag`/SURB completeness. -/
 
 /-- Counter plus an inexhaustible stream of 32-byte seeds — `wrap`'s randomness source. -/
