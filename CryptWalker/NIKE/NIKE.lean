@@ -107,9 +107,9 @@ hop, is recovered exactly whether the target key acts once at the end (the sende
 building the header) or the *later* hops act on an already-blinded element while the target acts
 on its own turn (the receiver's view, unwrapping one layer at a time). `commutes` handles zero
 re-blindings (the first hop); `groupAction_comm` handles peeling one more — this is the whole
-group-theoretic content `wrapNIKE_unwrapNIKE_complete` needs; everything else is byte-level
-bookkeeping (MAC agreement, routing-info decryption, the payload cipher) already proved the same
-way for KEM-Sphinx. -/
+group-theoretic content `NIKESphinx.wrapNIKE_unwrapNIKE_complete_valid` needs; everything else is
+byte-level bookkeeping (MAC agreement, routing-info decryption, the payload cipher) proved the
+same way for KEM-Sphinx. -/
 
 /-- The group element a client's ephemeral key becomes after `n` rounds of blinding by
 `f 0, f 1, ..., f (n-1)` in order — `NIKESphinx.nikeBlind` applied `n` times, abstractly. Paired

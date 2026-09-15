@@ -200,4 +200,17 @@ theorem ofKEM_payloadTagLength (kemSchemeName : String) (userForwardPayloadLengt
   · injection h
   · injection h with h; subst h; rfl
 
+/-- As `ofKEM_payloadTagLength`, for the NIKE side: `buildNIKE` sets `payloadTagLength` the same
+way regardless of which `nike` resolved, so this needs no `byName` witness either. Lets a caller
+holding only `ofNIKE`'s success proof discharge `wrapNIKE_unwrapNIKE_complete_valid`'s `h16`
+hypothesis. -/
+theorem ofNIKE_payloadTagLength (nikeSchemeName : String) (userForwardPayloadLength : Nat)
+    (withSURB : Bool) (nrHops : Nat) (geom : Geometry)
+    (h : ofNIKE nikeSchemeName userForwardPayloadLength withSURB nrHops = .ok geom) :
+    geom.payloadTagLength = CryptWalker.Sphinx.Constants.payloadTagLength := by
+  unfold ofNIKE at h
+  split at h
+  · injection h
+  · injection h with h; subst h; rfl
+
 end CryptWalker.Sphinx.Geometry

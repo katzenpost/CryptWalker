@@ -35,6 +35,12 @@ open CryptWalker.Util.Bytes (ofVector)
 
 private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
 
+/-- `x25519Nike` is exactly what the registry resolves `"x25519-ladder"` to — proved once here
+(reused below) rather than inline at each `ofNIKE_validForNIKE` call site. -/
+private theorem x25519Nike_byName : CryptWalker.NIKE.byName "x25519-ladder" = some x25519Nike := by
+  unfold CryptWalker.NIKE.byName CryptWalker.NIKE.registry
+  simp [CryptWalker.NIKE.x25519LadderEntry, CryptWalker.NIKE.X25519LadderScheme, x25519Nike]
+
 -- As `kem_selftest.lean`: the four crypto primitives `nikeSphinxCore` now takes explicitly rather
 -- than wiring up internally.
 private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
@@ -156,8 +162,9 @@ def runFillerRound : IO Bool := do
 /-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`nikeSphinxScheme`
 instead of calling `newNIKEPacket` directly — confirms the abstract-interface unification
 actually produces a packet `unwrapNIKE` accepts, not just that it typechecks. -/
-def runAbstractWrapRound (geom : Geometry) : IO Bool := do
-  let scheme := nikeSphinxCore x25519Nike wbCipher macS kdfS streamS geom
+def runAbstractWrapRound (geom : Geometry) (hvalid : geom.ValidForNIKE x25519Nike)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
+  let scheme := nikeSphinxCore x25519Nike wbCipher macS kdfS streamS geom hvalid rfl h16
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seed ← randomVector 32
@@ -169,11 +176,12 @@ def runAbstractWrapRound (geom : Geometry) : IO Bool := do
   | .ok pkt _ => unwrapAll geom nodes (ofVector pkt) (ofVector payload)
 
 /-- Empirical check of `Sphinx.Interface.unwrap_complete` (the property
-`wrapNIKE_unwrapNIKE_complete` axiomatizes): `unwrapChainAux`, given every hop's private key in
-path order, recovers the payload from a `wrap`-built packet in one call — no per-hop
-bookkeeping, unlike `unwrapAll`. -/
-def runCompletenessRound (geom : Geometry) : IO Bool := do
-  let scheme := nikeSphinxCore x25519Nike wbCipher macS kdfS streamS geom
+`wrapNIKE_unwrapNIKE_complete_valid` now proves, no axiom involved): `unwrapChainAux`, given every
+hop's private key in path order, recovers the payload from a `wrap`-built packet in one call — no
+per-hop bookkeeping, unlike `unwrapAll`. -/
+def runCompletenessRound (geom : Geometry) (hvalid : geom.ValidForNIKE x25519Nike)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
+  let scheme := nikeSphinxCore x25519Nike wbCipher macS kdfS streamS geom hvalid rfl h16
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seed ← randomVector 32
@@ -200,8 +208,9 @@ def runCompletenessRound (geom : Geometry) : IO Bool := do
 
 /-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
 round-trip through `unwrapNIKE`/`SURB.decryptSURBPayload`, not just that they typecheck. -/
-def runAbstractSURBRound (geom : Geometry) : IO Bool := do
-  let scheme := nikeSphinxCore x25519Nike wbCipher macS kdfS streamS geom
+def runAbstractSURBRound (geom : Geometry) (hvalid : geom.ValidForNIKE x25519Nike)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
+  let scheme := nikeSphinxCore x25519Nike wbCipher macS kdfS streamS geom hvalid rfl h16
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes true
   let seeds ← (List.range 3).toArray.mapM (fun _ => randomVector 32)
@@ -334,19 +343,35 @@ def main : IO UInt32 := do
   IO.println s!"3 hop(s) of 5 (filler path): {if fillerOk then "ok" else "FAIL"}"
   ok := ok && fillerOk
 
-  let geom3 ← IO.ofExcept (ofNIKE "x25519-ladder" 103 false 3)
-  let abstractOk ← runAbstractWrapRound geom3
-  IO.println s!"abstract Sphinx.Interface.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
-  ok := ok && abstractOk
+  -- `match h : ... with` (rather than `IO.ofExcept`) keeps the success witness around, so
+  -- `ofNIKE_validForNIKE`/`ofNIKE_payloadTagLength` can turn it into the two hypotheses
+  -- `nikeSphinxCore` now needs instead of the axiom it used to lean on.
+  match h3 : ofNIKE "x25519-ladder" 103 false 3 with
+  | .error e => throw (IO.userError e)
+  | .ok geom3 =>
+    let hvalid3 := ofNIKE_validForNIKE "x25519-ladder" 103 false 3 geom3 x25519Nike h3 x25519Nike_byName
+    let h163 : 16 ≤ geom3.payloadTagLength + geom3.forwardPayloadLength := by
+      rw [ofNIKE_payloadTagLength "x25519-ladder" 103 false 3 geom3 h3]
+      unfold CryptWalker.Sphinx.Constants.payloadTagLength; omega
 
-  let completeOk ← runCompletenessRound geom3
-  IO.println s!"Sphinx.Interface.unwrap_complete via unwrapChainAux (3 hops): {if completeOk then "ok" else "FAIL"}"
-  ok := ok && completeOk
+    let abstractOk ← runAbstractWrapRound geom3 hvalid3 h163
+    IO.println s!"abstract Sphinx.Interface.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
+    ok := ok && abstractOk
 
-  let geom3surb ← IO.ofExcept (ofNIKE "x25519-ladder" 103 true 3)
-  let abstractSurbOk ← runAbstractSURBRound geom3surb
-  IO.println s!"abstract Sphinx.Interface.newSURB/newPacketFromSURB (3 hops): {if abstractSurbOk then "ok" else "FAIL"}"
-  ok := ok && abstractSurbOk
+    let completeOk ← runCompletenessRound geom3 hvalid3 h163
+    IO.println s!"Sphinx.Interface.unwrap_complete via unwrapChainAux (3 hops): {if completeOk then "ok" else "FAIL"}"
+    ok := ok && completeOk
+
+  match h3s : ofNIKE "x25519-ladder" 103 true 3 with
+  | .error e => throw (IO.userError e)
+  | .ok geom3surb =>
+    let hvalid3s := ofNIKE_validForNIKE "x25519-ladder" 103 true 3 geom3surb x25519Nike h3s x25519Nike_byName
+    let h163s : 16 ≤ geom3surb.payloadTagLength + geom3surb.forwardPayloadLength := by
+      rw [ofNIKE_payloadTagLength "x25519-ladder" 103 true 3 geom3surb h3s]
+      unfold CryptWalker.Sphinx.Constants.payloadTagLength; omega
+    let abstractSurbOk ← runAbstractSURBRound geom3surb hvalid3s h163s
+    IO.println s!"abstract Sphinx.Interface.newSURB/newPacketFromSURB (3 hops): {if abstractSurbOk then "ok" else "FAIL"}"
+    ok := ok && abstractSurbOk
 
   for nrHops in [1, 2, 3, 5] do
     let geom ← IO.ofExcept (ofNIKE "x25519-ladder" 103 true nrHops)
