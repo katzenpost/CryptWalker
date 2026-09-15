@@ -36,6 +36,11 @@ open CryptWalker.Util.Bytes (ofVector)
 
 private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
 
+private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
+private def macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+private def kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+private def streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
+
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)
   pure (Vector.ofFn fun i : Fin n => bs[i.val]!)
@@ -96,7 +101,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
     let clientSeed ← randomVector 32
     let kp1 ← randomVector 32
     let kp2 ← randomVector 32
-    match newNIKESURB x25519Nike geom (ofVector clientSeed) (kp1 ++ kp2) filler path with
+    match newNIKESURB x25519Nike macS kdfS streamS geom (ofVector clientSeed) (kp1 ++ kp2) filler path with
     | .error e => throw (IO.userError s!"newNIKESURB failed: {e}")
     | .ok (s, k) =>
       surb := s; surbKeys := k
@@ -108,7 +113,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
         pkt0 := p
   else
     let clientPriv ← randomVector 32
-    match newNIKEPacket x25519Nike geom (ofVector clientPriv) filler path payload with
+    match newNIKEPacket x25519Nike wbCipher macS kdfS streamS geom (ofVector clientPriv) filler path payload with
     | .error e => throw (IO.userError s!"newNIKEPacket failed: {e}")
     | .ok p => pkt0 := p
 
@@ -117,7 +122,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   let mut finalPayload : ByteArray := ByteArray.empty
   for i in [0:nrHops] do
     let node := nodes[i]!
-    match unwrapNIKE x25519Nike geom (ofVector node.priv) pkt with
+    match unwrapNIKE x25519Nike wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
     | .error e => throw (IO.userError s!"hop {i}: unwrap failed: {e}")
     | .ok (payloadOut, _replayTag, _cmds, forwardPkt) =>
       if i < nrHops - 1 then

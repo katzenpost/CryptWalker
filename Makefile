@@ -23,7 +23,7 @@ TESTS := \
 	CryptWalker.Sign.blinded_test \
 	CryptWalker.BACAP.test \
 	CryptWalker.Sphinx.Crypto.test \
-	CryptWalker.Sphinx.Crypto.aez_test \
+	CryptWalker.WideBlockCipher.test \
 	CryptWalker.Sphinx.commands_test \
 	CryptWalker.Sphinx.nike_selftest \
 	CryptWalker.Sphinx.kem_selftest \
@@ -35,7 +35,7 @@ TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 # Bare `lake build` builds only defaultTargets, which is the library. The
 # executables have to be named or the test targets run whatever binary was left
 # in .lake/build/bin by an earlier build.
-EXES := $(TESTS) CryptWalker.NIKE.benchmark
+EXES := $(TESTS) CryptWalker.NIKE.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors
 
 .DEFAULT_GOAL := help
 

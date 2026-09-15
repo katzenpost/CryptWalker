@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import CryptWalker.Sphinx.Constants
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Common
-import CryptWalker.Sphinx.Crypto.AEZ
+import CryptWalker.WideBlockCipher.AEZ
 import CryptWalker.Util.Bytes
 
 /-! # Single-use reply blocks (SURB)
@@ -22,7 +22,7 @@ namespace CryptWalker.Sphinx.SURB
 open CryptWalker.Sphinx.Constants
 open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Common (toVec32)
-open CryptWalker.Sphinx.Crypto.AEZ (sprpEncrypt sprpDecrypt)
+open CryptWalker.WideBlockCipher.AEZ (sprpEncrypt sprpDecrypt)
 open CryptWalker.Util.Bytes (ofVector)
 
 /-- **`DecryptSURBPayload`**. `keys` is `nrHops * sprpKeyMaterialLength` bytes: `nrHops`

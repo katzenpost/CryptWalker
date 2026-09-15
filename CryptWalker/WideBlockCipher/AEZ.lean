@@ -4,10 +4,12 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import CryptWalker.Cipher.AES
+import CryptWalker.WideBlockCipher.WideBlockCipher
 
-namespace CryptWalker.Sphinx.Crypto.AEZ
+namespace CryptWalker.WideBlockCipher.AEZ
 
 open CryptWalker.Cipher.AES (subBytes shiftRows mixColumns)
+open CryptWalker.WideBlockCipher (WideBlockCipher)
 
 /-! # AEZ v5, restricted to Sphinx's exact usage
 
@@ -40,9 +42,12 @@ against `sprp_aez.json`, covering both the `aezTiny` (<32B) and `aezCore` (≥32
 abbrev Block := Array UInt8 -- always length 16 here; not tracked in the type, matching this
                              -- module's Go original, which is not proof-carrying either.
 
--- Not `private`: `zero16`/`xor16` (plus `aezTinyParams`/`aezTinyLR` and the ladder section below)
--- are also needed from `AEZCorrectness.lean`, which reasons about `aezTinyLR`'s round-trip
--- correctness against this file's own definitions rather than restating them.
+-- Not `private`: `zero16`/`xor16` (plus `aezTinyParams`/`aezTinyLR` and the ladder section below,
+-- including the already-proved `ladderBwdN_ladderFwdN_swap`) stay exposed for any future proof
+-- reasoning about `aezTinyLR`'s round-trip correctness against this file's own definitions rather
+-- than restating them — not currently consumed by anything outside this file (see
+-- `WideBlockCipher.aez_roundTrip`'s doc comment for why that particular proof isn't being pursued
+-- right now).
 def zero16 : Block := Array.replicate 16 0
 
 def xor16 (a b : Block) : Block := Array.ofFn fun i : Fin 16 => a[i.val]! ^^^ b[i.val]!
@@ -746,4 +751,35 @@ theorem sprpDecrypt_size (key : Array UInt8) (iv msg : ByteArray) :
   unfold sprpDecrypt
   exact decipher_size _ _ _
 
-end CryptWalker.Sphinx.Crypto.AEZ
+/-! ## AEZ, as a `WideBlockCipher` -/
+
+/-- **AEZ's own round trip**, assumed rather than derived. `sprpEncrypt`/`sprpDecrypt` dispatch on
+message size: below 32 bytes to `aezTiny` (a Feistel ladder, already proved to round-trip
+elsewhere), at or above 32 bytes — every real Sphinx payload, `payloadTagLength +
+forwardPayloadLength ≥ 32`, always takes this path — to `aezCore`, AEZ's full two-pass wide-block
+construction. Proving `aezCore` round-trips is real, substantial work (comparable in scope to the
+`aezTiny` proof on its own) that nothing currently needs: every Sphinx-completeness theorem in this
+codebase (`KEMSphinx.wrapKEM_unwrapKEM_complete_valid` and friends) is proved *generically* over an
+arbitrary `WideBlockCipher`'s abstract `roundTrip` field, never against this concrete `aez`
+instance — so deriving this fact from `aezCore`'s internals buys nothing today. Numerically verified
+instead, against real AEZ test vectors generated from the upstream Go implementation (`test.lean`,
+`sprp_aez.json`), covering both the `aezTiny` and `aezCore` paths. -/
+axiom aez_roundTrip (key : Array UInt8) (iv msg : ByteArray) (h16 : 16 ≤ msg.size) :
+    sprpDecrypt key iv (sprpEncrypt key iv msg) = msg
+
+/-- AEZ, as a `WideBlockCipher`: `sprpEncrypt`/`sprpDecrypt` and the already-proved
+`sprpEncrypt_size`/`sprpDecrypt_size` above, unchanged — those two fields cost no new proof.
+`keySize`/`ivSize` record the widths Sphinx's own `Geometry`/`Constants` actually use
+(`sprpKeyMaterialLength = 48`, the shared 16-byte IV); nothing in `encrypt`/`decrypt`/the laws
+above actually constrains callers to those widths, since AEZ's `initState` accepts key material of
+any length. The file `Lioness.lean` will eventually mirror (`Lioness.lioness : WideBlockCipher`). -/
+def aez : WideBlockCipher where
+  keySize := 48
+  ivSize  := 16
+  encrypt := sprpEncrypt
+  decrypt := sprpDecrypt
+  encrypt_size := sprpEncrypt_size
+  decrypt_size := sprpDecrypt_size
+  roundTrip := aez_roundTrip
+
+end CryptWalker.WideBlockCipher.AEZ

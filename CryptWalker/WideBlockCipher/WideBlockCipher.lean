@@ -3,9 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Sphinx.Crypto.AEZCorrectness
-
-namespace CryptWalker.Sphinx.Crypto.WideBlockCipher
+namespace CryptWalker.WideBlockCipher
 
 /-! # Wide-block ciphers, generically
 
@@ -25,7 +23,11 @@ exactly what Sphinx's completeness proof needs, is the one purely structural gua
 cipher (AEZ today, Lioness or another wide-block construction later) must satisfy regardless of
 its internals: `decrypt` undoes `encrypt`, and both preserve length. This lets every proof about
 `wrap`/`unwrap` cite `roundTrip` as a black box, never AEZ's (or any other cipher's) own internal
-construction. -/
+construction.
+
+This file stays free of any concrete instance — matching `KEM.lean`/`NIKE.lean`'s own convention —
+so each concrete cipher's own file (`AEZ.lean` now, `Lioness.lean` later) can provide its instance
+without this one changing. -/
 
 structure WideBlockCipher where
   keySize : Nat
@@ -56,19 +58,4 @@ instance : Inhabited WideBlockCipher := ⟨{
   roundTrip := fun _ _ _ _ => rfl
 }⟩
 
-/-- AEZ, as a `WideBlockCipher`: `sprpEncrypt`/`sprpDecrypt` and the already-proved
-`sprpEncrypt_size`/`sprpDecrypt_size`/`sprpDecrypt_sprpEncrypt` from `AEZCorrectness.lean`,
-unchanged — this instance costs no new proof. `keySize`/`ivSize` record the widths Sphinx's own
-`Geometry`/`Constants` actually use (`sprpKeyMaterialLength = 48`, the shared 16-byte IV); nothing
-in `encrypt`/`decrypt`/the laws above actually constrains callers to those widths, since AEZ's
-`initState` accepts key material of any length. -/
-def aez : WideBlockCipher where
-  keySize := 48
-  ivSize  := 16
-  encrypt := CryptWalker.Sphinx.Crypto.AEZ.sprpEncrypt
-  decrypt := CryptWalker.Sphinx.Crypto.AEZ.sprpDecrypt
-  encrypt_size := CryptWalker.Sphinx.Crypto.AEZ.sprpEncrypt_size
-  decrypt_size := CryptWalker.Sphinx.Crypto.AEZ.sprpDecrypt_size
-  roundTrip := fun key iv msg h => CryptWalker.Sphinx.Crypto.AEZ.sprpDecrypt_sprpEncrypt key iv msg h
-
-end CryptWalker.Sphinx.Crypto.WideBlockCipher
+end CryptWalker.WideBlockCipher

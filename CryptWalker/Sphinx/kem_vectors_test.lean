@@ -32,7 +32,7 @@ open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.Util.Bytes (ofVector)
 
 private def x25519Kem := CryptWalker.KEM.kemX25519Ladder
-private def wbCipher := CryptWalker.Sphinx.Crypto.WideBlockCipher.aez
+private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
 private def macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
 private def kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
 private def streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR

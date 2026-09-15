@@ -35,7 +35,7 @@ private def x25519Kem := CryptWalker.KEM.kemX25519Ladder
 -- The four crypto primitives `kemSphinxSchemeOf` wires up internally; the direct
 -- `createKEMHeader`/`newKEMPacket`/`unwrapKEM`/`newKEMSURB` calls below (bypassing the abstract
 -- `Sphinx.Interface` scheme) need them threaded through explicitly, same as `kemSphinxSchemeOf`.
-private def wbCipher := CryptWalker.Sphinx.Crypto.WideBlockCipher.aez
+private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
 private def macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
 private def kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
 private def streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
@@ -150,7 +150,7 @@ instead of calling `newKEMPacket` directly. `wrapKEM` draws one seed *per hop*, 
 must actually vary with the counter — unlike `NIKESphinx`'s version of this check, which draws
 only one seed total and can get away with a constant stream. -/
 def runAbstractWrapRound (geom : Geometry) : IO Bool := do
-  let scheme := kemSphinxSchemeOf x25519Kem geom
+  let scheme := kemSphinxSchemeOf x25519Kem wbCipher macS kdfS streamS geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
@@ -165,7 +165,7 @@ def runAbstractWrapRound (geom : Geometry) : IO Bool := do
 /-- As `NIKESphinx.nike_selftest`'s: empirical check of `Sphinx.Interface.unwrap_complete` (the
 property `wrapKEM_unwrapKEM_complete` axiomatizes). -/
 def runCompletenessRound (geom : Geometry) : IO Bool := do
-  let scheme := kemSphinxSchemeOf x25519Kem geom
+  let scheme := kemSphinxSchemeOf x25519Kem wbCipher macS kdfS streamS geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
@@ -195,7 +195,7 @@ def runCompletenessRound (geom : Geometry) : IO Bool := do
 round-trip through `unwrapKEM`/`SURB.decryptSURBPayload`. `wrapKEMSURB` draws one seed per hop
 plus two more (`keyPayload`), so the stream needs `nodes.size + 2` distinct entries. -/
 def runAbstractSURBRound (geom : Geometry) : IO Bool := do
-  let scheme := kemSphinxSchemeOf x25519Kem geom
+  let scheme := kemSphinxSchemeOf x25519Kem wbCipher macS kdfS streamS geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes true
   let seeds ← (List.range (nodes.size + 2)).toArray.mapM (fun _ => randomVector 32)

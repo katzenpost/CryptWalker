@@ -12,8 +12,8 @@ import CryptWalker.Sphinx.Common
 import CryptWalker.Sphinx.NIKESphinx
 import CryptWalker.Sphinx.SURB
 import CryptWalker.Sphinx.Crypto.Stream
-import CryptWalker.Sphinx.Crypto.AEZ
-import CryptWalker.Sphinx.Crypto.WideBlockCipher
+import CryptWalker.WideBlockCipher.WideBlockCipher
+import CryptWalker.WideBlockCipher.AEZ
 import CryptWalker.Sphinx.Crypto.MAC
 import CryptWalker.Sphinx.Crypto.GenericKDF
 import CryptWalker.Sphinx.Crypto.StreamCipher
@@ -29,8 +29,8 @@ open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Common
-open CryptWalker.Sphinx.NIKESphinx (HopKeys)
-open CryptWalker.Sphinx.Crypto.WideBlockCipher (WideBlockCipher)
+open CryptWalker.Sphinx.NIKESphinx (HopKeys deriveHopKeys)
+open CryptWalker.WideBlockCipher (WideBlockCipher)
 open CryptWalker.Sphinx.Crypto.MAC (MAC)
 open CryptWalker.Sphinx.Crypto.GenericKDF (KDF)
 open CryptWalker.Sphinx.Crypto.StreamCipher (StreamCipher)
@@ -96,20 +96,6 @@ private def kemSelfPublicKeyBytes (kem : KEM) (skBytes : ByteArray) : ByteArray 
   | none => skBytes
   | some sk => ofVector (kem.encodePublicKey (kem.derivePublicKey sk))
 
-/-- As `NIKESphinx.deriveHopKeys`, generic over which `KDF` does the expansion —
-`GenericKDF.packetKeysFrom` reproduces `sphinxKDF`'s own domain string and slicing exactly (see
-its doc comment), so this agrees with `NIKESphinx.deriveHopKeys sharedSecret` definitionally when
-`kdfS = GenericKDF.hkdfSha256Expand`. `blindingFactor` is the one `HopKeys` field this never
-populates (`ByteArray.empty`, matching `HopKeys`' own doc comment: unused on the KEM side, since
-there is no blinding chain to feed it into). -/
-private def deriveHopKeysG (kdfS : KDF) (sharedSecret : ByteArray) : HopKeys :=
-  let pk := CryptWalker.Sphinx.Crypto.GenericKDF.packetKeysFrom kdfS sharedSecret
-  { headerMAC := pk.headerMAC
-    headerEncryption := pk.headerEncryption
-    headerEncryptionIV := pk.headerEncryptionIV
-    payloadEncryption := pk.payloadEncryption
-    blindingFactor := ByteArray.empty }
-
 /-- The per-hop routing-info fragment for `createKEMHeader`'s third loop, factored out on its
 own: a non-terminal hop's fragment gets padded to a full `perHopRoutingInfoLength` and then has
 its last `kem.ciphertextSize` bytes overwritten with the next hop's embedded ciphertext, while a
@@ -163,7 +149,7 @@ def createKEMHeader (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCiphe
     | .error e => throw e
     | .ok (ct, ss) =>
       kemElements := kemElements.push ct
-      keys := keys.push (deriveHopKeysG kdfS ss)
+      keys := keys.push (deriveHopKeys kdfS ss)
 
   -- Per-hop routing-info keystream and encrypted padding, as in NIKESphinx.
   let totalRiLen := geom.routingInfoLength + geom.perHopRoutingInfoLength
@@ -269,7 +255,7 @@ private theorem createKEMHeader_loop1_size (kem : KEM) (kdfS : KDF) (path : Arra
             (match kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) with
               | .error e => throw e
               | .ok (ct, ss) =>
-                pure (ForInStep.yield (a.1.push ct, a.2.push (deriveHopKeysG kdfS ss)))
+                pure (ForInStep.yield (a.1.push ct, a.2.push (deriveHopKeys kdfS ss)))
               : Except String (ForInStep (Array ByteArray × Array HopKeys))))
         = Except.ok final →
       ∀ j (hj : j < final.1.size), (final.1[j]'hj).size = kem.ciphertextSize := by
@@ -541,17 +527,17 @@ private theorem createKEMHeader_loop1_content (kem : KEM) (kdfS : KDF) (path : A
           (match kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) with
             | .error e => throw e
             | .ok (ct, ss) =>
-              pure (ForInStep.yield (a.1.push ct, a.2.push (deriveHopKeysG kdfS ss)))
+              pure (ForInStep.yield (a.1.push ct, a.2.push (deriveHopKeys kdfS ss)))
             : Except String (ForInStep (Array ByteArray × Array HopKeys)))) = Except.ok final)
     (i : Nat) (hi : i < nrHops) :
     ∃ ct ss, kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) = Except.ok (ct, ss) ∧
-      final.1[i]! = ct ∧ final.2[i]! = deriveHopKeysG kdfS ss := by
+      final.1[i]! = ct ∧ final.2[i]! = deriveHopKeys kdfS ss := by
   have hnd : ∀ (b : Nat) (a a' : Array ByteArray × Array HopKeys), b ∈ List.range' 0 nrHops →
       (fun i (a : Array ByteArray × Array HopKeys) =>
         (match kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) with
           | .error e => throw e
           | .ok (ct, ss) =>
-            pure (ForInStep.yield (a.1.push ct, a.2.push (deriveHopKeysG kdfS ss)))
+            pure (ForInStep.yield (a.1.push ct, a.2.push (deriveHopKeys kdfS ss)))
           : Except String (ForInStep (Array ByteArray × Array HopKeys)))) b a
         ≠ Except.ok (ForInStep.done a') := by
     intro b a a' _hb hcontra
@@ -565,7 +551,7 @@ private theorem createKEMHeader_loop1_content (kem : KEM) (kdfS : KDF) (path : A
       (match kemEncap kem (path[j]!).publicKey (ephemeralSeeds[j]!) with
         | .error e => throw e
         | .ok (ct, ss) =>
-          pure (ForInStep.yield ((s j).1.push ct, (s j).2.push (deriveHopKeysG kdfS ss)))
+          pure (ForInStep.yield ((s j).1.push ct, (s j).2.push (deriveHopKeys kdfS ss)))
         : Except String (ForInStep (Array ByteArray × Array HopKeys)))
         = Except.ok (ForInStep.yield (s (j + 1))) := by
     intro j hj
@@ -600,7 +586,7 @@ private theorem createKEMHeader_loop1_content (kem : KEM) (kdfS : KDF) (path : A
       · simp only [reduceCtorEq] at hstepj
       · next ct ss hct =>
         simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
-        exact ⟨deriveHopKeysG kdfS ss, (congrArg Prod.snd hstepj).symm⟩)
+        exact ⟨deriveHopKeys kdfS ss, (congrArg Prod.snd hstepj).symm⟩)
     (fun j hj => (hsize j hj).2)
   have h1 : final.1[i]! = (s (i + 1)).1[i]! := by
     rw [← hsl']; exact hstable1 i nrHops hi (le_refl _)
@@ -1023,7 +1009,7 @@ private theorem createKEMHeader_unfold (kem : KEM) (macS : MAC) (kdfS : KDF) (st
       riKeyStream.size = path.size ∧ riPadding.size = path.size ∧
       (∀ i (hi : i < path.size), ∃ ct ss,
         kemEncap kem (path[i]!).publicKey (ephemeralSeeds[i]!) = Except.ok (ct, ss) ∧
-        kemElements[i]! = ct ∧ keys[i]! = deriveHopKeysG kdfS ss) ∧
+        kemElements[i]! = ct ∧ keys[i]! = deriveHopKeys kdfS ss) ∧
       (∀ i (hi : i < path.size),
         riKeyStream[i]! = (streamS.keystream (ofVector (keys[i]!).headerEncryption)
             (ofVector (keys[i]!).headerEncryptionIV)
@@ -1160,7 +1146,7 @@ private theorem createKEMHeader_unfold (kem : KEM) (macS : MAC) (kdfS : KDF) (st
 hypothesis this needs beyond `geom.ValidForKEM kem` is `hmactag`, tying `macS`'s output width to
 `Geometry`'s own fixed `macLength` constant — the one place a MAC's width is actually baked into
 the wire format (the header's trailing MAC field, at a fixed offset). `kdfS`/`streamS` need no
-such hypothesis: `deriveHopKeysG`/`keystream_size` compose with an arbitrary `KDF`/`StreamCipher`
+such hypothesis: `deriveHopKeys`/`keystream_size` compose with an arbitrary `KDF`/`StreamCipher`
 regardless of their declared `keySize`/`ivSize`, since those never appear in the *type* of
 `expand`/`keystream` (both take plain `ByteArray`). -/
 theorem createKEMHeader_hdr_size (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
@@ -1782,7 +1768,7 @@ def unwrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
   let replayTag := sha512_256 kemCiphertext
   let sharedSecret ← kemDecap kem privKey kemCiphertext
 
-  let keys := deriveHopKeysG kdfS sharedSecret
+  let keys := deriveHopKeys kdfS sharedSecret
   let gotMac := macS.mac (ofVector keys.headerMAC) (pkt.extract 0 macOff)
   if (ofVector gotMac).data ≠ (pkt.extract macOff (macOff + macLength)).data then
     throw "sphinx: invalid packet, MAC mismatch"
@@ -1904,7 +1890,7 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
        else thisPad0))
     (hkeyscontent : ∀ i (hi : i < nrHops), ∃ seed ss,
         kemEncap kem (path[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
-        keys[i]! = deriveHopKeysG kdfS ss)
+        keys[i]! = deriveHopKeys kdfS ss)
     (htsize : ∀ j (hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
     (ht0size : (t 0).size = geom.payloadTagLength + geom.forwardPayloadLength)
     (htstep : ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j)
@@ -2269,7 +2255,7 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
        else thisPad0))
     (hkeyscontent : ∀ i (hi : i < nrHops), ∃ seed ss,
         kemEncap kem (path[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
-        keys[i]! = deriveHopKeysG kdfS ss)
+        keys[i]! = deriveHopKeys kdfS ss)
     (htsize : ∀ j (hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
     (ht0size : (t 0).size = geom.payloadTagLength + geom.forwardPayloadLength)
     (htstep : ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j)
@@ -2564,7 +2550,7 @@ theorem unwrapChain_hopPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC
        else thisPad0))
     (hkeyscontent : ∀ i (hi : i < nrHops), ∃ seed ss,
         kemEncap kem (path[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
-        keys[i]! = deriveHopKeysG kdfS ss)
+        keys[i]! = deriveHopKeys kdfS ss)
     (htsize : ∀ j (hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
     (ht0size : (t 0).size = geom.payloadTagLength + geom.forwardPayloadLength)
     (htstep : ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j)
@@ -2774,7 +2760,7 @@ theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) 
   have hsprp : sprpKeys.size = nrHops := by rw [hsprpeq]; simp
   have hkeyscontent : ∀ i (hi : i < nrHops), ∃ seed ss,
       kemEncap kem (path.toArray[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
-      keys[i]! = deriveHopKeysG kdfS ss := by
+      keys[i]! = deriveHopKeys kdfS ss := by
     intro i hi
     obtain ⟨ct, ss, hkc, hcteq, hkeq⟩ := hkeyscontent0 i hi
     exact ⟨seeds[i]!, ss, hcteq ▸ hkc, hkeq⟩
@@ -2915,12 +2901,12 @@ structure KEMSphinxScheme extends CryptWalker.Sphinx.Interface.Sphinx where
       ∃ raw : ByteArray, xorBytes raw (stream.keystream key iv target.size) = target :=
     fun key iv target => xorBytes_achieves_any_target (stream.keystream key iv target.size) target
 
-/-- Build a `KEMSphinxScheme` from any `KEM` at all — total, no `Except`. -/
-def kemSphinxSchemeOf (kem : KEM) (geom : Geometry) : KEMSphinxScheme :=
-  let cipher := CryptWalker.Sphinx.Crypto.WideBlockCipher.aez
-  let macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
-  let kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
-  let streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
+/-- Build a `KEMSphinxScheme` from any `KEM` at all — total, no `Except`. Fully generic in the
+wide-block cipher/MAC/KDF/stream cipher too: nothing here picks a concrete instance of any of the
+four, matching `wrapKEM`/`unwrapKEM`'s own genericity. `kemSphinxScheme` below is the one place
+that does pick concrete defaults, for callers who only know a KEM's registered name. -/
+def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) : KEMSphinxScheme :=
   { State := SeedStream
     PrivateKey := ByteArray
     Command := RoutingCommand
@@ -2944,14 +2930,22 @@ def kemSphinxSchemeOf (kem : KEM) (geom : Geometry) : KEMSphinxScheme :=
 /-- Build a `KEMSphinxScheme` for whatever KEM `geom.scheme` names, resolved through
 `CryptWalker.KEM.byName` — the same registry `Geometry.ofKEM` resolves its ciphertext size
 against. Genuinely agnostic to *which* registered KEM this is: no NIKE, no PRF, nothing but the
-`KEM` value itself and a `Geometry`. -/
+`KEM` value itself and a `Geometry`.
+
+The one place that picks a concrete cryptographic stack: AEZ/HMAC-SHA256/HKDF-SHA256-Expand/
+AES-256-CTR, matching this codebase's `sphinx_kem_vectors.json` — `kemSphinxSchemeOf` underneath
+is fully generic over any `WideBlockCipher`/`MAC`/`KDF`/`StreamCipher`, this is just the one default
+choice a caller who only knows a KEM's name actually needs. -/
 def kemSphinxScheme (geom : Geometry) : Except String KEMSphinxScheme :=
   match geom.scheme with
   | .inl name => throw s!"sphinx: geometry scheme {name} is a NIKE, not a KEM"
   | .inr name =>
     match CryptWalker.KEM.byName name with
     | none => throw s!"sphinx: KEM scheme {name} not implemented"
-    | some kem => pure (kemSphinxSchemeOf kem geom)
+    | some kem => pure (kemSphinxSchemeOf kem CryptWalker.WideBlockCipher.AEZ.aez
+        CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+        CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+        CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR geom)
 
 /-! ## Wrap-resistance fails
 

@@ -93,7 +93,7 @@ def expandKey (key : Vector UInt8 32) : Array UInt8 := Id.run do
       w := w.push (w[4*(i - 8) + j]! ^^^ t[j]!)
   return w
 
-/-- Not `private`: `Sphinx.Crypto.AEZ` reuses this directly as AEZ's AES4/AES10 round function
+/-- Not `private`: `WideBlockCipher.AEZ` reuses this directly as AEZ's AES4/AES10 round function
 composes the same four steps under a different (fixed, 4- or 10-round) key schedule than
 AES-256 proper. -/
 def subBytes (s : Array UInt8) : Array UInt8 := s.map fun b => sbox[b.toNat]!

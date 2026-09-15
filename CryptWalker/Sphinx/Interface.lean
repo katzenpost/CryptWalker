@@ -10,7 +10,7 @@ import CryptWalker.Sphinx.Types
 import CryptWalker.Sphinx.Geometry
 import CryptWalker.Sphinx.Indistinguishability
 import CryptWalker.Sphinx.Integrity
-import CryptWalker.Sphinx.Crypto.WideBlockCipher
+import CryptWalker.WideBlockCipher.WideBlockCipher
 import CryptWalker.Sphinx.Crypto.MAC
 import CryptWalker.Sphinx.Crypto.GenericKDF
 import CryptWalker.Sphinx.Crypto.StreamCipher
@@ -85,7 +85,7 @@ structure Sphinx where
   swapping AEZ for another wide-block cipher, or HMAC-SHA256 for another MAC, is: define a new
   `WideBlockCipher`/`MAC` instance elsewhere and pass it in here. Nothing under `Sphinx.Interface`
   or its `NIKESphinx`/`KEMSphinx` witnesses needs to change or be re-proved. -/
-  cipher : CryptWalker.Sphinx.Crypto.WideBlockCipher.WideBlockCipher
+  cipher : CryptWalker.WideBlockCipher.WideBlockCipher
   mac    : CryptWalker.Sphinx.Crypto.MAC.MAC
   kdf    : CryptWalker.Sphinx.Crypto.GenericKDF.KDF
   stream : CryptWalker.Sphinx.Crypto.StreamCipher.StreamCipher

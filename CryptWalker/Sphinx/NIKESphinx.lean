@@ -12,8 +12,11 @@ import CryptWalker.Sphinx.Common
 import CryptWalker.Sphinx.SURB
 import CryptWalker.Sphinx.Crypto.KDF
 import CryptWalker.Sphinx.Crypto.ChaCha20
-import CryptWalker.Sphinx.Crypto.Stream
-import CryptWalker.Sphinx.Crypto.AEZ
+import CryptWalker.WideBlockCipher.WideBlockCipher
+import CryptWalker.WideBlockCipher.AEZ
+import CryptWalker.Sphinx.Crypto.MAC
+import CryptWalker.Sphinx.Crypto.GenericKDF
+import CryptWalker.Sphinx.Crypto.StreamCipher
 import CryptWalker.NIKE.NIKE
 import CryptWalker.NIKE.Schemes
 import CryptWalker.Sphinx.WrapResistance
@@ -28,10 +31,12 @@ open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Common
-open CryptWalker.Sphinx.Crypto.KDF (PacketKeys sphinxKDF)
+open CryptWalker.Sphinx.Crypto.KDF (PacketKeys)
 open CryptWalker.Sphinx.Crypto.ChaCha20 (keystream32)
-open CryptWalker.Sphinx.Crypto.Stream (keystream)
-open CryptWalker.Sphinx.Crypto.AEZ (sprpEncrypt sprpDecrypt)
+open CryptWalker.WideBlockCipher (WideBlockCipher)
+open CryptWalker.Sphinx.Crypto.MAC (MAC)
+open CryptWalker.Sphinx.Crypto.GenericKDF (KDF)
+open CryptWalker.Sphinx.Crypto.StreamCipher (StreamCipher)
 open CryptWalker.NIKE.NIKE (NIKE)
 open CryptWalker.Hash.Sha512 (sha512_256)
 open CryptWalker.Util.Bytes (ofVector)
@@ -169,10 +174,15 @@ structure HopKeys where
   blindingFactor : ByteArray
   deriving Inhabited
 
-/-- `sharedSecret` is whatever a NIKE's `encodeSharedSecret` produced — `sphinxKDF`/HKDF-expand
-accept arbitrary-length input key material, so no fixed width is assumed here. -/
-def deriveHopKeys (sharedSecret : ByteArray) : HopKeys :=
-  let pk : PacketKeys := sphinxKDF sharedSecret
+/-- `sharedSecret` is whatever a NIKE's `encodeSharedSecret` produced — `kdf.expand`/HKDF-expand
+accept arbitrary-length input key material, so no fixed width is assumed here. Generic in `kdfS`
+via `GenericKDF.packetKeysFrom`, which reproduces `Crypto.KDF.sphinxKDF`'s own domain string and
+slicing exactly (see that def's own doc comment) — agrees with the old hardcoded `deriveHopKeys`
+definitionally when `kdfS = GenericKDF.hkdfSha256Expand`. Shared with `KEMSphinx.lean` (its
+`deriveHopKeysG` was the same function under a different name; unified here since `HopKeys` itself
+already lives in this file). -/
+def deriveHopKeys (kdfS : KDF) (sharedSecret : ByteArray) : HopKeys :=
+  let pk : PacketKeys := CryptWalker.Sphinx.Crypto.GenericKDF.packetKeysFrom kdfS sharedSecret
   { headerMAC := pk.headerMAC
     headerEncryption := pk.headerEncryption
     headerEncryptionIV := pk.headerEncryptionIV
@@ -182,7 +192,8 @@ def deriveHopKeys (sharedSecret : ByteArray) : HopKeys :=
 /-- **`createHeader`**. `filler` must be exactly `(geom.nrHops - path.size) *
 geom.perHopRoutingInfoLength` bytes (ignored, and may be empty, when `path.size = geom.nrHops`)
 — the random padding that hides a shorter-than-maximum path's true hop count. -/
-def createHeader (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
+def createHeader (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
+    (clientPrivateKey : ByteArray)
     (filler : ByteArray) (path : Array PathHop) : Except String (ByteArray × Array SPRPKey) := do
   let nrHops := path.size
   if nrHops == 0 || nrHops > geom.nrHops then throw "sphinx: invalid path"
@@ -194,14 +205,14 @@ def createHeader (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
 
   -- Per-hop shared secrets/keys, and the (progressively blinded) group elements.
   let mut groupElements : Array ByteArray := Array.replicate nrHops clientPublicKey0
-  let mut keys : Array HopKeys := #[deriveHopKeys (← nikeDH nike clientSk (path[0]!).publicKey)]
+  let mut keys : Array HopKeys := #[deriveHopKeys kdfS (← nikeDH nike clientSk (path[0]!).publicKey)]
   let mut clientPublicKey := clientPublicKey0
   for i in [1:nrHops] do
     let mut sharedSecret ← nikeDH nike clientSk (path[i]!).publicKey
     for j in [0:i] do
       let fj ← nikeDecodePrivateKey nike (keys[j]!).blindingFactor
       sharedSecret ← nikeDH nike fj sharedSecret
-    keys := keys.push (deriveHopKeys sharedSecret)
+    keys := keys.push (deriveHopKeys kdfS sharedSecret)
     clientPublicKey := nikeBlind nike clientPublicKey (keys[i-1]!).blindingFactor
     groupElements := groupElements.set! i clientPublicKey
 
@@ -210,7 +221,8 @@ def createHeader (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
   let mut riKeyStream : Array ByteArray := #[]
   let mut riPadding : Array ByteArray := #[]
   for i in [0:nrHops] do
-    let ks := keystream (keys[i]!).headerEncryption (keys[i]!).headerEncryptionIV totalRiLen
+    let ks := streamS.keystream (ofVector (keys[i]!).headerEncryption)
+      (ofVector (keys[i]!).headerEncryptionIV) totalRiLen
     let ksLen := totalRiLen - (i + 1) * geom.perHopRoutingInfoLength
     let mut thisPad := ks.extract ksLen totalRiLen
     if i > 0 then
@@ -237,7 +249,7 @@ def createHeader (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
     routingInfo := xorBytes routingInfo (riKeyStream[i]!)
     let mPreimage := v0AD ++ groupElements[i]! ++ routingInfo
       ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
-    macBytes := ofVector (mac (keys[i]!).headerMAC mPreimage)
+    macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
 
   let hdr := v0AD ++ groupElements[0]! ++ routingInfo ++ macBytes
   let sprpKeys : Array SPRPKey := Array.ofFn fun i : Fin nrHops =>
@@ -259,10 +271,11 @@ set_option maxHeartbeats 1000000 in
 `≥ 1` of an array every entry of which starts as `clientPublicKey0`. Note the group-element slot's
 width is `nike.publicKeySize`, not a fixed literal — genuinely different NIKEs get genuinely
 different-width headers, matching `Geometry.buildNIKE`. -/
-private theorem createHeader_hdr_bytesPub (nike : NIKE) (geom : Geometry)
+private theorem createHeader_hdr_bytesPub (nike : NIKE) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry)
     (clientPrivateKey : ByteArray) (filler : ByteArray) (path : Array PathHop)
     (hdr : ByteArray) (sprpKeys : Array SPRPKey)
-    (h : createHeader nike geom clientPrivateKey filler path = .ok (hdr, sprpKeys)) :
+    (h : createHeader nike macS kdfS streamS geom clientPrivateKey filler path = .ok (hdr, sprpKeys)) :
     hdr.extract 2 (2 + nike.publicKeySize) = nikeSelfPublicKeyBytes nike clientPrivateKey ∧
       2 + nike.publicKeySize ≤ hdr.size := by
   unfold createHeader at h
@@ -336,7 +349,8 @@ final `for` loop): whatever the current fragment/budget/terminal-ness happen to 
 step always grows the accumulated `routingInfo` by exactly `geom.perHopRoutingInfoLength` bytes —
 `zeroPadTo` pads (never truncates, since the budget check bounds the fragment first) up to that
 width, and `xorBytes` afterward doesn't change the size. -/
-private theorem createHeader_loop3_step (nike : NIKE) (geom : Geometry) (path : Array PathHop)
+private theorem createHeader_loop3_step (nike : NIKE) (macS : MAC) (geom : Geometry)
+    (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
     (nrHops : Nat) (hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
     (hnnh : geom.nextNodeHopLength = nextNodeHopLength)
@@ -357,7 +371,7 @@ private theorem createHeader_loop3_step (nike : NIKE) (geom : Geometry) (path : 
         let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
         let mPreimage := v0AD ++ groupElements[i]! ++ routingInfo
           ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
-        let macBytes := ofVector (mac (keys[i]!).headerMAC mPreimage)
+        let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
         pure (ForInStep.yield (routingInfo, macBytes)) :
           Except String (ForInStep (ByteArray × ByteArray))) = Except.ok (ForInStep.yield (ri', mb'))) :
     ri'.size = ri.size + geom.perHopRoutingInfoLength := by
@@ -393,7 +407,8 @@ private theorem createHeader_loop3_step (nike : NIKE) (geom : Geometry) (path : 
 block at the call site) so its `hstep` parameter's type can be unified from context lazily, the
 same way `createHeader_loop3_step`'s can — an inline `by`-tactic block there gets elaborated too
 eagerly, before the step function itself has been pinned down from `hLoop3`. -/
-private theorem createHeader_loop3_never_done (nike : NIKE) (geom : Geometry) (path : Array PathHop)
+private theorem createHeader_loop3_never_done (nike : NIKE) (macS : MAC) (geom : Geometry)
+    (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
     (nrHops : Nat) (iRev : Nat) (ri mb : ByteArray) (a' : ByteArray × ByteArray)
     (hstep :
@@ -411,7 +426,7 @@ private theorem createHeader_loop3_never_done (nike : NIKE) (geom : Geometry) (p
         let routingInfo := xorBytes routingInfo (riKeyStream[i]!)
         let mPreimage := v0AD ++ groupElements[i]! ++ routingInfo
           ++ (if i > 0 then riPadding[i - 1]! else ByteArray.empty)
-        let macBytes := ofVector (mac (keys[i]!).headerMAC mPreimage)
+        let macBytes := ofVector (macS.mac (ofVector (keys[i]!).headerMAC) mPreimage)
         pure (ForInStep.yield (routingInfo, macBytes)) :
           Except String (ForInStep (ByteArray × ByteArray))) = Except.ok (ForInStep.done a')) :
     False := by
@@ -426,10 +441,11 @@ macLength`, matching `geom.headerLength` whenever `geom` was actually built for 
 silently: `geom.headerLength`, `geom.routingInfoLength` and `geom.perHopRoutingInfoLength` all
 come from `Geometry.buildNIKE`, which any `Geometry.ofNIKE nike.hpqcName ...` satisfies by
 construction). -/
-theorem createHeader_hdr_size (nike : NIKE) (geom : Geometry) (clientPrivateKey filler : ByteArray)
+theorem createHeader_hdr_size (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+    (geom : Geometry) (clientPrivateKey filler : ByteArray)
     (path : Array PathHop) (hdr : ByteArray) (sprpKeys : Array SPRPKey)
-    (hvalid : geom.ValidForNIKE nike)
-    (h : createHeader nike geom clientPrivateKey filler path = .ok (hdr, sprpKeys)) :
+    (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
+    (h : createHeader nike macS kdfS streamS geom clientPrivateKey filler path = .ok (hdr, sprpKeys)) :
     hdr.size = geom.headerLength := by
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, -, -⟩ := hvalid
   have hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength := by omega
@@ -546,9 +562,9 @@ theorem createHeader_hdr_size (nike : NIKE) (geom : Geometry) (clientPrivateKey 
         simpa [List.length_range'] using hraw.symm
       have hlne : List.range' 0 path.size ≠ [] := by
         simp only [ne_eq, List.range'_eq_nil_iff]; omega
-      have hmacsize : loop3Final.2.size = 32 := by
+      have hmacsize : loop3Final.2.size = macS.tagSize := by
         refine CryptWalker.Sphinx.Common.List.forIn_const_of_forall_mem (List.range' 0 path.size) hlne
-          _ (fun (a : ByteArray × ByteArray) => a.2.size) 32 ?_ ?_ _ _ hLoop3
+          _ (fun (a : ByteArray × ByteArray) => a.2.size) macS.tagSize ?_ ?_ _ _ hLoop3
         · intro a a' iRev hiRev hgb
           obtain ⟨riFragment0, hriFragment0, hgb⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok hgb
           by_cases hterm : path.size - 1 - iRev = path.size - 1
@@ -574,27 +590,31 @@ theorem createHeader_hdr_size (nike : NIKE) (geom : Geometry) (clientPrivateKey 
           + path.size * geom.perHopRoutingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops := by
         rw [← Nat.add_mul, Nat.sub_add_cancel hgen, Nat.mul_comm]
       rw [← hhdr]
-      simp only [ByteArray.size_append, hv0, hge0size, hloop3size, hinit_size, hmacsize,
+      simp only [ByteArray.size_append, hv0, hge0size, hloop3size, hinit_size, hmacsize, hmactag,
         byteArray_empty_size]
       rw [hheader, hrouting, ← hmulcombine]
       simp only [adLength, macLength]
 
-/-- **`newNIKEPacket`**. -/
-def newNIKEPacket (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
+/-- **`newNIKEPacket`**. Generic in the wide-block cipher/MAC/KDF/stream cipher, matching
+`createKEMHeader`/`unwrapKEM` on the KEM side. -/
+def newNIKEPacket (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (clientPrivateKey : ByteArray)
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) : Except String ByteArray := do
   if payload.size ≠ geom.forwardPayloadLength then
     throw s!"sphinx: invalid payload length: {payload.size}, expected {geom.forwardPayloadLength}"
-  let (hdr, sprpKeys) ← createHeader nike geom clientPrivateKey filler path
+  let (hdr, sprpKeys) ← createHeader nike macS kdfS streamS geom clientPrivateKey filler path
   let mut b := (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload
   for iRev in [0:sprpKeys.size] do
     let k := sprpKeys[sprpKeys.size - 1 - iRev]!
-    b := sprpEncrypt k.key.toArray (ofVector k.iv) b
+    b := cipher.encrypt k.key.toArray (ofVector k.iv) b
   pure (hdr ++ b)
 
-private theorem newNIKEPacket_bytesPub (nike : NIKE) (geom : Geometry)
+private theorem newNIKEPacket_bytesPub (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
+    (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
     (clientPrivateKey : ByteArray) (filler : ByteArray) (path : Array PathHop)
     (payload : ByteArray) (pkt : ByteArray)
-    (h : newNIKEPacket nike geom clientPrivateKey filler path payload = .ok pkt) :
+    (h : newNIKEPacket nike cipher macS kdfS streamS geom clientPrivateKey filler path payload
+      = .ok pkt) :
     pkt.extract 2 (2 + nike.publicKeySize) = nikeSelfPublicKeyBytes nike clientPrivateKey := by
   unfold newNIKEPacket at h
   dsimp only at h
@@ -609,10 +629,11 @@ private theorem newNIKEPacket_bytesPub (nike : NIKE) (geom : Geometry)
       pure_bind] at h
     obtain ⟨x, hx, hfx⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
     have hpkt : pkt = x.1 ++ (List.range' 0 [:x.2.size].size).foldl
-        (fun b a ↦ sprpEncrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
+        (fun b a ↦ cipher.encrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
         ({ data := Array.replicate geom.payloadTagLength 0 } ++ payload) := by
       injection hfx with hfx; exact hfx.symm
-    obtain ⟨hhdrPub, hhdrgePub⟩ := createHeader_hdr_bytesPub nike geom clientPrivateKey filler path x.1 x.2 hx
+    obtain ⟨hhdrPub, hhdrgePub⟩ := createHeader_hdr_bytesPub nike macS kdfS streamS geom
+      clientPrivateKey filler path x.1 x.2 hx
     rw [hpkt, CryptWalker.Util.Bytes.extract_append_of_le _ _ (by omega)]
     exact hhdrPub
 
@@ -624,10 +645,12 @@ confirmed by all 20 `sphinx_{nike,kem}_vectors.json` packets — see `Sphinx.Int
 for why this is an axiom rather than a proof through those loops. `wrapNIKE` uses it to give
 `Sphinx.Interface.wrap` a packet-length-preserving *type*, the same way `sprpDecrypt_size` lets
 `unwrapNIKE` do that for `forwardPkt`. -/
-theorem newNIKEPacket_size (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
+theorem newNIKEPacket_size (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (clientPrivateKey : ByteArray)
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
-    (hvalid : geom.ValidForNIKE nike)
-    (h : newNIKEPacket nike geom clientPrivateKey filler path payload = .ok pkt)
+    (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
+    (h : newNIKEPacket nike cipher macS kdfS streamS geom clientPrivateKey filler path payload
+      = .ok pkt)
     (hpay : payload.size = geom.forwardPayloadLength) :
     pkt.size = geom.packetLength := by
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
@@ -645,13 +668,14 @@ theorem newNIKEPacket_size (nike : NIKE) (geom : Geometry) (clientPrivateKey : B
       Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind] at h
     obtain ⟨x, hx, hfx⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
     have hpkt : pkt = x.1 ++ (List.range' 0 x.2.size).foldl
-        (fun b a ↦ sprpEncrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
+        (fun b a ↦ cipher.encrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
         ({ data := Array.replicate geom.payloadTagLength 0 } ++ payload) := by
       injection hfx with hfx; exact hfx.symm
-    have hhdrsize := createHeader_hdr_size nike geom clientPrivateKey filler path x.1 x.2 hvalid hx
+    have hhdrsize := createHeader_hdr_size nike macS kdfS streamS geom clientPrivateKey filler path
+      x.1 x.2 hvalid hmactag hx
     have hfoldsize := CryptWalker.Sphinx.Common.List.foldl_size_preserving (List.range' 0 x.2.size)
-      (fun b a ↦ sprpEncrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
-      (fun b a ↦ CryptWalker.Sphinx.Crypto.AEZ.sprpEncrypt_size _ _ b)
+      (fun b a ↦ cipher.encrypt x.2[x.2.size - 1 - a]!.key.toArray (ofVector x.2[x.2.size - 1 - a]!.iv) b)
+      (fun b a ↦ cipher.encrypt_size _ _ b)
       ({ data := Array.replicate geom.payloadTagLength 0 } ++ payload)
     rw [hpkt, ByteArray.size_append, hhdrsize, hfoldsize, ByteArray.size_append, hpacket]
     simp only [byteArray_mk_size, Array.size_replicate]
@@ -661,11 +685,13 @@ open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
 
 /-- **`wrapNIKE`**: `Sphinx.Interface.wrap` for `NIKESphinxScheme` — `newNIKEPacket`, drawing the
 client's ephemeral private key from the seed stream instead of taking it as a bare argument. -/
-def wrapNIKE (nike : NIKE) (geom : Geometry) (path : List PathHop) (filler : ByteArray)
+def wrapNIKE (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (path : List PathHop) (filler : ByteArray)
     (payload : Vector UInt8 geom.forwardPayloadLength) :
     EStateM String SeedStream (Vector UInt8 geom.packetLength) := do
   let seed ← nextSeed
-  match newNIKEPacket nike geom (ofVector seed) filler path.toArray (ofVector payload) with
+  match newNIKEPacket nike cipher macS kdfS streamS geom (ofVector seed) filler path.toArray
+      (ofVector payload) with
   | .error e => throw e
   | .ok pkt =>
     if hsize : pkt.size = geom.packetLength then pure ⟨pkt.data, hsize⟩
@@ -675,10 +701,11 @@ def wrapNIKE (nike : NIKE) (geom : Geometry) (path : List PathHop) (filler : Byt
 final payload-encryption layer (`sprpKeyMaterialLength = 64` bytes — `surb.go`'s
 `io.ReadFull(r, keyPayload[:])`). Returns `(surb, decryptionKeys)`; `decryptionKeys` is exactly
 what `SURB.decryptSURBPayload` wants. -/
-def newNIKESURB (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
+def newNIKESURB (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
+    (clientPrivateKey : ByteArray)
     (keyPayload : Vector UInt8 64) (filler : ByteArray) (path : Array PathHop) :
     Except String (ByteArray × ByteArray) := do
-  let (hdr, sprpKeys) ← createHeader nike geom clientPrivateKey filler path
+  let (hdr, sprpKeys) ← createHeader nike macS kdfS streamS geom clientPrivateKey filler path
   -- Reverse hop order, "to ease decryption" (surb.go's comment).
   let mut k : ByteArray := ByteArray.empty
   for iRev in [0:sprpKeys.size] do
@@ -692,11 +719,13 @@ def newNIKESURB (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
 sprpKeyMaterialLength`, and `newNIKESURB`'s `surb` is exactly `hdr ++ id(32) ++
 keyPayload(64)` with `hdr.size = geom.headerLength` (`createHeader`'s own loop-accumulated
 invariant, the same one `newNIKEPacket_size` relies on). -/
-theorem newNIKESURB_size (nike : NIKE) (geom : Geometry) (clientPrivateKey : ByteArray)
+theorem newNIKESURB_size (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
+    (geom : Geometry) (clientPrivateKey : ByteArray)
     (keyPayload : Vector UInt8 64) (filler : ByteArray) (path : Array PathHop)
-    (hvalid : geom.ValidForNIKE nike)
+    (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
     (surb surbKeys : ByteArray)
-    (h : newNIKESURB nike geom clientPrivateKey keyPayload filler path = .ok (surb, surbKeys)) :
+    (h : newNIKESURB nike macS kdfS streamS geom clientPrivateKey keyPayload filler path
+      = .ok (surb, surbKeys)) :
     surb.size = geom.surbLength := by
   obtain ⟨-, -, -, -, -, hsurb⟩ := id hvalid
   unfold newNIKESURB at h
@@ -707,7 +736,8 @@ theorem newNIKESURB_size (nike : NIKE) (geom : Geometry) (clientPrivateKey : Byt
   have hsurbeq : surb = x.1 ++ ofVector (path[0]!).id ++ ofVector keyPayload := by
     injection hfx with hfx
     exact congrArg Prod.fst hfx.symm
-  have hhdrsize := createHeader_hdr_size nike geom clientPrivateKey filler path x.1 x.2 hvalid hx
+  have hhdrsize := createHeader_hdr_size nike macS kdfS streamS geom clientPrivateKey filler path
+    x.1 x.2 hvalid hmactag hx
   rw [hsurbeq, ByteArray.size_append, ByteArray.size_append, hhdrsize, hsurb,
     CryptWalker.Util.Bytes.size_ofVector, CryptWalker.Util.Bytes.size_ofVector]
   simp only [nodeIDLength, CryptWalker.Sphinx.Constants.sprpKeyMaterialLength,
@@ -717,12 +747,13 @@ theorem newNIKESURB_size (nike : NIKE) (geom : Geometry) (clientPrivateKey : Byt
 /-- **`wrapNIKESURB`**: `Sphinx.Interface.newSURB` for `NIKESphinxScheme` — `newNIKESURB`, drawing
 the client's ephemeral key and `keyPayload` (two seeds' worth) from the seed stream instead of
 taking them as bare arguments. -/
-def wrapNIKESURB (nike : NIKE) (geom : Geometry) (path : List PathHop) (filler : ByteArray) :
+def wrapNIKESURB (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
+    (path : List PathHop) (filler : ByteArray) :
     EStateM String SeedStream (Vector UInt8 geom.surbLength × ByteArray) := do
   let clientKey ← nextSeed
   let kp1 ← nextSeed
   let kp2 ← nextSeed
-  match newNIKESURB nike geom (ofVector clientKey) (kp1 ++ kp2) filler path.toArray with
+  match newNIKESURB nike macS kdfS streamS geom (ofVector clientKey) (kp1 ++ kp2) filler path.toArray with
   | .error e => throw e
   | .ok (surb, k) =>
     if hsize : surb.size = geom.surbLength then pure (⟨surb.data, hsize⟩, k)
@@ -731,7 +762,8 @@ def wrapNIKESURB (nike : NIKE) (geom : Geometry) (path : List PathHop) (filler :
 /-- **`unwrapNIKE`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Interface.unwrap`
 (see that file). Unlike Go, a MAC mismatch reports only an error string, not also the replay
 tag. -/
-def unwrapNIKE (nike : NIKE) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArray) :
+def unwrapNIKE (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArray) :
     Except String
       (Option ByteArray × Vector UInt8 32 × List RoutingCommand × Option (Vector UInt8 pkt.size)) := do
   let geOff := 2
@@ -749,9 +781,9 @@ def unwrapNIKE (nike : NIKE) (geom : Geometry) (privKey : ByteArray) (pkt : Byte
   let privSk ← nikeDecodePrivateKey nike privKey
   let sharedSecret ← nikeDH nike privSk groupElement
   let replayTag := sha512_256 groupElement
-  let keys := deriveHopKeys sharedSecret
+  let keys := deriveHopKeys kdfS sharedSecret
 
-  let gotMac := mac keys.headerMAC (pkt.extract 0 macOff)
+  let gotMac := macS.mac (ofVector keys.headerMAC) (pkt.extract 0 macOff)
   if (ofVector gotMac).data ≠ (pkt.extract macOff (macOff + macLength)).data then
     throw "sphinx: invalid packet, MAC mismatch"
 
@@ -764,7 +796,7 @@ def unwrapNIKE (nike : NIKE) (geom : Geometry) (privKey : ByteArray) (pkt : Byte
       = geom.routingInfoLength + geom.perHopRoutingInfoLength
     rw [ByteArray.size_append, ByteArray.size_extract, hpad]
     omega
-  b := xorBytes b (keystream keys.headerEncryption keys.headerEncryptionIV b.size)
+  b := xorBytes b (streamS.keystream (ofVector keys.headerEncryption) (ofVector keys.headerEncryptionIV) b.size)
   have hb' : b.size = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
     show (xorBytes _ _).size = _
     rw [size_xorBytes]; exact hb
@@ -789,14 +821,14 @@ def unwrapNIKE (nike : NIKE) (geom : Geometry) (privKey : ByteArray) (pkt : Byte
     rw [ByteArray.size_extract]
     omega
   let decPayload :=
-    if rawPayload.size > 0 then sprpDecrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
+    if rawPayload.size > 0 then cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
     else rawPayload
   have hdec : decPayload.size = rawPayload.size := by
     show (if rawPayload.size > 0
-          then sprpDecrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
+          then cipher.decrypt keys.payloadEncryption.toArray (ofVector keys.headerEncryptionIV) rawPayload
           else rawPayload).size = rawPayload.size
     split
-    · exact CryptWalker.Sphinx.Crypto.AEZ.sprpDecrypt_size _ _ _
+    · exact cipher.decrypt_size _ _ _
     · rfl
 
   match nextNode with
@@ -836,55 +868,68 @@ def unwrapNIKE (nike : NIKE) (geom : Geometry) (privKey : ByteArray) (pkt : Byte
 claim that Sphinx onion-decrypts correctly, checked empirically by every vector and self-test
 round trip (`nike_vectors_test`; `nike_selftest`'s `runRound`/`runAbstractWrapRound`/
 `runAbstractSURBRound`), but not proved here for the reason the size axioms above aren't: real
-work, through `createHeader`'s blinding chain and `unwrapNIKE`'s AEZ/HMAC composition, out of
-scope for this pass. -/
-axiom wrapNIKE_unwrapNIKE_complete (nike : NIKE) (geom : Geometry) (path : List PathHop)
+work, through `createHeader`'s blinding chain and `unwrapNIKE`'s cipher/MAC composition, out of
+scope for this pass. Generic in the wide-block cipher/MAC/KDF/stream cipher, matching
+`wrapKEM_unwrapKEM_complete`. -/
+axiom wrapNIKE_unwrapNIKE_complete (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
+    (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : List PathHop)
     (privKeys : List ByteArray) (filler : ByteArray)
     (payload : Vector UInt8 geom.forwardPayloadLength) (st : SeedStream)
     (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream) :
     path ≠ [] →
     path.map (·.publicKey) = privKeys.map (nikeSelfPublicKeyBytes nike) →
-    wrapNIKE nike geom path filler payload st = .ok pkt st' →
-    unwrapChainAux (unwrapNIKE nike geom) privKeys (ofVector pkt) = .ok (some (ofVector payload))
+    wrapNIKE nike cipher macS kdfS streamS geom path filler payload st = .ok pkt st' →
+    unwrapChainAux (unwrapNIKE nike cipher macS kdfS streamS geom) privKeys (ofVector pkt)
+      = .ok (some (ofVector payload))
 
-private theorem wrapNIKE_bytesPub (nike : NIKE) (geom : Geometry) (path : List PathHop)
+private theorem wrapNIKE_bytesPub (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (path : List PathHop)
     (filler : ByteArray) (payload : Vector UInt8 geom.forwardPayloadLength) (i : Nat)
     (str : Nat → Vector UInt8 32) (v : Vector UInt8 geom.packetLength) (s' : SeedStream)
-    (hvalid : geom.ValidForNIKE nike)
-    (h : wrapNIKE nike geom path filler payload (i, str) = .ok v s') :
+    (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
+    (h : wrapNIKE nike cipher macS kdfS streamS geom path filler payload (i, str) = .ok v s') :
     (ofVector v).extract 2 (2 + nike.publicKeySize) = nikeSelfPublicKeyBytes nike (ofVector (str i)) := by
-  rcases hX : newNIKEPacket nike geom (ofVector (str i)) filler path.toArray (ofVector payload) with e | raw
-  · have hw : wrapNIKE nike geom path filler payload (i, str) = .error e (i + 1, str) := by
+  rcases hX : newNIKEPacket nike cipher macS kdfS streamS geom (ofVector (str i)) filler
+      path.toArray (ofVector payload) with e | raw
+  · have hw : wrapNIKE nike cipher macS kdfS streamS geom path filler payload (i, str)
+        = .error e (i + 1, str) := by
       simp only [wrapNIKE, Bind.bind, EStateM.bind, nextSeed]
-      match newNIKEPacket nike geom (ofVector (str i)) filler path.toArray (ofVector payload), hX with
+      match newNIKEPacket nike cipher macS kdfS streamS geom (ofVector (str i)) filler path.toArray
+          (ofVector payload), hX with
       | _, rfl => rfl
     rw [hw] at h; injection h
-  · have hsize := newNIKEPacket_size nike geom (ofVector (str i)) filler path.toArray (ofVector payload) raw
-      hvalid hX (by simp)
-    have hw : wrapNIKE nike geom path filler payload (i, str) = .ok ⟨raw.data, hsize⟩ (i + 1, str) := by
+  · have hsize := newNIKEPacket_size nike cipher macS kdfS streamS geom (ofVector (str i)) filler
+      path.toArray (ofVector payload) raw hvalid hmactag hX (by simp)
+    have hw : wrapNIKE nike cipher macS kdfS streamS geom path filler payload (i, str)
+        = .ok ⟨raw.data, hsize⟩ (i + 1, str) := by
       simp only [wrapNIKE, Bind.bind, EStateM.bind, nextSeed]
-      match newNIKEPacket nike geom (ofVector (str i)) filler path.toArray (ofVector payload), hX with
+      match newNIKEPacket nike cipher macS kdfS streamS geom (ofVector (str i)) filler path.toArray
+          (ofVector payload), hX with
       | _, rfl => simp [dif_pos hsize, EStateM.pure, pure]
     rw [hw] at h
     injection h with h
     rw [← h]
-    exact newNIKEPacket_bytesPub nike geom (ofVector (str i)) filler path.toArray (ofVector payload) raw hX
+    exact newNIKEPacket_bytesPub nike cipher macS kdfS streamS geom (ofVector (str i)) filler
+      path.toArray (ofVector payload) raw hX
 
 /-- Envelope bytes are a pure function of the seed drawn from `state` (`createHeader`'s
 `groupElements[0]!`, never overwritten after `Array.replicate`), regardless of the path/filler/
 payload the rest of `wrap` is building. -/
-theorem wrapNIKE_envelope_indep (nike : NIKE) (geom : Geometry) (hop0 hop1 : PathHop)
+theorem wrapNIKE_envelope_indep (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (hop0 hop1 : PathHop)
     (rest0 rest1 : List PathHop) (filler0 filler1 : ByteArray)
     (payload0 payload1 : Vector UInt8 geom.forwardPayloadLength)
     (st : SeedStream) (pkt0 pkt1 : Vector UInt8 geom.packetLength) (st0' st1' : SeedStream)
-    (hvalid : geom.ValidForNIKE nike) :
-    wrapNIKE nike geom (hop0 :: rest0) filler0 payload0 st = .ok pkt0 st0' →
-    wrapNIKE nike geom (hop1 :: rest1) filler1 payload1 st = .ok pkt1 st1' →
+    (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength) :
+    wrapNIKE nike cipher macS kdfS streamS geom (hop0 :: rest0) filler0 payload0 st = .ok pkt0 st0' →
+    wrapNIKE nike cipher macS kdfS streamS geom (hop1 :: rest1) filler1 payload1 st = .ok pkt1 st1' →
     (ofVector pkt0).extract 2 (2 + nike.publicKeySize) = (ofVector pkt1).extract 2 (2 + nike.publicKeySize) := by
   intro h0 h1
   obtain ⟨i, str⟩ := st
-  rw [wrapNIKE_bytesPub nike geom (hop0 :: rest0) filler0 payload0 i str pkt0 st0' hvalid h0,
-    wrapNIKE_bytesPub nike geom (hop1 :: rest1) filler1 payload1 i str pkt1 st1' hvalid h1]
+  rw [wrapNIKE_bytesPub nike cipher macS kdfS streamS geom (hop0 :: rest0) filler0 payload0 i str
+      pkt0 st0' hvalid hmactag h0,
+    wrapNIKE_bytesPub nike cipher macS kdfS streamS geom (hop1 :: rest1) filler1 payload1 i str
+      pkt1 st1' hvalid hmactag h1]
 
 /-- A `Sphinx` scheme whose header carries a re-blindable public-key element: `Envelope` is that
 element's type (`parseEnvelope` extracts it from a packet), `Factor` is the space a fresh
@@ -938,39 +983,36 @@ an abstract, injectively-embedded type finite and enumerable needs classical cho
 that, so — unlike `nikeSphinxSchemeOf`/`nikeSphinxScheme` — it compiles to real code: executable
 callers that only need `wrap`/`unwrap`/`newSURB`/`newPacketFromSURB` (tests, vector generation)
 should use this, not the fuller scheme. -/
-def nikeSphinxCore (nike : NIKE) (geom : Geometry) : CryptWalker.Sphinx.Interface.Sphinx where
+def nikeSphinxCore (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) : CryptWalker.Sphinx.Interface.Sphinx where
   State := SeedStream
   PrivateKey := ByteArray
   Command := RoutingCommand
   geometry := geom
   stateI := ⟨CryptWalker.Sphinx.Interface.initWith (fun _ => Vector.replicate 32 0)⟩
-  -- The four primitives `wrap`/`unwrap` below actually call, named honestly on the `Sphinx`
-  -- interface even though `createHeader`/`unwrapNIKE`'s bodies still reach `AEZ`/`HMAC`/`KDF`/
-  -- `Stream` directly rather than through these values yet -- routing their calls through these
-  -- fields instead of the concrete functions is tracked separately (mirroring `KEMSphinx`'s
-  -- rewiring); declaring them here first keeps `NIKESphinxScheme` an honest `Sphinx` instance in
-  -- the meantime.
-  cipher := CryptWalker.Sphinx.Crypto.WideBlockCipher.aez
-  mac    := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
-  kdf    := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
-  stream := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
+  cipher := cipher
+  mac    := macS
+  kdf    := kdfS
+  stream := streamS
   derivePublicKey := nikeSelfPublicKeyBytes nike
-  wrap := wrapNIKE nike geom
-  unwrap := unwrapNIKE nike geom
-  newSURB := wrapNIKESURB nike geom
+  wrap := wrapNIKE nike cipher macS kdfS streamS geom
+  unwrap := unwrapNIKE nike cipher macS kdfS streamS geom
+  newSURB := wrapNIKESURB nike macS kdfS streamS geom
   newPacketFromSURB := fun surb payload =>
     CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
   unwrap_complete := fun path privKeys filler payload st pkt st' hpath hkeys _hcmds _hsurb hwrap =>
-    wrapNIKE_unwrapNIKE_complete nike geom path privKeys filler payload st pkt st' hpath hkeys hwrap
+    wrapNIKE_unwrapNIKE_complete nike cipher macS kdfS streamS geom path privKeys filler payload
+      st pkt st' hpath hkeys hwrap
 
 /-- Build a `NIKESphinxScheme` from any `NIKE` at all — total, no `Except`, since every field here
 is defined unconditionally (needed by test/vector-generation code, which can't route through
 `nikeSphinxScheme`'s `Except` return because `NIKESphinxScheme` has `Type`-valued fields, putting it
 in `Type 1`, which `IO.ofExcept` cannot hold). `noncomputable` — see `nikeSphinxCore`'s doc comment
 if only the base `Sphinx` fields are actually needed. -/
-noncomputable def nikeSphinxSchemeOf (nike : NIKE) (geom : Geometry)
-    (hvalid : geom.ValidForNIKE nike) : NIKESphinxScheme where
-  toSphinx := nikeSphinxCore nike geom
+noncomputable def nikeSphinxSchemeOf (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
+    (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
+    (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength) : NIKESphinxScheme where
+  toSphinx := nikeSphinxCore nike cipher macS kdfS streamS geom
   Envelope := nike.PublicKey
   parseEnvelope := fun pkt =>
     (nike.decodePublicKey (toVecN nike.publicKeySize ((ofVector pkt).extract 2 (2 + nike.publicKeySize)))).getD default
@@ -979,8 +1021,8 @@ noncomputable def nikeSphinxSchemeOf (nike : NIKE) (geom : Geometry)
   envelope_indep := fun hop0 hop1 rest0 rest1 filler0 filler1 payload0 payload1 st pkt0 pkt1
       st0' st1' h0 h1 =>
     congrArg (fun b => (nike.decodePublicKey (toVecN nike.publicKeySize b)).getD default)
-      (wrapNIKE_envelope_indep nike geom hop0 hop1 rest0 rest1 filler0 filler1 payload0 payload1
-        st pkt0 pkt1 st0' st1' hvalid h0 h1)
+      (wrapNIKE_envelope_indep nike cipher macS kdfS streamS geom hop0 hop1 rest0 rest1 filler0
+        filler1 payload0 payload1 st pkt0 pkt1 st0' st1' hvalid hmactag h0 h1)
   nike := nike
 
 /-- Build a `NIKESphinxScheme` for whatever NIKE `geom.scheme` names, resolved through
@@ -991,7 +1033,12 @@ carries the size information this file needs, in its own `publicKeySize`/`privat
 adds beyond the original axiom-based version: `geom` must actually agree with `nike` on the packet
 layout constants (`geom.ValidForNIKE nike`, decidable since it's just `Nat` equalities) — true of
 any `geom` obtained from `Geometry.ofNIKE name ...` for this same `name`, and rejected explicitly
-(rather than silently trusted) otherwise. -/
+(rather than silently trusted) otherwise.
+
+The one place that picks a concrete cryptographic stack: AEZ/HMAC-SHA256/HKDF-SHA256-Expand/
+AES-256-CTR, matching this codebase's `sphinx_nike_vectors.json` — `nikeSphinxSchemeOf` underneath
+is fully generic over any `WideBlockCipher`/`MAC`/`KDF`/`StreamCipher`, this is just the one default
+choice a caller who only knows a NIKE's name actually needs. -/
 noncomputable def nikeSphinxScheme (geom : Geometry) : Except String NIKESphinxScheme :=
   match geom.scheme with
   | .inr name => throw s!"sphinx: geometry scheme {name} is a KEM, not a NIKE"
@@ -999,7 +1046,11 @@ noncomputable def nikeSphinxScheme (geom : Geometry) : Except String NIKESphinxS
     match CryptWalker.NIKE.byName name with
     | none => throw s!"sphinx: NIKE scheme {name} not implemented"
     | some nike =>
-      if hvalid : geom.ValidForNIKE nike then pure (nikeSphinxSchemeOf nike geom hvalid)
+      if hvalid : geom.ValidForNIKE nike then
+        pure (nikeSphinxSchemeOf nike CryptWalker.WideBlockCipher.AEZ.aez
+          CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+          CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+          CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR geom hvalid rfl)
       else throw s!"sphinx: geometry is not valid for NIKE scheme {name}"
 
 end CryptWalker.Sphinx.NIKESphinx

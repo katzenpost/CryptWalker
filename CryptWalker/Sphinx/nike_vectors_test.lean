@@ -68,6 +68,11 @@ def toVec32 (b : ByteArray) : Option (Vector UInt8 32) :=
 /-- The vectors were built by Go against `nike/x25519`, i.e. the ladder implementation. -/
 private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
 
+private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
+private def macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+private def kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+private def streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
+
 def parseNode (j : Json) : Except String NodeParam := do
   let pk ← field j "PrivateKey"
   match toVec32 pk with
@@ -113,7 +118,7 @@ def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   for i in [0:n] do
     if !stop then
       let node := v.nodes[i]!
-      match unwrapNIKE x25519Nike geom (ofVector node.privateKey) pkt with
+      match unwrapNIKE x25519Nike wbCipher macS kdfS streamS geom (ofVector node.privateKey) pkt with
       | .error e =>
         IO.eprintln s!"    hop {i}: unwrap failed: {e}"
         ok := false; stop := true

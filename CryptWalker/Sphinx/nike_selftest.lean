@@ -35,6 +35,13 @@ open CryptWalker.Util.Bytes (ofVector)
 
 private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
 
+-- As `kem_selftest.lean`: the four crypto primitives `nikeSphinxCore` now takes explicitly rather
+-- than wiring up internally.
+private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
+private def macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
+private def kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
+private def streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
+
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)
   pure (Vector.ofFn fun i : Fin n => bs[i.val]!)
@@ -81,7 +88,7 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
   for i in [0:n] do
     if !stop then
       let node := nodes[i]!
-      match unwrapNIKE x25519Nike geom (ofVector node.priv) pkt with
+      match unwrapNIKE x25519Nike wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
       | .error e =>
         IO.eprintln s!"  hop {i}: unwrap failed: {e}"
         ok := false
@@ -120,7 +127,7 @@ def runRound (geom : Geometry) : IO Bool := do
   let path ← buildPath nodes
   let clientPriv ← randomVector 32
   let payload ← randomBytes geom.forwardPayloadLength
-  match newNIKEPacket x25519Nike geom (ofVector clientPriv) ByteArray.empty path payload with
+  match newNIKEPacket x25519Nike wbCipher macS kdfS streamS geom (ofVector clientPriv) ByteArray.empty path payload with
   | .error e =>
     IO.eprintln s!"newNIKEPacket failed: {e}"
     pure false
@@ -140,7 +147,7 @@ def runFillerRound : IO Bool := do
   let clientPriv ← randomVector 32
   let payload ← randomBytes geom.forwardPayloadLength
   let filler ← randomBytes ((geom.nrHops - 3) * geom.perHopRoutingInfoLength)
-  match newNIKEPacket x25519Nike geom (ofVector clientPriv) filler path payload with
+  match newNIKEPacket x25519Nike wbCipher macS kdfS streamS geom (ofVector clientPriv) filler path payload with
   | .error e =>
     IO.eprintln s!"filler round: newNIKEPacket failed: {e}"
     pure false
@@ -150,7 +157,7 @@ def runFillerRound : IO Bool := do
 instead of calling `newNIKEPacket` directly — confirms the abstract-interface unification
 actually produces a packet `unwrapNIKE` accepts, not just that it typechecks. -/
 def runAbstractWrapRound (geom : Geometry) : IO Bool := do
-  let scheme := nikeSphinxCore x25519Nike geom
+  let scheme := nikeSphinxCore x25519Nike wbCipher macS kdfS streamS geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seed ← randomVector 32
@@ -166,7 +173,7 @@ def runAbstractWrapRound (geom : Geometry) : IO Bool := do
 path order, recovers the payload from a `wrap`-built packet in one call — no per-hop
 bookkeeping, unlike `unwrapAll`. -/
 def runCompletenessRound (geom : Geometry) : IO Bool := do
-  let scheme := nikeSphinxCore x25519Nike geom
+  let scheme := nikeSphinxCore x25519Nike wbCipher macS kdfS streamS geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seed ← randomVector 32
@@ -177,7 +184,7 @@ def runCompletenessRound (geom : Geometry) : IO Bool := do
     pure false
   | .ok pkt _ =>
     let privKeys := (nodes.map (fun n => ofVector n.priv)).toList
-    match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapNIKE x25519Nike geom) privKeys (ofVector pkt) with
+    match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapNIKE x25519Nike wbCipher macS kdfS streamS geom) privKeys (ofVector pkt) with
     | .error e =>
       IO.eprintln s!"completeness: unwrapChainAux failed: {e}"
       pure false
@@ -194,7 +201,7 @@ def runCompletenessRound (geom : Geometry) : IO Bool := do
 /-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
 round-trip through `unwrapNIKE`/`SURB.decryptSURBPayload`, not just that they typecheck. -/
 def runAbstractSURBRound (geom : Geometry) : IO Bool := do
-  let scheme := nikeSphinxCore x25519Nike geom
+  let scheme := nikeSphinxCore x25519Nike wbCipher macS kdfS streamS geom
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes true
   let seeds ← (List.range 3).toArray.mapM (fun _ => randomVector 32)
@@ -221,7 +228,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapNIKE x25519Nike geom (ofVector node.priv) pkt with
+          match unwrapNIKE x25519Nike wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -259,7 +266,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
   let clientSeed ← randomVector 32
   let kp1 ← randomVector 32
   let kp2 ← randomVector 32
-  match newNIKESURB x25519Nike geom (ofVector clientSeed) (kp1 ++ kp2) ByteArray.empty path with
+  match newNIKESURB x25519Nike macS kdfS streamS geom (ofVector clientSeed) (kp1 ++ kp2) ByteArray.empty path with
   | .error e =>
     IO.eprintln s!"newNIKESURB failed: {e}"
     pure false
@@ -285,7 +292,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapNIKE x25519Nike geom (ofVector node.priv) pkt with
+          match unwrapNIKE x25519Nike wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
