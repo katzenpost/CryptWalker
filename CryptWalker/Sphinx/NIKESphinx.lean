@@ -1443,6 +1443,81 @@ private theorem newNIKEPacket_unfold (nike : NIKE) (cipher : WideBlockCipher) (m
     rw [hfeq] at hfx
     rw [← hfx, htl]
 
+/-- **The packet arriving at hop `k`** (`0 ≤ k < nrHops`), assembled from `createHeader`'s
+`groupElements`/`riPadding`/loop3 trace `s` and `newNIKEPacket`'s payload trace `t`. Mirrors
+`KEMSphinx.hopPacket`, with `groupElements[k]!` (this hop's re-blinded group element, width
+`nike.publicKeySize`) in place of `kemElements[k]!` (an independent per-hop ciphertext, width
+`kem.ciphertextSize`) — the one structural difference between the two schemes' wire formats. -/
+private def hopPacket (groupElements riPadding : Array ByteArray) (s : Nat → ByteArray × ByteArray)
+    (t : Nat → ByteArray) (nrHops k : Nat) : ByteArray :=
+  v0AD ++ groupElements[k]! ++ ((s (nrHops - k)).1 ++ (if k > 0 then riPadding[k - 1]! else ByteArray.empty))
+    ++ (s (nrHops - k)).2 ++ t (nrHops - k)
+
+/-- **`hopPacket`'s size**: exactly `geom.packetLength`, for every `k < nrHops` — the routing-info
+slot (`R(k) ++ P(k-1)`) is always exactly `geom.routingInfoLength` bytes regardless of `k`, matching
+the classical Sphinx invariant that the wire format never changes size as a packet is forwarded.
+Mirrors `KEMSphinx.hopPacket_size`. -/
+private theorem hopPacket_size (nike : NIKE) (macS : MAC) (geom : Geometry) (path : Array PathHop)
+    (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
+    (sprpKeys : Array SPRPKey)
+    (nrHops : Nat) (s : Nat → ByteArray × ByteArray) (t : Nat → ByteArray)
+    (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
+    (hs0size : (s 0).1.size = (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength)
+    (hstep : ∀ j (hj : j < nrHops), ∃ riFragment0,
+        commandsToBytes
+          (if (nrHops - 1 - j) == nrHops - 1 then geom.perHopRoutingInfoLength
+           else geom.perHopRoutingInfoLength - geom.nextNodeHopLength)
+          (path[nrHops - 1 - j]!).commands = Except.ok riFragment0 ∧
+        (s (j + 1)).1 = xorBytes (zeroPadTo geom.perHopRoutingInfoLength
+            (if (nrHops - 1 - j) == nrHops - 1 then riFragment0
+             else riFragment0 ++ (RoutingCommand.nextNodeHop (path[nrHops - 1 - j + 1]!).id
+               (toVec32 (s j).2)).toBytes) ++ (s j).1) (riKeyStream[nrHops - 1 - j]!) ∧
+        (s (j + 1)).2 = ofVector (macS.mac (ofVector (keys[nrHops - 1 - j]!).headerMAC)
+          (v0AD ++ groupElements[nrHops - 1 - j]! ++ (s (j + 1)).1
+            ++ (if nrHops - 1 - j > 0 then riPadding[nrHops - 1 - j - 1]! else ByteArray.empty))))
+    (hgnsize : groupElements.size = nrHops)
+    (hgesize : ∀ j (hj : j < groupElements.size), (groupElements[j]'hj).size = nike.publicKeySize)
+    (hpadsize : ∀ i (hi : i < nrHops), riPadding[i]!.size = (i + 1) * geom.perHopRoutingInfoLength)
+    (htsize : ∀ j (hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
+    (ht0size : (t 0).size = geom.payloadTagLength + geom.forwardPayloadLength)
+    (hsprp : sprpKeys.size = nrHops) (hgen : nrHops ≤ geom.nrHops) (k : Nat) (hk : k < nrHops) :
+    (hopPacket groupElements riPadding s t nrHops k).size = geom.packetLength := by
+  obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
+  have hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength := by omega
+  have hssize := createHeader_s_size nike macS geom path keys groupElements riKeyStream riPadding
+    hperhop hnnh nrHops s hstep
+  have hR : (s (nrHops - k)).1.size
+      = (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength + (nrHops - k) * geom.perHopRoutingInfoLength :=
+    hs0size ▸ (hssize (nrHops - k) (by omega)).1
+  have hM : (s (nrHops - k)).2.size = macS.tagSize := (hssize (nrHops - k) (by omega)).2 (by omega)
+  have hcts : groupElements[k]!.size = nike.publicKeySize := by
+    rw [getElem!_pos groupElements k (by omega)]; exact hgesize k (by omega)
+  have hv0 : v0AD.size = 2 := rfl
+  have hcombine : (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
+      + nrHops * geom.perHopRoutingInfoLength = geom.perHopRoutingInfoLength * geom.nrHops := by
+    rw [← Nat.add_mul, Nat.sub_add_cancel hgen, Nat.mul_comm]
+  have hnrHmul : (nrHops - k) * geom.perHopRoutingInfoLength + k * geom.perHopRoutingInfoLength
+      = nrHops * geom.perHopRoutingInfoLength := by
+    rw [← Nat.add_mul]; congr 1; omega
+  have hadL : adLength = 2 := rfl
+  have hmacL : macLength = 32 := rfl
+  unfold hopPacket
+  simp only [ByteArray.size_append]
+  rw [hcts, hM, hmactag, htsize (nrHops - k) (by omega), ht0size, hv0, hR]
+  simp only [hheader, hpacket, hrouting, hadL, hmacL] at *
+  split
+  · next hk0 =>
+    rw [hpadsize (k - 1) (by omega)]
+    have : (k - 1 + 1) = k := by omega
+    rw [this]
+    omega
+  · next hk0 =>
+    simp only [byteArray_empty_size]
+    have hkeq0 : k = 0 := by omega
+    rw [hkeq0] at hnrHmul ⊢
+    simp only [Nat.sub_zero, Nat.zero_mul, Nat.add_zero] at hnrHmul ⊢
+    omega
+
 open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
 
 /-- **`wrapNIKE`**: `Sphinx.Interface.wrap` for `NIKESphinxScheme` — `newNIKEPacket`, drawing the
