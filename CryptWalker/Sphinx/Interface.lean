@@ -106,12 +106,22 @@ structure Sphinx where
   newPacketFromSURB : Vector UInt8 geometry.surbLength → ByteArray →
     Except String (ByteArray × Vector UInt8 32)
 
-  /-- **Completeness**: any packet `wrap` builds, `unwrap` can undo. -/
+  /-- **Completeness**: any packet `wrap` builds, `unwrap` can undo — given that `path` is
+  well-formed: no hop's own `commands` list already contains one of the wire-level sentinel
+  values `wrap`'s own internals rely on (`null`, the zero-byte padding terminator `parseAll`
+  stops at; `nextNodeHop`, the forwarding marker each non-terminal hop's header fragment gets
+  appended after its own commands; `surbReply`, which only means something for an actual SURB
+  reply flow). A hop's own commands are meant to carry application-level directives
+  (`recipient`/`nodeDelay`/a real `surbReply` on a genuine SURB path) — never these
+  protocol-internal markers, which nothing before `wrap` currently rejects on the caller's
+  behalf. -/
   unwrap_complete : ∀ (path : List Types.PathHop) (privKeys : List PrivateKey)
       (filler : ByteArray) (payload : Vector UInt8 geometry.forwardPayloadLength) (st : State)
       (pkt : Vector UInt8 geometry.packetLength) (st' : State),
     path ≠ [] →
     path.map (·.publicKey) = privKeys.map derivePublicKey →
+    (∀ hop ∈ path, ∀ c ∈ hop.commands, c ≠ .null ∧ (∀ id m, c ≠ .nextNodeHop id m) ∧
+      (∀ id, c ≠ .surbReply id)) →
     wrap path filler payload st = .ok pkt st' →
     unwrapChainAux unwrap privKeys (ofVector pkt) = .ok (some (ofVector payload))
 
@@ -164,7 +174,7 @@ instance : Inhabited Sphinx := ⟨{
   newSURB := fun _ _ => pure (Vector.emptyWithCapacity 0, ByteArray.empty)
   newPacketFromSURB := fun _ _ => .ok (ByteArray.empty, default)
   unwrap_complete := by
-    intro path privKeys filler payload st pkt st' _hpath _hkeys hwrap
+    intro path privKeys filler payload st pkt st' _hpath _hkeys _hcmds hwrap
     cases hwrap
 }⟩
 
