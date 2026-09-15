@@ -1354,6 +1354,95 @@ theorem newNIKEPacket_size (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     simp only [byteArray_mk_size, Array.size_replicate]
     omega
 
+/-- `newNIKEPacket`'s payload loop's one-step accumulator update — never fails, so its `forIn`
+collapses to a bare `List.foldl` under `List.forIn_pure_yield_eq_foldl`. Mirrors
+`KEMSphinx.payloadEncryptStep` (the payload-encryption loop is byte-identical between the two
+schemes: both layer `sprpKeys` back-to-front over the tag-prefixed payload). -/
+private def payloadEncryptStep (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+    (b : ByteArray) (iRev : Nat) : ByteArray :=
+  let k := sprpKeys[sprpKeys.size - 1 - iRev]!
+  cipher.encrypt k.key.toArray (ofVector k.iv) b
+
+/-- **The full trace of `newNIKEPacket`'s payload-encryption loop.** -/
+private theorem newNIKEPacket_payload_trace (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+    (init : ByteArray) :
+    ∃ t : Nat → ByteArray, t 0 = init ∧
+      t sprpKeys.size = (List.range' 0 sprpKeys.size).foldl (payloadEncryptStep cipher sprpKeys) init ∧
+      ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j := by
+  obtain ⟨t, ht0, htl, hstep⟩ := CryptWalker.Sphinx.Common.List.foldl_exists_trace
+    (List.range' 0 sprpKeys.size) (payloadEncryptStep cipher sprpKeys) init
+  refine ⟨t, ht0, by simpa using htl, ?_⟩
+  intro j hj
+  have hj' : j < (List.range' 0 sprpKeys.size).length := by simpa using hj
+  simpa using hstep j hj'
+
+/-- **The payload-layering invariant, at the content level**: writing `payloadAt k := t
+(sprpKeys.size - k)` for the trace above, hop `k` recovers `payloadAt (k+1)` from `payloadAt k`
+by decrypting with exactly *its own* `sprpKeys[k]!` — the SPRP-layering fact `unwrapNIKE`'s
+payload decryption at each hop needs. -/
+private theorem newNIKEPacket_payload_content (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+    (t : Nat → ByteArray)
+    (hstep : ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j)
+    (k : Nat) (hk : k < sprpKeys.size) :
+    t (sprpKeys.size - k) = cipher.encrypt (sprpKeys[k]!).key.toArray (ofVector (sprpKeys[k]!).iv)
+      (t (sprpKeys.size - (k + 1))) := by
+  have hstepk := hstep (sprpKeys.size - k - 1) (by omega)
+  rw [show sprpKeys.size - k - 1 + 1 = sprpKeys.size - k from by omega] at hstepk
+  unfold payloadEncryptStep at hstepk
+  rw [show sprpKeys.size - 1 - (sprpKeys.size - k - 1) = k from by omega] at hstepk
+  rw [hstepk, show sprpKeys.size - (k + 1) = sprpKeys.size - k - 1 from by omega]
+
+/-- The payload trace never changes size — `cipher.encrypt` preserves length at every step. -/
+private theorem newNIKEPacket_payload_size_trace (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
+    (t : Nat → ByteArray)
+    (hstep : ∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j) :
+    ∀ j (hj : j ≤ sprpKeys.size), (t j).size = (t 0).size := by
+  intro j hj
+  induction j with
+  | zero => rfl
+  | succ j ih =>
+    rw [hstep j (by omega)]
+    unfold payloadEncryptStep
+    rw [cipher.encrypt_size]
+    exact ih (by omega)
+
+/-- **`newNIKEPacket`, fully unfolded to content.** As `createHeader_hdr_size`'s own opening moves:
+packages `createHeader`'s own success and the payload-encryption trace
+(`newNIKEPacket_payload_trace`) behind one hypothesis, in the shape a successful `newNIKEPacket`
+call actually unfolds to. Mirrors `KEMSphinx.newKEMPacket_unfold`. -/
+private theorem newNIKEPacket_unfold (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
+    (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (clientPrivateKey : ByteArray)
+    (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
+    (h : newNIKEPacket nike cipher macS kdfS streamS geom clientPrivateKey filler path payload
+      = Except.ok pkt) :
+    payload.size = geom.forwardPayloadLength ∧
+    ∃ (hdr : ByteArray) (sprpKeys : Array SPRPKey) (t : Nat → ByteArray),
+      createHeader nike macS kdfS streamS geom clientPrivateKey filler path = Except.ok (hdr, sprpKeys) ∧
+      t 0 = (⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload ∧
+      (∀ j (hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j) ∧
+      pkt = hdr ++ t sprpKeys.size := by
+  unfold newNIKEPacket at h
+  dsimp only at h
+  split at h
+  case isTrue =>
+    have h' : (Except.error
+        s!"sphinx: invalid payload length: {payload.size}, expected {geom.forwardPayloadLength}" :
+        Except String ByteArray) = Except.ok pkt := h
+    injection h'
+  case isFalse =>
+    rename_i hpay
+    simp only [Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size, Nat.sub_zero,
+      Nat.add_sub_cancel, Nat.div_one, List.forIn_pure_yield_eq_foldl, pure_bind] at h
+    obtain ⟨x, hx, hfx⟩ := CryptWalker.Sphinx.Common.Except.eq_ok_of_bind_eq_ok h
+    obtain ⟨t, ht0, htl, hstep⟩ := newNIKEPacket_payload_trace cipher x.2
+      ((⟨Array.replicate geom.payloadTagLength 0⟩ : ByteArray) ++ payload)
+    refine ⟨by omega, x.1, x.2, t, hx, ht0, hstep, ?_⟩
+    injection hfx with hfx
+    have hfeq : (fun b a => cipher.encrypt x.2[x.2.size - 1 - a]!.key.toArray
+        (ofVector x.2[x.2.size - 1 - a]!.iv) b) = payloadEncryptStep cipher x.2 := rfl
+    rw [hfeq] at hfx
+    rw [← hfx, htl]
+
 open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
 
 /-- **`wrapNIKE`**: `Sphinx.Interface.wrap` for `NIKESphinxScheme` — `newNIKEPacket`, drawing the
