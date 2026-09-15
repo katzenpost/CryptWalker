@@ -129,8 +129,8 @@ lake exe CryptWalker.Cipher.test        # AES-256-GCM-SIV vectors from hpqc
 lake exe CryptWalker.Sign.test
 lake exe CryptWalker.Sign.blinded_test  # blinded Ed25519 vectors from hpqc
 lake exe CryptWalker.BACAP.test         # BACAP vectors from hpqc
-lake exe CryptWalker.Sphinx.Crypto.test      # Sphinx Hash/MAC/Stream/KDF/ChaCha20 vectors from katzenpost
-lake exe CryptWalker.Sphinx.Crypto.aez_test  # AEZ v5 (Sphinx's SPRP) vectors from katzenpost
+lake exe CryptWalker.Sphinx.crypto_test      # Sphinx Hash/MAC/Stream/KDF/ChaCha20 vectors from katzenpost
+lake exe CryptWalker.WideBlockCipher.test    # AEZ v5 (Sphinx's SPRP) vectors from katzenpost
 lake exe CryptWalker.Sphinx.commands_test    # Sphinx routing-command wire-format vectors from katzenpost
 lake exe CryptWalker.Sphinx.nike_selftest    # NIKE-Sphinx round-trip self-tests
 lake exe CryptWalker.Sphinx.kem_selftest     # KEM-Sphinx round-trip self-tests

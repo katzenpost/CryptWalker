@@ -23,6 +23,11 @@ def ofVector {n : Nat} (v : Vector UInt8 n) : ByteArray := ⟨v.toArray⟩
 @[simp] theorem size_ofVector {n : Nat} (v : Vector UInt8 n) : (ofVector v).size = n := by
   simp [ofVector, ByteArray.size]
 
+/-- The reverse of `ofVector`: reinterpret a `ByteArray` as a fixed-width vector, total via
+`ByteArray.get!`'s default-on-out-of-range behavior (never exercised by a caller that already
+knows its input is exactly `n` bytes). -/
+def toVecN (n : Nat) (a : ByteArray) : Vector UInt8 n := Vector.ofFn fun i : Fin n => a.get! i.val
+
 /-- The left half of a concatenation. -/
 theorem extract_append_left (a b : ByteArray) : (a ++ b).extract 0 a.size = a := by
   apply ByteArray.ext_getElem

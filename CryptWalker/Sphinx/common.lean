@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import CryptWalker.Sphinx.geometry
 import CryptWalker.Sphinx.commands
-import CryptWalker.Sphinx.Crypto.hmac
+import CryptWalker.MAC.HMAC
 import CryptWalker.Util.Bytes
 
 /-! # Helpers shared by NIKE-Sphinx and KEM-Sphinx
@@ -18,7 +18,7 @@ namespace CryptWalker.Sphinx.Common
 
 open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
-open CryptWalker.Sphinx.Crypto.HMAC (hmacSha256)
+open CryptWalker.MAC.HMAC (hmacSha256)
 open CryptWalker.Util.Bytes (ofVector size_ofVector extract_append_le extract_append_of_le
   extract_append_of_ge append_extract)
 

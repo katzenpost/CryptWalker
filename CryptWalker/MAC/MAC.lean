@@ -3,10 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Sphinx.Crypto.hmac
-import CryptWalker.Sphinx.common
-
-namespace CryptWalker.Sphinx.Crypto.MAC
+namespace CryptWalker.MAC
 
 /-! # Message authentication codes, generically
 
@@ -32,11 +29,4 @@ instance : Inhabited MAC := ⟨{
   mac := fun _ _ => #v[]
 }⟩
 
-/-- HMAC-SHA256, as a `MAC`: Sphinx's own `mac`/`hmacSha256` wrapper (`Common.mac`), keyed via
-`toVecN` to bridge the plain-`ByteArray` key this structure wants. -/
-def hmacSha256MAC : MAC where
-  keySize := 32
-  tagSize := 32
-  mac := fun key msg => CryptWalker.Sphinx.Common.mac (CryptWalker.Sphinx.Common.toVecN 32 key) msg
-
-end CryptWalker.Sphinx.Crypto.MAC
+end CryptWalker.MAC

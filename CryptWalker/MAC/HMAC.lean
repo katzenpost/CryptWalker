@@ -4,15 +4,13 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import CryptWalker.Hash.Sha2
+import CryptWalker.MAC.MAC
 
-namespace CryptWalker.Sphinx.Crypto.HMAC
+namespace CryptWalker.MAC.HMAC
 
 open CryptWalker.Hash.Sha2
 
 /-! # HMAC-SHA256
-
-Sphinx's header MAC (`crypto.NewMAC` in `katzenpost/core/sphinx/internal/crypto/crypto.go`):
-`hmac.New(sha256.New, key)`, used at the full 32-byte tag width (`MACLength = 32`).
 
 RFC 2104, sized to SHA-256's 64-byte block, calling `Sha256.hash` directly. -/
 
@@ -32,4 +30,11 @@ def hmacSha256 (key msg : ByteArray) : Vector UInt8 32 :=
   let key := if key.size > blockSize then ⟨(hash32 key).toArray⟩ else key
   hash32 (xorPad key 0x5c ++ ⟨(hash32 (xorPad key 0x36 ++ msg)).toArray⟩)
 
-end CryptWalker.Sphinx.Crypto.HMAC
+/-- HMAC-SHA256, as a `MAC`: `hmacSha256`'s own signature already matches `MAC.mac`'s shape
+exactly, no `ByteArray`/`Vector` reinterpretation needed. -/
+def hmacSha256MAC : CryptWalker.MAC.MAC where
+  keySize := 32
+  tagSize := 32
+  mac := hmacSha256
+
+end CryptWalker.MAC.HMAC

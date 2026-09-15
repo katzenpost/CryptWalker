@@ -12,12 +12,14 @@ import CryptWalker.Sphinx.common
 import CryptWalker.Sphinx.nike_sphinx_theorems
 import CryptWalker.Sphinx.kem_sphinx
 import CryptWalker.Sphinx.surb
-import CryptWalker.Sphinx.Crypto.stream
 import CryptWalker.WideBlockCipher.WideBlockCipher
 import CryptWalker.WideBlockCipher.AEZ
-import CryptWalker.Sphinx.Crypto.mac
-import CryptWalker.Sphinx.Crypto.generic_kdf
-import CryptWalker.Sphinx.Crypto.stream_cipher
+import CryptWalker.MAC.MAC
+import CryptWalker.KDF.KDF
+import CryptWalker.KDF.HKDF
+import CryptWalker.Sphinx.kdf
+import CryptWalker.StreamCipher.StreamCipher
+import CryptWalker.StreamCipher.AES256CTR
 import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Schemes
 import CryptWalker.Hash.Sha512
@@ -32,9 +34,9 @@ open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Common
 open CryptWalker.Sphinx.NIKESphinx (HopKeys deriveHopKeys)
 open CryptWalker.WideBlockCipher (WideBlockCipher)
-open CryptWalker.Sphinx.Crypto.MAC (MAC)
-open CryptWalker.Sphinx.Crypto.GenericKDF (KDF)
-open CryptWalker.Sphinx.Crypto.StreamCipher (StreamCipher)
+open CryptWalker.MAC (MAC)
+open CryptWalker.KDF (KDF)
+open CryptWalker.StreamCipher (StreamCipher)
 open CryptWalker.KEM.KEM (KEM)
 open CryptWalker.Hash.Sha512 (sha512_256)
 open CryptWalker.Util.Bytes (ofVector extract_append_le extract_append_of_le extract_append_of_ge
@@ -2611,12 +2613,12 @@ def kemSphinxScheme (geom : Geometry) : Except String KEMSphinxScheme :=
     | none => throw s!"sphinx: KEM scheme {name} not implemented"
     | some kem =>
       if hvalid : geom.ValidForKEM kem then
-        if hmactag : CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC.tagSize = macLength then
+        if hmactag : CryptWalker.MAC.HMAC.hmacSha256MAC.tagSize = macLength then
           if h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength then
             pure (kemSphinxSchemeOf kem CryptWalker.WideBlockCipher.AEZ.aez
-              CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
-              CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
-              CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR geom hvalid hmactag h16)
+              CryptWalker.MAC.HMAC.hmacSha256MAC
+              CryptWalker.KDF.HKDF.hkdfSha256Expand
+              CryptWalker.StreamCipher.AES256CTR.aes256CTR geom hvalid hmactag h16)
           else throw s!"sphinx: geometry's payload tag/forward payload too short for scheme {name}"
         else throw "sphinx: internal error: hmacSha256MAC.tagSize ≠ macLength"
       else throw s!"sphinx: geometry is not valid for KEM scheme {name}"
@@ -2646,6 +2648,5 @@ theorem unwrapKEM_routingInfoBlock_not_wrap_resistant (streamS : StreamCipher) (
     (target : ByteArray) :
     ∃ raw : ByteArray, xorBytes raw (streamS.keystream key iv target.size) = target :=
   xorBytes_achieves_any_target (streamS.keystream key iv target.size) target
-
 
 end CryptWalker.Sphinx.KEMSphinx

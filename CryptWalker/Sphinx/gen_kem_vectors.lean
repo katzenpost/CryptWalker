@@ -34,9 +34,9 @@ open CryptWalker.Util.Bytes (ofVector)
 private def x25519Kem := CryptWalker.KEM.kemX25519Ladder
 
 private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
-private def macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
-private def kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
-private def streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
+private def macS := CryptWalker.MAC.HMAC.hmacSha256MAC
+private def kdfS := CryptWalker.KDF.HKDF.hkdfSha256Expand
+private def streamS := CryptWalker.StreamCipher.AES256CTR.aes256CTR
 
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)

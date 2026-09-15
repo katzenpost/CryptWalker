@@ -12,8 +12,8 @@ from these plus a NIKE/KEM scheme's key/ciphertext size, in `Geometry.lean`. Two
 
 * `katzenpost/core/sphinx/constants/constants.go`
 * `katzenpost/core/sphinx/internal/crypto/crypto.go` (the crypto-primitive-derived sizes) —
-  cross-referenced against the ported primitives in `Sphinx.Crypto` rather than restated as
-  independent literals, so the two can't silently drift apart. -/
+  cross-referenced against the ported primitives (`CryptWalker.MAC`/`KDF`/`StreamCipher`) rather
+  than restated as independent literals, so the two can't silently drift apart. -/
 
 /-- `constants.NodeIDLength`. -/
 def nodeIDLength : Nat := 32
@@ -28,13 +28,13 @@ def surbIDLength : Nat := 16
 with. -/
 def commandTagLength : Nat := 1
 
-/-- `internal/crypto.MACLength`: `HMAC.hmacSha256`'s full tag width. -/
+/-- `internal/crypto.MACLength`: `MAC.HMAC.hmacSha256`'s full tag width. -/
 def macLength : Nat := 32
 
-/-- `internal/crypto.StreamIVLength`: `Crypto.Stream.keystream`'s IV width. -/
+/-- `internal/crypto.StreamIVLength`: `StreamCipher.AES256CTR.keystream`'s IV width. -/
 def streamIVLength : Nat := 16
 
-/-- `internal/crypto.SPRPKeyLength`/`SPRPIVLength`: `Crypto.AEZ`'s key/nonce. -/
+/-- `internal/crypto.SPRPKeyLength`/`SPRPIVLength`: `WideBlockCipher.AEZ`'s key/nonce. -/
 def sprpKeyLength : Nat := 48
 def sprpIVLength : Nat := streamIVLength
 

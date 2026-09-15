@@ -11,9 +11,9 @@ import CryptWalker.Sphinx.geometry
 import CryptWalker.Sphinx.indistinguishability
 import CryptWalker.Sphinx.integrity
 import CryptWalker.WideBlockCipher.WideBlockCipher
-import CryptWalker.Sphinx.Crypto.mac
-import CryptWalker.Sphinx.Crypto.generic_kdf
-import CryptWalker.Sphinx.Crypto.stream_cipher
+import CryptWalker.MAC.MAC
+import CryptWalker.KDF.KDF
+import CryptWalker.StreamCipher.StreamCipher
 import CryptWalker.Util.Bytes
 
 namespace CryptWalker.Sphinx.Interface
@@ -94,9 +94,9 @@ structure Sphinx where
   header integrity, a KDF for per-hop keys, a stream cipher for routing-info encryption. Kept
   abstract so swapping e.g. AEZ for another wide-block cipher needs no change below. -/
   cipher : CryptWalker.WideBlockCipher.WideBlockCipher
-  mac    : CryptWalker.Sphinx.Crypto.MAC.MAC
-  kdf    : CryptWalker.Sphinx.Crypto.GenericKDF.KDF
-  stream : CryptWalker.Sphinx.Crypto.StreamCipher.StreamCipher
+  mac    : CryptWalker.MAC.MAC
+  kdf    : CryptWalker.KDF.KDF
+  stream : CryptWalker.StreamCipher.StreamCipher
 
   /-- Raw bytes — width depends on which NIKE/KEM this scheme wraps, not fixed here. -/
   derivePublicKey : PrivateKey → ByteArray

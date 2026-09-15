@@ -5,10 +5,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Lean.Data.Json
 import CryptWalker.Hash.Sha512
-import CryptWalker.Sphinx.Crypto.hmac
-import CryptWalker.Sphinx.Crypto.stream
-import CryptWalker.Sphinx.Crypto.kdf
-import CryptWalker.Sphinx.Crypto.chacha20
+import CryptWalker.MAC.HMAC
+import CryptWalker.StreamCipher.AES256CTR
+import CryptWalker.Sphinx.kdf
+import CryptWalker.Cipher.ChaCha20
 import CryptWalker.Util.newhex
 
 /-!
@@ -26,10 +26,10 @@ checked here alongside its siblings.
 open Lean
 open CryptWalker.Util.newhex
 open CryptWalker.Hash.Sha512 (sha512_256)
-open CryptWalker.Sphinx.Crypto.ChaCha20 (keystream32)
-open CryptWalker.Sphinx.Crypto.HMAC (hmacSha256)
-open CryptWalker.Sphinx.Crypto.Stream (keystream)
-open CryptWalker.Sphinx.Crypto.KDF (sphinxKDF PacketKeys)
+open CryptWalker.Cipher.ChaCha20 (keystream32)
+open CryptWalker.MAC.HMAC (hmacSha256)
+open CryptWalker.StreamCipher.AES256CTR (keystream)
+open CryptWalker.Sphinx.KDF (sphinxKDF PacketKeys)
 
 def field (j : Json) (k : String) : Except String ByteArray := do
   let s ← (← j.getObjVal? k).getStr?

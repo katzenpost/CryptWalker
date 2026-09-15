@@ -44,9 +44,9 @@ private theorem x25519Nike_byName : CryptWalker.NIKE.byName "x25519-ladder" = so
 -- As `kem_selftest.lean`: the four crypto primitives `nikeSphinxCore` now takes explicitly rather
 -- than wiring up internally.
 private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
-private def macS := CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
-private def kdfS := CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
-private def streamS := CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR
+private def macS := CryptWalker.MAC.HMAC.hmacSha256MAC
+private def kdfS := CryptWalker.KDF.HKDF.hkdfSha256Expand
+private def streamS := CryptWalker.StreamCipher.AES256CTR.aes256CTR
 
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)

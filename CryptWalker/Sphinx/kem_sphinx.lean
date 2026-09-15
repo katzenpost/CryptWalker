@@ -11,12 +11,14 @@ import CryptWalker.Sphinx.sphinx
 import CryptWalker.Sphinx.common
 import CryptWalker.Sphinx.nike_sphinx_theorems
 import CryptWalker.Sphinx.surb
-import CryptWalker.Sphinx.Crypto.stream
 import CryptWalker.WideBlockCipher.WideBlockCipher
 import CryptWalker.WideBlockCipher.AEZ
-import CryptWalker.Sphinx.Crypto.mac
-import CryptWalker.Sphinx.Crypto.generic_kdf
-import CryptWalker.Sphinx.Crypto.stream_cipher
+import CryptWalker.MAC.MAC
+import CryptWalker.KDF.KDF
+import CryptWalker.KDF.HKDF
+import CryptWalker.Sphinx.kdf
+import CryptWalker.StreamCipher.StreamCipher
+import CryptWalker.StreamCipher.AES256CTR
 import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Schemes
 import CryptWalker.Hash.Sha512
@@ -31,9 +33,9 @@ open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Common
 open CryptWalker.Sphinx.NIKESphinx (HopKeys deriveHopKeys)
 open CryptWalker.WideBlockCipher (WideBlockCipher)
-open CryptWalker.Sphinx.Crypto.MAC (MAC)
-open CryptWalker.Sphinx.Crypto.GenericKDF (KDF)
-open CryptWalker.Sphinx.Crypto.StreamCipher (StreamCipher)
+open CryptWalker.MAC (MAC)
+open CryptWalker.KDF (KDF)
+open CryptWalker.StreamCipher (StreamCipher)
 open CryptWalker.KEM.KEM (KEM)
 open CryptWalker.Hash.Sha512 (sha512_256)
 open CryptWalker.Util.Bytes (ofVector extract_append_le extract_append_of_le extract_append_of_ge

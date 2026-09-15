@@ -22,7 +22,7 @@ TESTS := \
 	CryptWalker.Sign.test \
 	CryptWalker.Sign.blinded_test \
 	CryptWalker.BACAP.test \
-	CryptWalker.Sphinx.Crypto.test \
+	CryptWalker.Sphinx.crypto_test \
 	CryptWalker.WideBlockCipher.test \
 	CryptWalker.Sphinx.commands_test \
 	CryptWalker.Sphinx.nike_selftest \
@@ -103,7 +103,7 @@ test-bacap: build ## BACAP vectors from hpqc
 	@$(BIN)/CryptWalker-BACAP-test
 
 test-sphinx-crypto: build ## Sphinx primitive-layer vectors (hash/MAC/stream/KDF) from katzenpost
-	@$(BIN)/CryptWalker-Sphinx-Crypto-test
+	@$(BIN)/CryptWalker-Sphinx-crypto_test
 
 gen-sphinx-vectors: build ## build Sphinx packets with the Lean port, for cross-checking against katzenpost's Unwrap
 	@$(BIN)/CryptWalker-Sphinx-gen_nike_vectors

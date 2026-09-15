@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-namespace CryptWalker.Sphinx.Crypto.ChaCha20
+namespace CryptWalker.Cipher.ChaCha20
 
 /-! # ChaCha20 (original/Bernstein construction, 64-bit nonce)
 
@@ -70,4 +70,4 @@ which is all `GeneratePrivateKey` ever draws from it. -/
 def keystream32 (key : Array UInt8) : Array UInt8 :=
   (block key (Array.replicate 8 0) 0 0).extract 0 32
 
-end CryptWalker.Sphinx.Crypto.ChaCha20
+end CryptWalker.Cipher.ChaCha20

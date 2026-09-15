@@ -10,13 +10,15 @@ import CryptWalker.Sphinx.types
 import CryptWalker.Sphinx.sphinx
 import CryptWalker.Sphinx.common
 import CryptWalker.Sphinx.surb
-import CryptWalker.Sphinx.Crypto.kdf
-import CryptWalker.Sphinx.Crypto.chacha20
+import CryptWalker.Sphinx.kdf
+import CryptWalker.Cipher.ChaCha20
 import CryptWalker.WideBlockCipher.WideBlockCipher
 import CryptWalker.WideBlockCipher.AEZ
-import CryptWalker.Sphinx.Crypto.mac
-import CryptWalker.Sphinx.Crypto.generic_kdf
-import CryptWalker.Sphinx.Crypto.stream_cipher
+import CryptWalker.MAC.MAC
+import CryptWalker.KDF.KDF
+import CryptWalker.KDF.HKDF
+import CryptWalker.StreamCipher.StreamCipher
+import CryptWalker.StreamCipher.AES256CTR
 import CryptWalker.NIKE.NIKE
 import CryptWalker.NIKE.Schemes
 import CryptWalker.Sphinx.wrap_resistance
@@ -32,12 +34,12 @@ open CryptWalker.Sphinx.Geometry (Geometry)
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Common
-open CryptWalker.Sphinx.Crypto.KDF (PacketKeys)
-open CryptWalker.Sphinx.Crypto.ChaCha20 (keystream32)
+open CryptWalker.Sphinx.KDF (PacketKeys)
+open CryptWalker.Cipher.ChaCha20 (keystream32)
 open CryptWalker.WideBlockCipher (WideBlockCipher)
-open CryptWalker.Sphinx.Crypto.MAC (MAC)
-open CryptWalker.Sphinx.Crypto.GenericKDF (KDF)
-open CryptWalker.Sphinx.Crypto.StreamCipher (StreamCipher)
+open CryptWalker.MAC (MAC)
+open CryptWalker.KDF (KDF)
+open CryptWalker.StreamCipher (StreamCipher)
 open CryptWalker.NIKE.NIKE (NIKE telescopeElem telescopeSecret telescope_agree)
 open CryptWalker.Hash.Sha512 (sha512_256)
 open CryptWalker.Util.Bytes (ofVector extract_append_le extract_append_of_le extract_append_of_ge
@@ -201,10 +203,11 @@ structure HopKeys where
   deriving Inhabited
 
 /-- `sharedSecret` is whatever a NIKE's `encodeSharedSecret` produced (no fixed width assumed).
-Generic in `kdfS` via `GenericKDF.packetKeysFrom`, agreeing with the old hardcoded `deriveHopKeys`
-definitionally when `kdfS = GenericKDF.hkdfSha256Expand`. Shared with `kem_sphinx_theorems.lean`. -/
+Generic in `kdfS` via `Sphinx.KDF.packetKeysFrom`, agreeing with `Sphinx.KDF.sphinxKDF`
+definitionally when `kdfS = CryptWalker.KDF.HKDF.hkdfSha256Expand`. Shared with
+`kem_sphinx_theorems.lean`. -/
 def deriveHopKeys (kdfS : KDF) (sharedSecret : ByteArray) : HopKeys :=
-  let pk : PacketKeys := CryptWalker.Sphinx.Crypto.GenericKDF.packetKeysFrom kdfS sharedSecret
+  let pk : PacketKeys := CryptWalker.Sphinx.KDF.packetKeysFrom kdfS sharedSecret
   { headerMAC := pk.headerMAC
     headerEncryption := pk.headerEncryption
     headerEncryptionIV := pk.headerEncryptionIV
@@ -3000,12 +3003,12 @@ noncomputable def nikeSphinxScheme (geom : Geometry) : Except String NIKESphinxS
     | none => throw s!"sphinx: NIKE scheme {name} not implemented"
     | some nike =>
       if hvalid : geom.ValidForNIKE nike then
-        if hmactag : CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC.tagSize = macLength then
+        if hmactag : CryptWalker.MAC.HMAC.hmacSha256MAC.tagSize = macLength then
           if h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength then
             pure (nikeSphinxSchemeOf nike CryptWalker.WideBlockCipher.AEZ.aez
-              CryptWalker.Sphinx.Crypto.MAC.hmacSha256MAC
-              CryptWalker.Sphinx.Crypto.GenericKDF.hkdfSha256Expand
-              CryptWalker.Sphinx.Crypto.StreamCipher.aes256CTR geom hvalid hmactag h16)
+              CryptWalker.MAC.HMAC.hmacSha256MAC
+              CryptWalker.KDF.HKDF.hkdfSha256Expand
+              CryptWalker.StreamCipher.AES256CTR.aes256CTR geom hvalid hmactag h16)
           else throw s!"sphinx: geometry's payload tag/forward payload too short for scheme {name}"
         else throw "sphinx: internal error: hmacSha256MAC.tagSize ≠ macLength"
       else throw s!"sphinx: geometry is not valid for NIKE scheme {name}"
