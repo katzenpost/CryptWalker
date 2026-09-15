@@ -529,6 +529,20 @@ theorem zeroPadTo_size {n : Nat} {b : ByteArray} (h : b.size ≤ n) : (zeroPadTo
   · simp only [ByteArray.size_append, byteArray_mk_size, Array.size_replicate]
     omega
 
+/-- `zeroPadTo`'s definition, spelled out as an explicit append — the shape both
+`kemRiFragment_content_terminal`/`_nonterminal` and their NIKE-side counterparts need to peel
+apart a padded fragment's content. Fully generic, no `KEM`/`NIKE` dependence. -/
+theorem zeroPadTo_eq_append (b : ByteArray) (n : Nat) (h : b.size ≤ n) :
+    zeroPadTo n b = b ++ ⟨Array.replicate (n - b.size) 0⟩ := by
+  unfold zeroPadTo
+  split
+  · next hge =>
+    have hz : n - b.size = 0 := by omega
+    rw [hz]
+    show b = b ++ ByteArray.empty
+    rw [ByteArray.append_empty]
+  · rfl
+
 theorem replicate_extract (k lo hi : Nat) (h : hi ≤ k) :
     (⟨Array.replicate k (0 : UInt8)⟩ : ByteArray).extract lo hi = ⟨Array.replicate (hi - lo) 0⟩ := by
   apply ByteArray.ext_getElem

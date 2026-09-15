@@ -325,17 +325,6 @@ private theorem kemRiFragment_size (kem : KEM) (geom : Geometry) (path : Array P
     rw [← h, ByteArray.size_append, ByteArray.size_extract, zeroPadTo_size hle1perHop, hctsBang]
     omega
 
-private theorem zeroPadTo_eq_append (b : ByteArray) (n : Nat) (h : b.size ≤ n) :
-    zeroPadTo n b = b ++ ⟨Array.replicate (n - b.size) 0⟩ := by
-  unfold zeroPadTo
-  split
-  · next hge =>
-    have hz : n - b.size = 0 := by omega
-    rw [hz]
-    show b = b ++ ByteArray.empty
-    rw [ByteArray.append_empty]
-  · rfl
-
 /-- **`kemRiFragment`'s content, terminal-hop case**: the leading `perHop - ctSize` bytes parse
 back to exactly the hop's own commands, and the trailing `ctSize` bytes are all zero (the fixed
 tail every terminal fragment reserves, per `kemRiFragment`'s own doc comment — matching what
