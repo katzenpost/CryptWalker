@@ -2728,8 +2728,8 @@ axiom wrapKEM_unwrapKEM_complete (kem : KEM) (cipher : WideBlockCipher) (macS : 
     (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream) :
     path ≠ [] →
     path.map (·.publicKey) = privKeys.map (kemSelfPublicKeyBytes kem) →
-    (∀ hop ∈ path, ∀ c ∈ hop.commands, c ≠ .null ∧ (∀ id m, c ≠ .nextNodeHop id m) ∧
-      (∀ id, c ≠ .surbReply id)) →
+    (∀ hop ∈ path, ∀ c ∈ hop.commands, c ≠ .null ∧ (∀ id m, c ≠ .nextNodeHop id m)) →
+    (∀ c ∈ (path[path.length - 1]!).commands, ∀ id, c ≠ .surbReply id) →
     wrapKEM kem cipher macS kdfS streamS geom path filler payload st = .ok pkt st' →
     unwrapChainAux (unwrapKEM kem cipher macS kdfS streamS geom) privKeys (ofVector pkt)
       = .ok (some (ofVector payload))
@@ -2754,8 +2754,8 @@ theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) 
     (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream)
     (hpath : path ≠ [])
     (hpriv : path.map (·.publicKey) = privKeys.map (kemSelfPublicKeyBytes kem))
-    (hcmds : ∀ hop ∈ path, ∀ c ∈ hop.commands, c ≠ .null ∧ (∀ id m, c ≠ .nextNodeHop id m) ∧
-      (∀ id, c ≠ .surbReply id))
+    (hcmds : ∀ hop ∈ path, ∀ c ∈ hop.commands, c ≠ .null ∧ (∀ id m, c ≠ .nextNodeHop id m))
+    (hsurb : ∀ c ∈ (path[path.length - 1]!).commands, ∀ id, c ≠ .surbReply id)
     (hwrap : wrapKEM kem cipher macS kdfS streamS geom path filler payload st = .ok pkt st') :
     unwrapChainAux (unwrapKEM kem cipher macS kdfS streamS geom) privKeys (ofVector pkt)
       = .ok (some (ofVector payload)) := by
@@ -2868,14 +2868,12 @@ theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) 
     rw [List.getElem!_toArray] at hc
     have hi' : i < path.length := by rwa [← List.size_toArray]
     have hmem : path[i]! ∈ path := by rw [getElem!_pos path i hi']; exact List.getElem_mem hi'
-    exact (hcmds path[i]! hmem c hc).2.1 id m
+    exact (hcmds path[i]! hmem c hc).2 id m
+  have hnrHopseq : nrHops = path.length := hnrHopsdef.trans List.size_toArray
   have hcmdsurb : ∀ c ∈ (path.toArray[nrHops - 1]!).commands, ∀ id, c ≠ RoutingCommand.surbReply id := by
     intro c hc id
-    rw [List.getElem!_toArray] at hc
-    have hi' : nrHops - 1 < path.length := by rw [← List.size_toArray]; omega
-    have hmem : path[nrHops - 1]! ∈ path := by
-      rw [getElem!_pos path (nrHops - 1) hi']; exact List.getElem_mem hi'
-    exact (hcmds path[nrHops - 1]! hmem c hc).2.2 id
+    rw [List.getElem!_toArray, hnrHopseq] at hc
+    exact hsurb c hc id
   have hlen : path.length = privKeys.length := by
     have := congrArg List.length hpriv
     simpa using this

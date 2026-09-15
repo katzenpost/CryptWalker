@@ -960,7 +960,7 @@ def nikeSphinxCore (nike : NIKE) (geom : Geometry) : CryptWalker.Sphinx.Interfac
   newSURB := wrapNIKESURB nike geom
   newPacketFromSURB := fun surb payload =>
     CryptWalker.Sphinx.SURB.newPacketFromSURB geom (ofVector surb) payload
-  unwrap_complete := fun path privKeys filler payload st pkt st' hpath hkeys _hcmds hwrap =>
+  unwrap_complete := fun path privKeys filler payload st pkt st' hpath hkeys _hcmds _hsurb hwrap =>
     wrapNIKE_unwrapNIKE_complete nike geom path privKeys filler payload st pkt st' hpath hkeys hwrap
 
 /-- Build a `NIKESphinxScheme` from any `NIKE` at all — total, no `Except`, since every field here
