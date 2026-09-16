@@ -47,7 +47,7 @@ EXES := $(TESTS) CryptWalker.NIKE.benchmark CryptWalker.Sphinx.gen_nike_vectors 
 all: build ## build everything, library and executables
 
 build: ## build everything, library and executables
-	$(LAKE) build CryptWalker $(EXES)
+	$(LAKE) build --log-level=warning CryptWalker $(EXES)
 
 # A suite counts as failed if it exits non-zero or prints anything matching
 # "fail". Most suites signal a mismatch by throwing, which exits 1, but
