@@ -59,30 +59,38 @@ def sha256v1PRF : Adapter.PRF where
   derive := sha256v1Derive
 
 /-- The Montgomery-ladder X25519 implementation, wrapped into a KEM. Registered under
-`"x25519-ladder"`, matching `NIKE.Schemes`'s naming (see there for why the ladder implementation
-carries the suffix and the group one doesn't). -/
+`"x25519-ladder-kem"` — see the registry section below for why this diverges from `hpqc`'s own
+naming. -/
 def kemX25519Ladder : KEM := kemOfNike sha256v1PRF X25519_montgomery_ladder.LadderScheme
 
-/-- The group-formulation X25519 implementation, wrapped into a KEM. Registered under the bare
-`"x25519"` name, matching `NIKE.Schemes`'s convention — the two NIKEs agree byte-for-byte
+/-- The group-formulation X25519 implementation, wrapped into a KEM. Registered under
+`"x25519-kem"` — the two NIKEs agree byte-for-byte
 (`CryptWalker.NIKE.test`'s `testX25519GroupAgreesWithLadder`), so either can serve as *the*
-`"x25519"` KEM; picking the group one here is purely for naming symmetry with `NIKE.Schemes`. -/
+`"x25519-kem"` KEM; picking the group one here is purely for naming symmetry with
+`NIKE.Schemes`'s own `x25519GroupEntry`. -/
 def kemX25519 : KEM := kemOfNike sha256v1PRF CryptWalker.NIKE.X25519.Scheme
 
-/-! ## The `hpqc/kem/schemes` registry, ported
+/-! ## The `hpqc/kem/schemes` registry, ported (names deliberately diverge from `hpqc`)
 
 `hpqc/kem/schemes.All()` lists ~30 schemes (MLKEM768, sntrup, HQC, FrodoKEM, the Classic McEliece
 family, X-Wing, and many hybrid combiners — see `hpqc/kem/schemes/schemes.go`); this project
 ports `hpqc`'s one X25519 adapter twice over, once per X25519 implementation
-(`kemX25519`/`kemX25519Ladder`) — `hpqc/kem/adapter`'s own `Scheme.Name()`
-(`kem/adapter/kem.go:120`) just returns the wrapped NIKE's name (`a.nike.Name()`), so the
-registered names are the same strings `NIKE.Schemes`'s registry uses — no collision, since Go
-keeps `nike/schemes` and `kem/schemes` as two independent maps, and so does this port. (Earlier
-this file exposed a bare `Schemes : List String := ["X25519"]`, wrong on both counts —
-capitalized unlike `hpqc`'s own name, and not actually paired with a scheme.) -/
+(`kemX25519`/`kemX25519Ladder`). `hpqc/kem/adapter`'s own `Scheme.Name()`
+(`kem/adapter/kem.go:120`) just returns the wrapped NIKE's name unchanged (`a.nike.Name()`), so
+in `hpqc` a KEM-adapter scheme and its underlying NIKE share one string — harmless there only
+because `nike/schemes` and `kem/schemes` are two independent Go maps. This port's `NIKE.registry`
+and `KEM.registry` get merged into one flat `Sphinx.Schemes.schemeNames` list
+(`schemes.lean`), where that collision would be real and confusing (two different entries named
+`"x25519"`, one NIKE-backed and one KEM-backed). So, unlike `hpqc`, every KEM-adapter entry here
+carries an explicit `-kem` suffix its underlying NIKE entry lacks — a deliberate naming choice,
+not a port of anything `hpqc` does. (Earlier this file exposed a bare
+`Schemes : List String := ["X25519"]`, wrong on both counts — capitalized unlike `hpqc`'s own
+name, and not actually paired with a scheme.) -/
 
-/-- One entry in the scheme registry: a scheme's canonical `hpqc` name paired with the actual
-implementation `byName` should return for it. `KEM.KEM` carries everything a caller (including
+/-- One entry in the scheme registry: a scheme's registry name paired with the actual
+implementation `byName` should return for it. Named `hpqcName` for parallelism with
+`NIKE.RegistryEntry`, though the KEM-side value is this port's own `-kem`-suffixed name, not
+`hpqc`'s (see the registry section above). `KEM.KEM` carries everything a caller (including
 `Sphinx.KEMSphinx`) needs directly — `derivePublicKey`, `stateFromSeed` — so, unlike an earlier
 version of this structure, there is no need to also carry the `prf`/`nike` a `kemOfNike`-built
 scheme happens to be made from; that stays an internal detail of `Adapter.kemOfNike`. -/
@@ -90,9 +98,9 @@ structure RegistryEntry where
   hpqcName : String
   scheme : KEM
 
-def x25519LadderEntry : RegistryEntry := { hpqcName := "x25519-ladder", scheme := kemX25519Ladder }
+def x25519LadderEntry : RegistryEntry := { hpqcName := "x25519-ladder-kem", scheme := kemX25519Ladder }
 
-def x25519GroupEntry : RegistryEntry := { hpqcName := "x25519", scheme := kemX25519 }
+def x25519GroupEntry : RegistryEntry := { hpqcName := "x25519-kem", scheme := kemX25519 }
 
 def registry : List RegistryEntry := [x25519LadderEntry, x25519GroupEntry]
 

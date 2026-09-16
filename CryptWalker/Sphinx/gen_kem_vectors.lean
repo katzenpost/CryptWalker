@@ -148,7 +148,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
 def main : IO UInt32 := do
   let mut vecs : Array Json := #[]
   for withSURB in [false, true] do
-    let geom ← IO.ofExcept (ofKEM "x25519" 103 withSURB 5)
+    let geom ← IO.ofExcept (ofKEM "x25519-kem" 103 withSURB 5)
     for nrHops in [1, 2, 3, 4, 5] do
       let v ← buildVec geom withSURB nrHops
       vecs := vecs.push v

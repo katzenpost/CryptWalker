@@ -186,8 +186,8 @@ def main : IO UInt32 := do
       | .error e => do IO.eprintln e; pure 1
       | .ok vecs =>
         IO.println s!"KEM-Sphinx full-packet vectors ({vecs.size} from katzenpost)"
-        let geomNoSurb ← IO.ofExcept (ofKEM "x25519" 103 false 5)
-        let geomSurb ← IO.ofExcept (ofKEM "x25519" 103 true 5)
+        let geomNoSurb ← IO.ofExcept (ofKEM "x25519-kem" 103 false 5)
+        let geomSurb ← IO.ofExcept (ofKEM "x25519-kem" 103 true 5)
         let mut ok := true
         for i in [0:vecs.size] do
           let v := vecs[i]!

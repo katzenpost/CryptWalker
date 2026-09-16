@@ -32,9 +32,9 @@ open CryptWalker.Util.Bytes (ofVector)
 
 private def x25519Kem := CryptWalker.KEM.kemX25519Ladder
 
-/-- `x25519Kem` is exactly what the registry resolves `"x25519-ladder"` to — proved once here
+/-- `x25519Kem` is exactly what the registry resolves `"x25519-ladder-kem"` to — proved once here
 (reused below) rather than inline at each `ofKEM_validForKEM` call site. -/
-private theorem x25519Kem_byName : CryptWalker.KEM.byName "x25519-ladder" = some x25519Kem := by
+private theorem x25519Kem_byName : CryptWalker.KEM.byName "x25519-ladder-kem" = some x25519Kem := by
   unfold CryptWalker.KEM.byName CryptWalker.KEM.registry
   simp [CryptWalker.KEM.x25519LadderEntry, x25519Kem]
 
@@ -139,7 +139,7 @@ def runRound (geom : Geometry) : IO Bool := do
       unwrapAll geom nodes pkt0 payload
 
 def runFillerRound : IO Bool := do
-  let geom ← IO.ofExcept (ofKEM "x25519" 103 false 5)
+  let geom ← IO.ofExcept (ofKEM "x25519-kem" 103 false 5)
   let nodes ← (List.range 3).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
@@ -326,7 +326,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
 def main : IO UInt32 := do
   let mut ok := true
   for nrHops in [1, 2, 3, 5] do
-    let geom ← IO.ofExcept (ofKEM "x25519-ladder" 103 false nrHops)
+    let geom ← IO.ofExcept (ofKEM "x25519-ladder-kem" 103 false nrHops)
     let roundOk ← runRound geom
     IO.println s!"{nrHops} hop(s), no filler: {if roundOk then "ok" else "FAIL"}"
     ok := ok && roundOk
@@ -338,12 +338,12 @@ def main : IO UInt32 := do
   -- `match h : ... with` (rather than `IO.ofExcept`) keeps the success witness around, so
   -- `ofKEM_validForKEM`/`ofKEM_payloadTagLength` can turn it into the two hypotheses
   -- `kemSphinxSchemeOf` needs to call the real completeness theorem underneath it.
-  match h3 : ofKEM "x25519-ladder" 103 false 3 with
+  match h3 : ofKEM "x25519-ladder-kem" 103 false 3 with
   | .error e => throw (IO.userError e)
   | .ok geom3 =>
-    let hvalid3 := ofKEM_validForKEM "x25519-ladder" 103 false 3 geom3 x25519Kem h3 x25519Kem_byName
+    let hvalid3 := ofKEM_validForKEM "x25519-ladder-kem" 103 false 3 geom3 x25519Kem h3 x25519Kem_byName
     let h163 : 16 ≤ geom3.payloadTagLength + geom3.forwardPayloadLength := by
-      rw [ofKEM_payloadTagLength "x25519-ladder" 103 false 3 geom3 h3]
+      rw [ofKEM_payloadTagLength "x25519-ladder-kem" 103 false 3 geom3 h3]
       unfold CryptWalker.Sphinx.Constants.payloadTagLength; omega
 
     let abstractOk ← runAbstractWrapRound geom3 hvalid3 h163
@@ -354,19 +354,19 @@ def main : IO UInt32 := do
     IO.println s!"Sphinx.Interface.unwrap_complete via unwrapChainAux (3 hops): {if completeOk then "ok" else "FAIL"}"
     ok := ok && completeOk
 
-  match h3s : ofKEM "x25519-ladder" 103 true 3 with
+  match h3s : ofKEM "x25519-ladder-kem" 103 true 3 with
   | .error e => throw (IO.userError e)
   | .ok geom3surb =>
-    let hvalid3s := ofKEM_validForKEM "x25519-ladder" 103 true 3 geom3surb x25519Kem h3s x25519Kem_byName
+    let hvalid3s := ofKEM_validForKEM "x25519-ladder-kem" 103 true 3 geom3surb x25519Kem h3s x25519Kem_byName
     let h163s : 16 ≤ geom3surb.payloadTagLength + geom3surb.forwardPayloadLength := by
-      rw [ofKEM_payloadTagLength "x25519-ladder" 103 true 3 geom3surb h3s]
+      rw [ofKEM_payloadTagLength "x25519-ladder-kem" 103 true 3 geom3surb h3s]
       unfold CryptWalker.Sphinx.Constants.payloadTagLength; omega
     let abstractSurbOk ← runAbstractSURBRound geom3surb hvalid3s h163s
     IO.println s!"abstract Sphinx.Interface.newSURB/newPacketFromSURB (3 hops): {if abstractSurbOk then "ok" else "FAIL"}"
     ok := ok && abstractSurbOk
 
   for nrHops in [1, 2, 3, 5] do
-    let geom ← IO.ofExcept (ofKEM "x25519-ladder" 103 true nrHops)
+    let geom ← IO.ofExcept (ofKEM "x25519-ladder-kem" 103 true nrHops)
     let surbOk ← runSURBRound geom
     IO.println s!"SURB round trip ({nrHops} hop(s)): {if surbOk then "ok" else "FAIL"}"
     ok := ok && surbOk
