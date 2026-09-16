@@ -4,7 +4,6 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import VCVio.OracleComp.Constructions.SampleableType
-import VCVio.EvalDist.Bool
 
 import CryptWalker.Sphinx.types
 import CryptWalker.Sphinx.geometry
@@ -23,7 +22,6 @@ namespace CryptWalker.Sphinx.Interface
 set_option linter.dupNamespace false
 
 open CryptWalker.Util.Bytes (ofVector)
-open OracleComp OracleSpec ENNReal
 
 /-! # The abstract Sphinx interface
 
@@ -40,7 +38,7 @@ The paper states four security properties for a mix format; this project formali
   `Indistinguishability.advantage_le`.
 * **Wrap-resistance** (§4.3) — stated only on `NIKESphinxScheme.wrap_resistant` (`nike_sphinx.lean`),
   not here on the base `Sphinx` structure: it needs a re-blindable public-key element a KEM-based
-  scheme has no analogue of. `uniformHit_eq` below is its scheme-independent mathematical core.
+  scheme has no analogue of. `NIKESphinx.uniformHit_eq` is its scheme-independent mathematical core.
 
 A packet scheme: private-key/command types, `wrap`/`unwrap`, `newSURB`/`newPacketFromSURB`, and
 a completeness law relating them.
@@ -181,26 +179,5 @@ instance : Inhabited Sphinx := ⟨{
     intro path privKeys filler payload st pkt st' _hpath _hkeys _hcmds _hsurb hwrap
     cases hwrap
 }⟩
-
-/-! ## Wrap-resistance (§4.3)
-
-Unlike `unwrap_complete`, wrap-resistance is a probabilistic bound on adversarial forgery, and
-needs structure (a public-key element, a factor space, a blinding action) a group-blinding-chain
-scheme has and a KEM-based one doesn't — so it lives on `NIKESphinxScheme` only. -/
-
-/-- A uniformly sampled `b : F`, pushed through a bijection `act`, hits any fixed `target` with
-probability `1/|F|`. The mathematical core of wrap-resistance's single-query case: `act` is
-"blind by this freshly drawn factor," `target` the header an adversary is trying to forge. -/
-theorem uniformHit_eq {F G : Type} [Fintype F] [SampleableType F] [DecidableEq G]
-    {act : F → G} (hact : Function.Bijective act) (target : G) :
-    Pr[= true | ($ᵗ F) >>= fun b => pure (decide (act b = target))] =
-      (Fintype.card F : ℝ≥0∞)⁻¹ := by
-  obtain ⟨b₀, rfl⟩ := hact.surjective target
-  simp only [probOutput_bind_eq_tsum, probOutput_uniformSample, probOutput_pure]
-  rw [tsum_fintype, Finset.sum_eq_single b₀]
-  · simp
-  · intro b _ hne
-    simp [show act b ≠ act b₀ from fun heq => hne (hact.injective heq)]
-  · exact absurd (Finset.mem_univ b₀)
 
 end CryptWalker.Sphinx.Interface

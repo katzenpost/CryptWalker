@@ -21,7 +21,6 @@ import CryptWalker.StreamCipher.StreamCipher
 import CryptWalker.StreamCipher.AES256CTR
 import CryptWalker.NIKE.NIKE
 import CryptWalker.NIKE.Schemes
-import CryptWalker.Sphinx.wrap_resistance
 import CryptWalker.Hash.Sha512
 import CryptWalker.Util.Bytes
 
@@ -53,6 +52,21 @@ re-blindable-envelope structure (`Envelope`/`Factor`/`blind`/`wrap_resistant`/`e
 (`wrapNIKE_unwrapNIKE_complete_valid`), and the builders (`nikeSphinxCore`/`nikeSphinxSchemeOf`/
 `nikeSphinxScheme`) that actually construct one of these. -/
 
+/-- A uniformly sampled `b : F`, pushed through a bijection `act`, hits any fixed `target` with
+probability `1/|F|`. The mathematical core of wrap-resistance's single-query case: `act` is
+"blind by this freshly drawn factor," `target` the header an adversary is trying to forge. -/
+theorem uniformHit_eq {F G : Type} [Fintype F] [SampleableType F] [DecidableEq G]
+    {act : F → G} (hact : Function.Bijective act) (target : G) :
+    Pr[= true | ($ᵗ F) >>= fun b => pure (decide (act b = target))] =
+      (Fintype.card F : ℝ≥0∞)⁻¹ := by
+  obtain ⟨b₀, rfl⟩ := hact.surjective target
+  simp only [probOutput_bind_eq_tsum, probOutput_uniformSample, probOutput_pure]
+  rw [tsum_fintype, Finset.sum_eq_single b₀]
+  · simp
+  · intro b _ hne
+    simp [show act b ≠ act b₀ from fun heq => hne (hact.injective heq)]
+  · exact absurd (Finset.mem_univ b₀)
+
 /-- A `Sphinx` scheme whose header carries a re-blindable public-key element: `Envelope` is that
 element's type (`parseEnvelope` extracts it from a packet), `Factor` the space a fresh blinding
 value is drawn from, `blind` the re-blinding action. `wrap_resistant` needs no per-instance proof
@@ -76,7 +90,7 @@ structure NIKESphinxScheme extends CryptWalker.Sphinx.Interface.Sphinx where
   wrap_resistant : ∀ (e target : Envelope), Function.Bijective (blind · e) →
       Pr[= true | ($ᵗ Factor) >>= fun b => pure (decide (blind b e = target))] =
         (Fintype.card Factor : ℝ≥0∞)⁻¹ :=
-    fun _ target hbij => CryptWalker.Sphinx.Interface.uniformHit_eq hbij target
+    fun _ target hbij => uniformHit_eq hbij target
   /-- **Envelope independence** (§4.4, exact rather than up to some advantage): the envelope
   depends only on `wrap`'s seed-stream draw, never on path/filler/payload, so two calls sharing a
   starting `State` produce byte-for-byte identical envelopes — no adversary can learn anything
