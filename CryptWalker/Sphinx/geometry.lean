@@ -143,6 +143,43 @@ full ciphertext at every hop, not just the header's leading element. -/
   geom.packetLength = geom.headerLength + geom.payloadTagLength + geom.forwardPayloadLength ∧
   geom.surbLength = geom.headerLength + nodeIDLength + CryptWalker.Sphinx.Constants.sprpKeyMaterialLength
 
+/-- As `ofNIKE`, for a caller that already holds a concrete `nike` rather than a name to look up
+against `byName` — e.g. a self-test exercising a specific registered scheme's implementation
+directly. `label` only ends up in the result's `scheme` field (for display/debugging); unlike
+`ofNIKE` it plays no role in the computation, so building this needs no `byName` witness, and
+(unlike `ofNIKE`) it never fails. -/
+def ofNIKEWith (label : String) (nike : NIKE) (userForwardPayloadLength : Nat) (withSURB : Bool)
+    (nrHops : Nat) : Geometry :=
+  buildNIKE label nike.publicKeySize userForwardPayloadLength withSURB nrHops
+
+/-- `ofNIKEWith`'s result is `ValidForNIKE nike` unconditionally — it's built from `nike.
+publicKeySize` directly, not resolved by name, so there's nothing to prove beyond unfolding. -/
+theorem ofNIKEWith_validForNIKE (label : String) (nike : NIKE) (userForwardPayloadLength : Nat)
+    (withSURB : Bool) (nrHops : Nat) :
+    (ofNIKEWith label nike userForwardPayloadLength withSURB nrHops).ValidForNIKE nike :=
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+/-- As `ofNIKE_payloadTagLength`, for `ofNIKEWith`. -/
+theorem ofNIKEWith_payloadTagLength (label : String) (nike : NIKE) (userForwardPayloadLength : Nat)
+    (withSURB : Bool) (nrHops : Nat) :
+    (ofNIKEWith label nike userForwardPayloadLength withSURB nrHops).payloadTagLength =
+      CryptWalker.Sphinx.Constants.payloadTagLength := rfl
+
+/-- As `ofNIKEWith`, for the KEM side. -/
+def ofKEMWith (label : String) (kem : KEM) (userForwardPayloadLength : Nat) (withSURB : Bool)
+    (nrHops : Nat) : Geometry :=
+  buildKEM label kem.ciphertextSize userForwardPayloadLength withSURB nrHops
+
+theorem ofKEMWith_validForKEM (label : String) (kem : KEM) (userForwardPayloadLength : Nat)
+    (withSURB : Bool) (nrHops : Nat) :
+    (ofKEMWith label kem userForwardPayloadLength withSURB nrHops).ValidForKEM kem :=
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+theorem ofKEMWith_payloadTagLength (label : String) (kem : KEM) (userForwardPayloadLength : Nat)
+    (withSURB : Bool) (nrHops : Nat) :
+    (ofKEMWith label kem userForwardPayloadLength withSURB nrHops).payloadTagLength =
+      CryptWalker.Sphinx.Constants.payloadTagLength := rfl
+
 theorem ofNIKE_validForNIKE (nikeSchemeName : String) (userForwardPayloadLength : Nat)
     (withSURB : Bool) (nrHops : Nat) (geom : Geometry) (nike : NIKE)
     (h : ofNIKE nikeSchemeName userForwardPayloadLength withSURB nrHops = .ok geom)
