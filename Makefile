@@ -29,7 +29,8 @@ TESTS := \
 	CryptWalker.Sphinx.kem_selftest \
 	CryptWalker.Sphinx.nike_vectors_test \
 	CryptWalker.Sphinx.kem_vectors_test \
-	CryptWalker.KEM.mlkem768_test
+	CryptWalker.KEM.mlkem768_test \
+	CryptWalker.Hash.blake2b_256_test
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 

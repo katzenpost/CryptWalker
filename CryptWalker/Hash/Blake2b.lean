@@ -76,19 +76,38 @@ private def pad (msg : ByteArray) : ByteArray :=
   let blocks := if blocks = 0 then 1 else blocks
   msg ++ ⟨Array.replicate (blocks * 128 - msg.size) 0⟩
 
-private def digestArray (msg : ByteArray) : Array UInt64 :=
-  let padded := pad msg
-  let blocks := padded.size / 128
-  let initial := (List.range 8).toArray.map fun i =>
-    if i = 0 then iv[0]! ^^^ 0x01010040 else iv[i]!
-  (List.range blocks).foldl (fun h i =>
-    compress h (padded.data.extract (128*i) (128*i + 128)) (min msg.size (128*(i+1))) (i + 1 = blocks)) initial
+private def zeroPadTo128 (b : ByteArray) : ByteArray :=
+  b ++ ⟨Array.replicate (128 - b.size) 0⟩
 
-/-- BLAKE2b-512, with the standard unkeyed 64-byte parameter block. -/
+/-- RFC 7693's keyed mode: the key, zero-padded to one full block, is prepended to the message and
+the parameter block's `key_length` field is set accordingly — everything else (padding, block
+counting, finalization) is unchanged, applied to `key ++ message` as a whole. -/
+private def digestArray (key : ByteArray) (digestLen : Nat) (msg : ByteArray) : Array UInt64 :=
+  let d := if key.size > 0 then zeroPadTo128 key ++ msg else msg
+  let padded := pad d
+  let blocks := padded.size / 128
+  let param : UInt64 :=
+    UInt64.ofNat digestLen ||| (UInt64.ofNat key.size <<< 8) |||
+      ((1 : UInt64) <<< 16) ||| ((1 : UInt64) <<< 24)
+  let initial := (List.range 8).toArray.map fun i =>
+    if i = 0 then iv[0]! ^^^ param else iv[i]!
+  (List.range blocks).foldl (fun h i =>
+    compress h (padded.data.extract (128*i) (128*i + 128)) (min d.size (128*(i+1))) (i + 1 = blocks)) initial
+
+private def extractDigest (h : Array UInt64) (n : Nat) : Vector UInt8 n :=
+  Vector.ofFn fun i : Fin n => (h[i.val / 8]! >>> UInt64.ofNat (8 * (i.val % 8))).toUInt8
+
+/-- BLAKE2b-512, unkeyed. -/
 def hash (msg : ByteArray) : Vector UInt8 64 :=
-  let h := digestArray msg
-  Vector.ofFn fun i : Fin 64 =>
-    (h[i.val / 8]! >>> UInt64.ofNat (8 * (i.val % 8))).toUInt8
+  extractDigest (digestArray ByteArray.empty 64 msg) 64
+
+/-- BLAKE2b-256, unkeyed. -/
+def hash256 (msg : ByteArray) : Vector UInt8 32 :=
+  extractDigest (digestArray ByteArray.empty 32 msg) 32
+
+/-- BLAKE2b-256, keyed. -/
+def hash256Keyed (key msg : ByteArray) : Vector UInt8 32 :=
+  extractDigest (digestArray key 32 msg) 32
 
 private def xorPad (key : ByteArray) (pad : UInt8) : ByteArray :=
   let key := key ++ ⟨Array.replicate (128 - key.size) 0⟩
