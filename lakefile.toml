@@ -90,3 +90,6 @@ name = "CryptWalker.Sphinx.gen_kem_vectors"
 
 [[lean_exe]]
 name = "CryptWalker.Sphinx.benchmark"
+
+[[lean_exe]]
+name = "CryptWalker.KEM.mlkem768_test"
