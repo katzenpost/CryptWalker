@@ -79,6 +79,27 @@ def decaps768 (dk : DecapsulationKey params encoding) (c : Ciphertext params enc
   if uBytes c.uEncoded = uBytes c'.uEncoded ∧ vBytes c.vEncoded = vBytes c'.vEncoded then k'
   else kBar
 
+/-! ## FIPS 203 §7.2/§7.3 input-validation checks
+
+`keygen768`/`encaps768`/`decaps768` above are the *internal* algorithms (Algorithms 19-21) — they
+never reject a malformed key, matching VCVio's own `keygenInternal`/`encapsInternal`/
+`decapsInternal`. FIPS 203's top-level `ML-KEM.Encaps`/`ML-KEM.Decaps` additionally run one input
+check each before calling into the internal algorithm; these are that check, exposed separately
+rather than folded into `encaps768`/`decaps768` themselves so a caller can still reach the
+internal algorithms directly (as `kemMLKEM768` does — see the module doc's discussion of `Reliable`,
+which is about noise, not malformed keys; a real deployment would call these checks first). -/
+
+/-- FIPS 203 §7.2's encapsulation-key modulus check: decoding `tHatEncoded` and re-encoding it must
+reproduce the same bytes. Fails exactly when some coefficient in the encoded vector is not fully
+reduced mod `q` — i.e. genuinely represents a modulus violation, not an implementation defect. -/
+def checkEncapsulationKey (ek : EncapsulationKey params encoding) : Bool :=
+  tBytes (encoding.byteEncode12Vec (encoding.byteDecode12Vec ek.tHatEncoded)) == tBytes ek.tHatEncoded
+
+/-- FIPS 203 §7.3's decapsulation-key hash check: `dk.ekHash` must match a fresh
+`H(ekPKE)` recomputation. -/
+def checkDecapsulationKey (dk : DecapsulationKey params encoding) : Bool :=
+  ofVector (primitives.hEncapsulationKey dk.ekPKE.tHatEncoded dk.ekPKE.rho) == ofVector dk.ekHash
+
 /-! ## Size facts: `keygen768`/`encaps768`'s outputs are always well-formed -/
 
 private theorem keygen768_ek_wf (d z : Seed32) :

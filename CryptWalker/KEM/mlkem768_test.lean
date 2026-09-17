@@ -24,6 +24,12 @@ there), and include "modified ciphertext" cases exercising `decaps768`'s implici
 (`jReject`) — a malformed ciphertext still decapsulates to a specific, deterministic pseudorandom
 key rather than erroring, and that key is exactly what NIST's vector checks.
 
+Also checks `checkEncapsulationKey`/`checkDecapsulationKey` (FIPS 203 §7.2/§7.3's input-validation
+checks, also `MLKEM768.lean`) against NIST's `decapsulationKeyCheck`/`encapsulationKeyCheck` `VAL`
+groups, vendored into `testdata/mlkem768_keycheck.json` — the modulus check ("noisy linear system
+values too large" cases must fail) and the hash check ("modified H" cases must fail) both need to
+correctly *reject* a malformed key, not just accept a well-formed one.
+
 Local encode/decode helpers on the *raw* `EncapsulationKey`/`DecapsulationKey`/`Ciphertext`
 structures (not `MLKEM768Encoding.lean`'s `PublicKey`/`PrivateKey`/`CT` wrapper subtypes) — a KAT
 test only needs raw computation and a byte comparison, not the formal wire-type well-formedness
@@ -195,10 +201,58 @@ def runEncapDecap : IO Bool := do
         IO.eprintln s!"{name}: unknown mode {mode}"; ok := false
     pure ok
 
+/-! ## Input-validation checks: `checkDecapsulationKey`/`checkEncapsulationKey` (VAL) -/
+
+def runKeyCheck : IO Bool := do
+  match ← loadPrimitive "testdata/mlkem768_keycheck.json" "mlkem768_keycheck" with
+  | .error e => do IO.eprintln e; pure false
+  | .ok arr => do
+    IO.println s!"ML-KEM-768 key checks (NIST ACVP, {arr.size} vectors)"
+    let mut ok := true
+    for j in arr do
+      match (do
+        let name ← (← j.getObjVal? "name").getStr?
+        let mode ← (← j.getObjVal? "mode").getStr?
+        let wantPass ← (← j.getObjVal? "want_pass").getBool?
+        pure (name, mode, wantPass) : Except String _) with
+      | .error e => do IO.eprintln e; ok := false
+      | .ok (name, "checkDK", wantPass) =>
+        match field j "dk_hex" with
+        | .error e => do IO.eprintln e; ok := false
+        | .ok dk =>
+          if dk.size ≠ params.secretKeyBytes then
+            ok := false
+            IO.println s!"  FAIL  {name}  (dk wrong length)"
+          else
+            let gotPass := checkDecapsulationKey (decodeDKRaw dk)
+            if gotPass == wantPass then
+              IO.println s!"  ok    {name}"
+            else
+              ok := false
+              IO.println s!"  FAIL  {name}  want pass={wantPass} got pass={gotPass}"
+      | .ok (name, "checkEK", wantPass) =>
+        match field j "ek_hex" with
+        | .error e => do IO.eprintln e; ok := false
+        | .ok ek =>
+          if ek.size ≠ params.publicKeyBytes then
+            ok := false
+            IO.println s!"  FAIL  {name}  (ek wrong length)"
+          else
+            let gotPass := checkEncapsulationKey (decodeEKRaw ek)
+            if gotPass == wantPass then
+              IO.println s!"  ok    {name}"
+            else
+              ok := false
+              IO.println s!"  FAIL  {name}  want pass={wantPass} got pass={gotPass}"
+      | .ok (name, mode, _) => do
+        IO.eprintln s!"{name}: unknown mode {mode}"; ok := false
+    pure ok
+
 def main : IO UInt32 := do
   let okKeyGen ← runKeyGen
   let okEncapDecap ← runEncapDecap
-  if okKeyGen ∧ okEncapDecap then
+  let okKeyCheck ← runKeyCheck
+  if okKeyGen ∧ okEncapDecap ∧ okKeyCheck then
     IO.println "ML-KEM-768 KAT: all NIST ACVP vectors passed"
     pure 0
   else
