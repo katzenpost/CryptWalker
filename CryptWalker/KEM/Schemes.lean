@@ -7,12 +7,14 @@ import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Combiner
 import CryptWalker.KEM.MLKEM768
 import CryptWalker.Hash.Sha2
+import CryptWalker.MAC.HMAC
 
 open CryptWalker.NIKE
 open CryptWalker.NIKE.NIKE
 open CryptWalker.KEM.KEM
 open CryptWalker.KEM.Adapter
 open CryptWalker.Hash.Sha2
+open CryptWalker.MAC.HMAC (hmacSha256)
 
 namespace CryptWalker.KEM
 
@@ -110,7 +112,39 @@ building a `KEMSphinxScheme` from this entry must discharge it, not just `trivia
 def mlkem768Entry : RegistryEntry :=
   { hpqcName := "mlkem768-kem", scheme := CryptWalker.KEM.MLKEM768.kemMLKEM768 }
 
-def registry : List RegistryEntry := [x25519LadderEntry, x25519GroupEntry, mlkem768Entry]
+/-! ## Hybrid: X25519 + ML-KEM-768, via the generic split-PRF combiner
+
+hpqc's `kem/schemes` registers exactly this pairing twice, via two different mechanisms
+(`schemes.go`): `"Xwing"`, the fixed, non-generic construction from draft-connolly-cfrg-xwing (a
+single SHA3-256 hash over both raw secrets and both public keys, no split-PRF, no sub-KEM
+agility); and `"MLKEM768-X25519"`, built via hpqc's *generic* `kem/combiner` — the same
+`Combiner.combineKEM` this project already has. hpqc's own comment on that second entry: "If Xwing
+is not the PQ Hybrid KEM you are looking for then we recommend using our secure generic KEM
+combiner." This is that one, not X-Wing. -/
+
+/-- `Combiner.PRF`, instantiated with SHA-256 (unkeyed) for key derivation and HMAC-SHA256 for the
+per-component keyed hash. hpqc's deployed combiner (`kem/combiner/split_prf.go`) uses BLAKE2b-256
+in keyed mode; this project's `Hash.Blake2b` only has BLAKE2b-512 (a different parameter block,
+not simply truncatable to a BLAKE2b-256 result), so — exactly as `sha256v1PRF` above already does
+for the KEM adapter's PRF — this is a portable stand-in for implementations with SHA-256 but no
+BLAKE2b-256, not the deployed construction. -/
+def sha256CombinerPRF : Combiner.PRF where
+  hash  := sha256V
+  keyed := fun key msg => hmacSha256 (Combiner.toBytes key) msg
+
+/-- X25519 combined with ML-KEM-768 via `Combiner.combineKEM` — IND-CCA2 as long as *at least
+one* component is (Giacon, Heuer & Poettering, https://eprint.iacr.org/2018/024.pdf, Theorem 1).
+`Reliable` is `combineKEM`'s generic `k₁.Reliable s.1 ∧ k₂.Reliable s.2` — trivial on the X25519
+half, ML-KEM-768's genuine noise-dependent condition on the other; any caller building a
+`KEMSphinxScheme` from this entry must still discharge that, exactly as for `mlkem768Entry` alone. -/
+def kemMLKEM768X25519 : KEM :=
+  Combiner.combineKEM sha256CombinerPRF kemX25519 CryptWalker.KEM.MLKEM768.kemMLKEM768
+
+def mlkem768X25519Entry : RegistryEntry :=
+  { hpqcName := "mlkem768-x25519-kem", scheme := kemMLKEM768X25519 }
+
+def registry : List RegistryEntry :=
+  [x25519LadderEntry, x25519GroupEntry, mlkem768Entry, mlkem768X25519Entry]
 
 /-- `hpqc/kem/schemes.ByName`, ported: case-insensitive lookup, `none` for any name not in
 `registry` — which, unlike `hpqc`'s own registry, is most of `hpqc/kem/schemes.All()`: this

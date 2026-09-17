@@ -28,9 +28,11 @@ a non-`Reliable` keypair. Using `kem.generate` uniformly is also simply more rep
 how a real Sphinx mix node actually gets its keys.
 
 Runs the full round set once per registered KEM-Sphinx scheme — `"x25519-ladder-kem"`
-(`KEM.kemX25519Ladder`), `"x25519-kem"` (`KEM.kemX25519`), and `"mlkem768-kem"`
-(`MLKEM768.kemMLKEM768`) — since `createKEMHeader`/`unwrapKEM` are generic over any `KEM`, not
-just the ladder implementation `kem_vectors_test`'s Go-cross-checked vectors happen to use. -/
+(`KEM.kemX25519Ladder`), `"x25519-kem"` (`KEM.kemX25519`), `"mlkem768-kem"`
+(`MLKEM768.kemMLKEM768`), and `"mlkem768-x25519-kem"` (`KEM.kemMLKEM768X25519`, the classical/
+post-quantum hybrid built by `Combiner.combineKEM` — see `KEM/Schemes.lean`'s module doc) — since
+`createKEMHeader`/`unwrapKEM` are generic over any `KEM`, not just the ladder implementation
+`kem_vectors_test`'s Go-cross-checked vectors happen to use. -/
 
 open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
@@ -43,6 +45,7 @@ open CryptWalker.Util.Bytes (ofVector)
 private def x25519Ladder := CryptWalker.KEM.kemX25519Ladder
 private def x25519Group := CryptWalker.KEM.kemX25519
 private def mlkem768 := CryptWalker.KEM.MLKEM768.kemMLKEM768
+private def mlkem768X25519 := CryptWalker.KEM.kemMLKEM768X25519
 
 -- `kemSphinxSchemeOf` (used below) takes these four explicitly rather than wiring one concrete
 -- choice up internally; the direct `createKEMHeader`/`newKEMPacket`/`unwrapKEM`/`newKEMSURB` calls
@@ -393,8 +396,10 @@ def main : IO UInt32 := do
   IO.println ""
   let okMLKEM ← runSuite "mlkem768-kem" mlkem768
   IO.println ""
-  if okLadder && okGroup && okMLKEM then
-    IO.println "all KEM-Sphinx round-trip self-tests passed (all three schemes)"
+  let okHybrid ← runSuite "mlkem768-x25519-kem" mlkem768X25519
+  IO.println ""
+  if okLadder && okGroup && okMLKEM && okHybrid then
+    IO.println "all KEM-Sphinx round-trip self-tests passed (all four schemes)"
     pure 0
   else
     IO.eprintln "KEM-Sphinx round-trip self-tests FAILED"
