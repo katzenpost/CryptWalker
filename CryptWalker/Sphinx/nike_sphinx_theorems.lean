@@ -2953,7 +2953,9 @@ def nikeSphinxCore (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS :
   newSURB := wrapNIKESURB nike macS kdfS streamS geom
   newPacketFromSURB := fun surb payload =>
     CryptWalker.Sphinx.SURB.newPacketFromSURB cipher geom (ofVector surb) payload
-  unwrap_complete := fun path privKeys filler payload st pkt st' hpath hkeys hcmds hsurb hwrap =>
+  -- NIKE-Sphinx never fails the way a lattice-based KEM can, so `unwrapReliable` stays at
+  -- `Sphinx`'s trivial default and this proof just discards the new, always-true hypothesis.
+  unwrap_complete := fun path privKeys filler payload st pkt st' hpath _hrel hkeys hcmds hsurb hwrap =>
     wrapNIKE_unwrapNIKE_complete_valid nike cipher macS kdfS streamS geom hvalid hmactag h16
       path privKeys filler payload st pkt st' hpath hkeys hcmds hsurb hwrap
 

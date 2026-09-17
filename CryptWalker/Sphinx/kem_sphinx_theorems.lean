@@ -193,7 +193,7 @@ public key (`kemSelfPublicKeyBytes`) and encapsulating against it succeeds, deca
 trips already on `KEM` — no AEZ/HMAC/KDF/stream-cipher content, and no assumption about which `KEM`
 this is beyond its own laws. -/
 theorem kemEncap_kemDecap_of_honest (kem : KEM) (skBytes : ByteArray) (seedV : Vector UInt8 32)
-    (ctBytes ssBytes : ByteArray)
+    (ctBytes ssBytes : ByteArray) (hrel : kem.Reliable (kem.stateFromSeed seedV))
     (henc : kemEncap kem (kemSelfPublicKeyBytes kem skBytes) seedV = .ok (ctBytes, ssBytes)) :
     kemDecap kem skBytes ctBytes = .ok ssBytes := by
   obtain ⟨sk, hsk⟩ := kem.decodePrivateKey_total (toVecN kem.privateKeySize skBytes)
@@ -209,7 +209,7 @@ theorem kemEncap_kemDecap_of_honest (kem : KEM) (skBytes : ByteArray) (seedV : V
     obtain ⟨ct, ss⟩ := val
     simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at henc
     obtain ⟨hct, hss⟩ := henc
-    obtain ⟨t', hd⟩ := kem.honestRoundTrip sk (kem.stateFromSeed seedV) ct ss s' hgb
+    obtain ⟨t', hd⟩ := kem.honestRoundTrip sk (kem.stateFromSeed seedV) hrel ct ss s' hgb
       (kem.stateFromSeed (Vector.replicate 32 0))
     unfold kemDecap
     rw [hsk, ← hct, toVecN_ofVector, kem.decode_encode_ct]
@@ -1586,6 +1586,7 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
            ++ thisPad0.extract riPadding[i - 1]!.size thisPad0.size
        else thisPad0))
     (hkeyscontent : ∀ i (_hi : i < nrHops), ∃ seed ss,
+        kem.Reliable (kem.stateFromSeed seed) ∧
         kemEncap kem (path[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
         keys[i]! = deriveHopKeys kdfS ss)
     (htsize : ∀ j (_hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
@@ -1611,9 +1612,9 @@ theorem unwrapKEM_hopPacket_nonterminal (kem : KEM) (cipher : WideBlockCipher) (
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
   have hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by omega
   -- The honest KEM round trip at hop `k`.
-  obtain ⟨seed, ss, hencap, hkeyseq⟩ := hkeyscontent k (by omega)
+  obtain ⟨seed, ss, hrel, hencap, hkeyseq⟩ := hkeyscontent k (by omega)
   have hdecap : kemDecap kem privKey kemElements[k]! = Except.ok ss :=
-    kemEncap_kemDecap_of_honest kem privKey seed kemElements[k]! ss (by rw [hpp]; exact hencap)
+    kemEncap_kemDecap_of_honest kem privKey seed kemElements[k]! ss hrel (by rw [hpp]; exact hencap)
   -- The loop3 trace's step at hop `k` (`j := nrHops - 1 - k`).
   have hj1 : nrHops - 1 - k < nrHops := by omega
   obtain ⟨riFragment, hriFragment0, hR1, hM1⟩ := hstep (nrHops - 1 - k) hj1
@@ -1948,6 +1949,7 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
            ++ thisPad0.extract riPadding[i - 1]!.size thisPad0.size
        else thisPad0))
     (hkeyscontent : ∀ i (_hi : i < nrHops), ∃ seed ss,
+        kem.Reliable (kem.stateFromSeed seed) ∧
         kemEncap kem (path[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
         keys[i]! = deriveHopKeys kdfS ss)
     (htsize : ∀ j (_hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
@@ -1970,9 +1972,9 @@ theorem unwrapKEM_hopPacket_terminal (kem : KEM) (cipher : WideBlockCipher) (mac
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
   have hperhop : geom.nextNodeHopLength + kem.ciphertextSize ≤ geom.perHopRoutingInfoLength := by omega
   -- The honest KEM round trip at hop `k`.
-  obtain ⟨seed, ss, hencap, hkeyseq⟩ := hkeyscontent k (by omega)
+  obtain ⟨seed, ss, hrel, hencap, hkeyseq⟩ := hkeyscontent k (by omega)
   have hdecap : kemDecap kem privKey kemElements[k]! = Except.ok ss :=
-    kemEncap_kemDecap_of_honest kem privKey seed kemElements[k]! ss (by rw [hpp]; exact hencap)
+    kemEncap_kemDecap_of_honest kem privKey seed kemElements[k]! ss hrel (by rw [hpp]; exact hencap)
   -- The loop3 trace's step at hop `k` (`j := nrHops - 1 - k = 0`).
   have hj1 : nrHops - 1 - k < nrHops := by omega
   obtain ⟨riFragment, hriFragment0, hR1, hM1⟩ := hstep (nrHops - 1 - k) hj1
@@ -2243,6 +2245,7 @@ theorem unwrapChain_hopPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC
            ++ thisPad0.extract riPadding[i - 1]!.size thisPad0.size
        else thisPad0))
     (hkeyscontent : ∀ i (_hi : i < nrHops), ∃ seed ss,
+        kem.Reliable (kem.stateFromSeed seed) ∧
         kemEncap kem (path[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
         keys[i]! = deriveHopKeys kdfS ss)
     (htsize : ∀ j (_hj : j ≤ sprpKeys.size), (t j).size = (t 0).size)
@@ -2306,53 +2309,70 @@ theorem unwrapChain_hopPacket (kem : KEM) (cipher : WideBlockCipher) (macS : MAC
       exact hind
 
 /-- `nextSeed` never fails, so `List.mapM (fun _ => nextSeed)` over any list never fails either —
-it always produces a seed list of the same length, and (though we never need the specific values)
-advances the counter by exactly that length. -/
+it always produces a seed list of the same length, advances the counter by exactly that length,
+and (needed so a caller can state a hypothesis about which *specific* states the run touches, e.g.
+`KEM.Reliable`) draws its `j`-th seed from exactly `str (i + j)`. -/
 private theorem listMapM_nextSeed_succeeds {α : Type} (l : List α) (i : Nat)
     (str : Nat → Vector UInt8 32) :
     ∃ seeds : List (Vector UInt8 32), seeds.length = l.length ∧
       (l.mapM (fun _ => nextSeed) : EStateM String SeedStream (List (Vector UInt8 32)))
-        (i, str) = .ok seeds (i + l.length, str) := by
+        (i, str) = .ok seeds (i + l.length, str) ∧
+      ∀ j (_hj : j < l.length), seeds[j]! = str (i + j) := by
   induction l generalizing i with
-  | nil => exact ⟨[], rfl, rfl⟩
+  | nil => exact ⟨[], rfl, rfl, fun j hj => absurd hj (by simp)⟩
   | cons a l ih =>
-    obtain ⟨seeds, hlen, heq⟩ := ih (i + 1)
-    refine ⟨str i :: seeds, by simp [hlen], ?_⟩
-    simp only [List.mapM_cons, Bind.bind, EStateM.bind, nextSeed]
-    rw [heq]
-    dsimp only [Bind.bind, EStateM.bind, pure, EStateM.pure]
-    simp only [List.length_cons]
-    congr 2
-    omega
+    obtain ⟨seeds, hlen, heq, hcontent⟩ := ih (i + 1)
+    refine ⟨str i :: seeds, by simp [hlen], ?_, ?_⟩
+    · simp only [List.mapM_cons, Bind.bind, EStateM.bind, nextSeed]
+      rw [heq]
+      dsimp only [Bind.bind, EStateM.bind, pure, EStateM.pure]
+      simp only [List.length_cons]
+      congr 2
+      omega
+    · intro j hj
+      cases j with
+      | zero => simp
+      | succ j' =>
+        simp only [List.length_cons] at hj
+        have := hcontent j' (by omega)
+        simpa [show i + (j' + 1) = i + 1 + j' from by omega] using this
 
 /-- As `listMapM_nextSeed_succeeds`, for `Array.mapM` — via `Array.mapM_eq_mapM_toList`. -/
 private theorem arrayMapM_nextSeed_succeeds {α : Type} (l : Array α) (i : Nat)
     (str : Nat → Vector UInt8 32) :
     ∃ seeds : Array (Vector UInt8 32), seeds.size = l.size ∧
       (l.mapM (fun _ => nextSeed) : EStateM String SeedStream (Array (Vector UInt8 32)))
-        (i, str) = .ok seeds (i + l.size, str) := by
-  obtain ⟨seedsL, hlen, heq⟩ := listMapM_nextSeed_succeeds l.toList i str
-  refine ⟨seedsL.toArray, by simp [hlen], ?_⟩
-  rw [Array.mapM_eq_mapM_toList]
-  show (Functor.map List.toArray (l.toList.mapM (fun _ => nextSeed))) (i, str) = _
-  dsimp only [Functor.map, EStateM.map]
-  rw [heq]
-  dsimp only
-  congr 1
+        (i, str) = .ok seeds (i + l.size, str) ∧
+      ∀ j (_hj : j < l.size), seeds[j]! = str (i + j) := by
+  obtain ⟨seedsL, hlen, heq, hcontent⟩ := listMapM_nextSeed_succeeds l.toList i str
+  refine ⟨seedsL.toArray, by simp [hlen], ?_, ?_⟩
+  · rw [Array.mapM_eq_mapM_toList]
+    show (Functor.map List.toArray (l.toList.mapM (fun _ => nextSeed))) (i, str) = _
+    dsimp only [Functor.map, EStateM.map]
+    rw [heq]
+    dsimp only
+    congr 1
+  · intro j hj
+    have hj' : j < l.toList.length := by simpa using hj
+    rw [List.getElem!_toArray]
+    exact hcontent j hj'
 
 /-- **`wrapKEM`, fully unfolded to content.** A successful `wrapKEM` run drew some array of
 per-hop seeds (via `nextSeed`, which never fails — `arrayMapM_nextSeed_succeeds`) and then
-`newKEMPacket` succeeded on it, producing exactly `pkt`'s own bytes. -/
+`newKEMPacket` succeeded on it, producing exactly `pkt`'s own bytes. The `j`-th seed is exactly
+`str (i + j)` — exposed so a caller can state a hypothesis about which specific states the run
+touches (e.g. `KEM.Reliable`). -/
 private theorem wrapKEM_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (path : List PathHop) (filler : ByteArray)
     (payload : Vector UInt8 geom.forwardPayloadLength) (i : Nat) (str : Nat → Vector UInt8 32)
     (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream)
     (h : wrapKEM kem cipher macS kdfS streamS geom path filler payload (i, str) = .ok pkt st') :
     ∃ seeds : Array (Vector UInt8 32), seeds.size = path.length ∧
+      (∀ j (_hj : j < path.length), seeds[j]! = str (i + j)) ∧
       newKEMPacket kem cipher macS kdfS streamS geom seeds filler path.toArray (ofVector payload)
         = Except.ok (ofVector pkt) := by
-  obtain ⟨seeds, hlen, heq⟩ := arrayMapM_nextSeed_succeeds path.toArray i str
-  refine ⟨seeds, by rw [hlen]; simp, ?_⟩
+  obtain ⟨seeds, hlen, heq, hcontent⟩ := arrayMapM_nextSeed_succeeds path.toArray i str
+  refine ⟨seeds, by rw [hlen]; simp, by simpa using hcontent, ?_⟩
   rcases hnk : newKEMPacket kem cipher macS kdfS streamS geom seeds filler path.toArray
       (ofVector payload) with e | pktRaw
   · exfalso
@@ -2414,12 +2434,17 @@ theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) 
     (hpriv : path.map (·.publicKey) = privKeys.map (kemSelfPublicKeyBytes kem))
     (hcmds : ∀ hop ∈ path, ∀ c ∈ hop.commands, c ≠ .null ∧ (∀ id m, c ≠ .nextNodeHop id m))
     (hsurb : ∀ c ∈ (path[path.length - 1]!).commands, ∀ id, c ≠ .surbReply id)
+    -- Every hop's encapsulation must draw from a `Reliable` state — the seed stream this run
+    -- uses must never hit the KEM's rare decoding-failure event. Trivial (`fun _ _ => trivial`)
+    -- for any perfect-correctness KEM (every `KEM` this project has built directly so far);
+    -- real content for one whose `Reliable` isn't the default `True`.
+    (hrel : ∀ j, j < path.length → kem.Reliable (kem.stateFromSeed (st.2 (st.1 + j))))
     (hwrap : wrapKEM kem cipher macS kdfS streamS geom path filler payload st = .ok pkt st') :
     unwrapChainAux (unwrapKEM kem cipher macS kdfS streamS geom) privKeys (ofVector pkt)
       = .ok (some (ofVector payload)) := by
   obtain ⟨i, str⟩ := st
-  obtain ⟨seeds, hseedsize, hnk⟩ := wrapKEM_unfold kem cipher macS kdfS streamS geom path filler
-    payload i str pkt st' hwrap
+  obtain ⟨seeds, hseedsize, hseedcontent, hnk⟩ := wrapKEM_unfold kem cipher macS kdfS streamS geom
+    path filler payload i str pkt st' hwrap
   obtain ⟨hpaysize, hdr, sprpKeys, t, hcreate, ht0content, htstep, hpkteq⟩ :=
     newKEMPacket_unfold kem cipher macS kdfS streamS geom seeds filler path.toArray (ofVector payload)
       (ofVector pkt) hnk
@@ -2431,15 +2456,19 @@ theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) 
   have hgen : nrHops ≤ geom.nrHops := hple
   have hsprp : sprpKeys.size = nrHops := by rw [hsprpeq]; simp
   have hkeyscontent : ∀ i (hi : i < nrHops), ∃ seed ss,
+      kem.Reliable (kem.stateFromSeed seed) ∧
       kemEncap kem (path.toArray[i]!).publicKey seed = Except.ok (kemElements[i]!, ss) ∧
       keys[i]! = deriveHopKeys kdfS ss := by
     intro i hi
     obtain ⟨ct, ss, hkc, hcteq, hkeq⟩ := hkeyscontent0 i hi
-    exact ⟨seeds[i]!, ss, hcteq ▸ hkc, hkeq⟩
+    have hi' : i < path.length := by rwa [show path.length = nrHops from by simp [hnrHopsdef]]
+    have hrel' : kem.Reliable (kem.stateFromSeed seeds[i]!) := by
+      rw [hseedcontent i hi']; exact hrel i hi'
+    exact ⟨seeds[i]!, ss, hrel', hcteq ▸ hkc, hkeq⟩
   have hksize : ∀ j (hj : j < kemElements.size), (kemElements[j]'hj).size = kem.ciphertextSize := by
     intro j hj
     have hj' : j < nrHops := by rwa [hknsize] at hj
-    obtain ⟨seed, ss, hkc, -⟩ := hkeyscontent j hj'
+    obtain ⟨seed, ss, -, hkc, -⟩ := hkeyscontent j hj'
     have := kemEncap_size kem _ seed kemElements[j]! ss hkc
     rwa [getElem!_pos kemElements j hj] at this
   have hriKScontent : ∀ i (hi : i < nrHops), riKeyStream[i]! =
@@ -2585,9 +2614,13 @@ def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS 
     newSURB := wrapKEMSURB kem macS kdfS streamS geom
     newPacketFromSURB := fun surb payload =>
       CryptWalker.Sphinx.SURB.newPacketFromSURB cipher geom (ofVector surb) payload
-    unwrap_complete := fun path privKeys filler payload st pkt st' hpath hpriv hcmds hsurb hwrap =>
+    -- A starting seed stream is `Reliable` when every draw it will ever make keeps `kem`'s own
+    -- rare correctness failure out of reach — trivially `True` for any perfect-correctness `kem`
+    -- (unchanged from `Sphinx`'s default, since `kem.Reliable` itself defaults to `True`).
+    unwrapReliable := fun st => ∀ j, kem.Reliable (kem.stateFromSeed (st.2 (st.1 + j)))
+    unwrap_complete := fun path privKeys filler payload st pkt st' hpath hrel hpriv hcmds hsurb hwrap =>
       wrapKEM_unwrapKEM_complete_valid kem cipher macS kdfS streamS geom hvalid hmactag h16
-        path privKeys filler payload st pkt st' hpath hpriv hcmds hsurb hwrap
+        path privKeys filler payload st pkt st' hpath hpriv hcmds hsurb (fun j _ => hrel j) hwrap
     kem := kem
     not_wrap_resistant := fun key iv target =>
       xorBytes_achieves_any_target (streamS.keystream key iv target.size) target }

@@ -112,6 +112,13 @@ structure Sphinx where
   newPacketFromSURB : Vector UInt8 geometry.surbLength → ByteArray →
     Except String (ByteArray × Vector UInt8 32)
 
+  /-- Which starting states are guaranteed not to run into the backing scheme's rare correctness
+  failure over an unbounded run. `True` for every perfect-correctness backing — every NIKE, and
+  any Diffie-Hellman-based KEM (`KEM.KEM.Reliable`'s own default, unchanged) — since neither has a
+  decoding step with a failure mode to name. A KEM-Sphinx instance backed by a lattice-based KEM
+  (e.g. ML-KEM) overrides this with the real per-draw guarantee its own `KEM.Reliable` needs. -/
+  unwrapReliable : State → Prop := fun _ => True
+
   /-- **Completeness**: any packet `wrap` builds, `unwrap` can undo, given `path` is well-formed —
   no hop's `commands` already contains `null` or `nextNodeHop` (both wire-level sentinels this
   port only ever constructs itself, never something a caller supplies), and the last hop carries
@@ -121,6 +128,7 @@ structure Sphinx where
       (filler : ByteArray) (payload : Vector UInt8 geometry.forwardPayloadLength) (st : State)
       (pkt : Vector UInt8 geometry.packetLength) (st' : State),
     path ≠ [] →
+    unwrapReliable st →
     path.map (·.publicKey) = privKeys.map derivePublicKey →
     (∀ hop ∈ path, ∀ c ∈ hop.commands, c ≠ .null ∧ (∀ id m, c ≠ .nextNodeHop id m)) →
     (∀ c ∈ (path[path.length - 1]!).commands, ∀ id, c ≠ .surbReply id) →
@@ -176,7 +184,7 @@ instance : Inhabited Sphinx := ⟨{
   newSURB := fun _ _ => pure (Vector.emptyWithCapacity 0, ByteArray.empty)
   newPacketFromSURB := fun _ _ => .ok (ByteArray.empty, default)
   unwrap_complete := by
-    intro path privKeys filler payload st pkt st' _hpath _hkeys _hcmds _hsurb hwrap
+    intro path privKeys filler payload st pkt st' _hpath _hrel _hkeys _hcmds _hsurb hwrap
     cases hwrap
 }⟩
 

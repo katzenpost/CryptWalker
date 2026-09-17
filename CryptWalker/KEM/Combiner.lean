@@ -188,13 +188,13 @@ derive the same shared secret from the same inputs. -/
 theorem combinedRoundTrip
     (pk₁ : k₁.PublicKey) (pk₂ : k₂.PublicKey)
     (sk₁ : k₁.PrivateKey) (sk₂ : k₂.PrivateKey)
-    (h₁ : ∀ s c p s', k₁.encap pk₁ s = .ok (c, p) s' →
+    (h₁ : ∀ s, k₁.Reliable s → ∀ c p s', k₁.encap pk₁ s = .ok (c, p) s' →
             ∀ t, ∃ t', k₁.decap sk₁ c t = .ok p t')
-    (h₂ : ∀ s c p s', k₂.encap pk₂ s = .ok (c, p) s' →
+    (h₂ : ∀ s, k₂.Reliable s → ∀ c p s', k₂.encap pk₂ s = .ok (c, p) s' →
             ∀ t, ∃ t', k₂.decap sk₂ c t = .ok p t') :
-    ∀ s c k s', encapM F k₁ k₂ (pk₁, pk₂) s = .ok (c, k) s' →
+    ∀ s, k₁.Reliable s.1 ∧ k₂.Reliable s.2 → ∀ c k s', encapM F k₁ k₂ (pk₁, pk₂) s = .ok (c, k) s' →
       ∀ t, ∃ t', decapM F k₁ k₂ (sk₁, sk₂) c t = .ok k t' := by
-  rintro ⟨s₁, s₂⟩ c k s' hEnc ⟨t₁, t₂⟩
+  rintro ⟨s₁, s₂⟩ ⟨hrel1, hrel2⟩ c k s' hEnc ⟨t₁, t₂⟩
   simp only [encapM, decapM, bind, EStateM.bind, liftFst, liftSnd] at hEnc ⊢
   cases hE1 : k₁.encap pk₁ s₁ with
   | error e sa => rw [hE1] at hEnc; simp at hEnc
@@ -208,8 +208,8 @@ theorem combinedRoundTrip
       obtain ⟨c₂, p₂⟩ := b
       rw [hE2] at hEnc
       simp only at hEnc
-      obtain ⟨t₁', hd₁⟩ := h₁ s₁ c₁ p₁ sa hE1 t₁
-      obtain ⟨t₂', hd₂⟩ := h₂ s₂ c₂ p₂ sb hE2 t₂
+      obtain ⟨t₁', hd₁⟩ := h₁ s₁ hrel1 c₁ p₁ sa hE1 t₁
+      obtain ⟨t₂', hd₂⟩ := h₂ s₂ hrel2 c₂ p₂ sb hE2 t₂
       cases hEnc
       simp only [hd₁, hd₂]
       exact ⟨_, rfl⟩
@@ -273,6 +273,11 @@ def combineKEM : KEM where
   -- and `k₂` happened to be the same scheme — not a case this combiner is meant for.
   stateFromSeed := fun seed => (k₁.stateFromSeed seed, k₂.stateFromSeed seed)
   derivePublicKey := fun sk => (k₁.derivePublicKey sk.1, k₂.derivePublicKey sk.2)
+
+  -- The combined state is reliable exactly when both components' states are — reduces to
+  -- `True ∧ True` when both `k₁`/`k₂` are perfect-correctness KEMs (their own `Reliable`s at the
+  -- trivial default), so this generalizes without weakening the trivial case.
+  Reliable := fun s => k₁.Reliable s.1 ∧ k₂.Reliable s.2
 
   -- Both components' own `honestRoundTrip` witnesses, combined exactly as `generate`'s embedded
   -- proof below combines `k₁.generate`/`k₂.generate`'s — `combinedRoundTrip` already proves this
