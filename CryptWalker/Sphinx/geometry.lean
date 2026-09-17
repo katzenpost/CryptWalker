@@ -117,6 +117,43 @@ def ofKEM (kemSchemeName : String) (userForwardPayloadLength : Nat) (withSURB : 
   | some scheme =>
     pure (buildKEM kemSchemeName scheme.ciphertextSize userForwardPayloadLength withSURB nrHops)
 
+/-- The reverse of `ofNIKE`: given a target *total packet size* rather than a target payload
+size, solve for the `userForwardPayloadLength` that hits it exactly, then build the geometry the
+usual way. Not a katzenpost port — `geo.go`/`geo_impl.go` have no such factory, only the forward
+direction. `headerLength`/`surbLength` depend only on the scheme and hop count, never on the
+payload length (`buildNIKE`'s own definition), so `probe` (built with a throwaway `0` payload)
+reads them off safely before `overhead` is known and the real payload size is solved for. Unlike
+Go's `int`-based arithmetic, which would silently go negative for a too-small target, `Nat`
+forces an explicit check: this throws rather than truncating. -/
+def ofNIKETargetSize (nikeSchemeName : String) (targetPacketLength : Nat) (withSURB : Bool)
+    (nrHops : Nat) : Except String Geometry :=
+  match CryptWalker.NIKE.byName nikeSchemeName with
+  | none => throw s!"geometry has invalid NIKE Scheme {nikeSchemeName}"
+  | some scheme =>
+    -- `probe`'s own `packetLength`, at the throwaway payload `0`, is exactly the fixed overhead
+    -- (header + tag + whatever SURB reservation `withSURB` adds) — no need to re-derive that sum.
+    let probe := buildNIKE nikeSchemeName scheme.publicKeySize 0 withSURB nrHops
+    if targetPacketLength < probe.packetLength then
+      throw s!"geometry: target packet size {targetPacketLength} too small for \
+        {probe.packetLength}-byte overhead"
+    else
+      pure (buildNIKE nikeSchemeName scheme.publicKeySize
+        (targetPacketLength - probe.packetLength) withSURB nrHops)
+
+/-- As `ofNIKETargetSize`, for the KEM side — see there. -/
+def ofKEMTargetSize (kemSchemeName : String) (targetPacketLength : Nat) (withSURB : Bool)
+    (nrHops : Nat) : Except String Geometry :=
+  match CryptWalker.KEM.byName kemSchemeName with
+  | none => throw s!"geometry has invalid KEM Scheme {kemSchemeName}"
+  | some scheme =>
+    let probe := buildKEM kemSchemeName scheme.ciphertextSize 0 withSURB nrHops
+    if targetPacketLength < probe.packetLength then
+      throw s!"geometry: target packet size {targetPacketLength} too small for \
+        {probe.packetLength}-byte overhead"
+    else
+      pure (buildKEM kemSchemeName scheme.ciphertextSize
+        (targetPacketLength - probe.packetLength) withSURB nrHops)
+
 open CryptWalker.NIKE.NIKE (NIKE)
 open CryptWalker.KEM.KEM (KEM)
 
@@ -224,5 +261,44 @@ theorem ofNIKE_payloadTagLength (nikeSchemeName : String) (userForwardPayloadLen
   split at h
   · injection h
   · injection h with h; subst h; rfl
+
+/-- `ofNIKETargetSize` actually hits the target it was asked for — no Go equivalent exists to
+mirror (Go's forward-only factories are never checked, internally, against their own arithmetic
+at all; see `geometry.lean`'s module doc history). Pure `Nat` arithmetic once the `Except`/`if`
+branches are resolved. -/
+theorem ofNIKETargetSize_packetLength (nikeSchemeName : String) (targetPacketLength : Nat)
+    (withSURB : Bool) (nrHops : Nat) (geom : Geometry)
+    (h : ofNIKETargetSize nikeSchemeName targetPacketLength withSURB nrHops = .ok geom) :
+    geom.packetLength = targetPacketLength := by
+  unfold ofNIKETargetSize at h
+  split at h
+  · injection h
+  · rename_i scheme _
+    dsimp only at h
+    split at h
+    · injection h
+    · injection h with h
+      subst h
+      unfold buildNIKE deriveForwardPayloadLength at *
+      dsimp only at *
+      cases withSURB <;> simp_all; omega
+
+/-- As `ofNIKETargetSize_packetLength`, for the KEM side. -/
+theorem ofKEMTargetSize_packetLength (kemSchemeName : String) (targetPacketLength : Nat)
+    (withSURB : Bool) (nrHops : Nat) (geom : Geometry)
+    (h : ofKEMTargetSize kemSchemeName targetPacketLength withSURB nrHops = .ok geom) :
+    geom.packetLength = targetPacketLength := by
+  unfold ofKEMTargetSize at h
+  split at h
+  · injection h
+  · rename_i scheme _
+    dsimp only at h
+    split at h
+    · injection h
+    · injection h with h
+      subst h
+      unfold buildKEM deriveForwardPayloadLength at *
+      dsimp only at *
+      cases withSURB <;> simp_all; omega
 
 end CryptWalker.Sphinx.Geometry
