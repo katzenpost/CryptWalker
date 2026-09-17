@@ -35,11 +35,11 @@ TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 # Bare `lake build` builds only defaultTargets, which is the library. The
 # executables have to be named or the test targets run whatever binary was left
 # in .lake/build/bin by an earlier build.
-EXES := $(TESTS) CryptWalker.NIKE.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors
+EXES := $(TESTS) CryptWalker.NIKE.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.Sphinx.benchmark
 
 .DEFAULT_GOAL := help
 
-.PHONY: all build test bench sorries clean help
+.PHONY: all build test bench bench-sphinx sorries clean help
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors
@@ -111,6 +111,9 @@ gen-sphinx-vectors: build ## build Sphinx packets with the Lean port, for cross-
 
 bench: build ## run the NIKE benchmarks
 	@$(BIN)/CryptWalker-NIKE-benchmark
+
+bench-sphinx: build ## run the Sphinx packet-creation/unwrap benchmarks (all 4 schemes x 3 payload sizes)
+	@$(BIN)/CryptWalker-Sphinx-benchmark
 
 sorries: ## list every declaration still standing on sorry
 	@$(LAKE) build 2>&1 | grep 'declaration uses' | sort -u || echo "no sorries"
