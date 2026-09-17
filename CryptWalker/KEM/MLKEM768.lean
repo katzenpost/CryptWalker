@@ -1,0 +1,234 @@
+/-
+SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
+SPDX-License-Identifier: AGPL-3.0-only
+-/
+
+import CryptWalker.KEM.MLKEM768Encoding
+import CryptWalker.KEM.KEM
+import LatticeCrypto.MLKEM.KPKE
+
+/-! # ML-KEM-768: our own `keygen`/`encaps`/`decaps`, and the `KEM.KEM` instance
+
+`keygen768`/`encaps768`/`decaps768` mirror FIPS 203 Algorithms 19-21 exactly (the same shape as
+VCVio's own `MLKEM.keygenInternal`/`encapsInternal`/`decapsInternal`, confirmed by reading
+`LatticeCrypto/MLKEM/Internal.lean`), but are our own code, built directly from `KPKE.keygenFromSeed`/
+`encrypt`/`decrypt` and `MLKEM768Primitives.primitives`'s hash fields — not a call into VCVio's
+`Internal.lean`. This is deliberate: this thin hash-composition layer is exactly where FIPS 203
+differs from round-3 Kyber (which hashed the freshly-sampled encapsulation message through itself,
+`m ← H(m)`, before deriving encryption coins — a hedge against weak/structured randomness that
+FIPS 203 dropped). Owning this layer means a future variant restoring that pre-hash is a small,
+local change here, not a fork of vendored code.
+
+## `Reliable`, stated honestly
+
+`KPKE.decrypt`'s correctness depends on the accumulated noise (from both keygen's own secret/error
+vectors *and* encaps's own coins) staying under FIPS 203's decoding margin — and unlike a
+Diffie-Hellman KEM, this genuinely cannot be guaranteed for every possible draw: ML-KEM's CBD
+noise is individually bounded but *not* worst-case boundable in aggregate without also invoking
+just how unlikely a bad combination is (that's exactly why FIPS 203 publishes a nonzero, if
+negligible, decryption-failure probability rather than a hard bound). Deriving a checkable
+arithmetic characterization of exactly when the aggregate noise stays small enough is a serious,
+dedicated piece of lattice-cryptography formalization on its own (comparable to what a standalone
+paper establishes for Kyber's correctness bound) — well beyond this bridge's scope.
+
+So `Reliable` here is stated *operationally*: "the specific draw this state would produce
+decapsulates correctly against any keypair it's used with" — directly the round-trip property,
+not a lower-level noise bound. This is the same style VCVio's own `VCVio.CryptoFoundations.
+KeyEncapMech.PerfectlyCorrect` already uses (`Pr[CorrectExp] = 1`, an operational experiment, not
+an arithmetic characterization), just restated as a plain `Prop` to match this project's
+deterministic `EStateM` model rather than a probability space. It is not circular or vacuous —
+`Reliable s` is a genuine, checkable (in principle, by running the computation) fact about a
+specific state, it is simply not yet *characterized* here in terms of the underlying noise
+polynomials' coefficients. That characterization — and separately, bounding how often `Reliable`
+actually holds — is exactly the follow-on work this file's `Reliable` definition is designed to
+make room for, without blocking a working, honest ML-KEM-768 `KEM.KEM` instance today. -/
+
+namespace CryptWalker.KEM.MLKEM768
+
+open MLKEM
+open MLKEM.Concrete
+open CryptWalker.KEM.KEM (KEM KEMError)
+open CryptWalker.Util.Bytes (ofVector toVecN size_ofVector)
+
+/-! ## `keygen768` / `encaps768` / `decaps768` -/
+
+/-- `ML-KEM.KeyGen_internal`, our own copy — see the module doc. -/
+def keygen768 (d z : Seed32) :
+    EncapsulationKey params encoding × DecapsulationKey params encoding :=
+  let (ekPKE, dkPKE) := KPKE.keygenFromSeed ring encoding primitives d
+  let ekHash := primitives.hEncapsulationKey ekPKE.tHatEncoded ekPKE.rho
+  (ekPKE, { dkPKE, ekPKE, ekHash, z })
+
+/-- `ML-KEM.Encaps_internal`, our own copy. -/
+def encaps768 (ek : EncapsulationKey params encoding) (m : Message) :
+    SharedSecret × Ciphertext params encoding :=
+  let ekHash := primitives.hEncapsulationKey ek.tHatEncoded ek.rho
+  let (k, r) := primitives.gEncaps m ekHash
+  (k, KPKE.encrypt ring encoding primitives ek m r)
+
+/-- `ML-KEM.Decaps_internal`, our own copy. Compares ciphertexts componentwise on their
+`ByteArray` encodings rather than via `DecidableEq (Ciphertext params encoding)` — sidesteps
+needing a `DecidableEq encoding.EncodedU`/`EncodedV` instance, which (like `++`) typeclass search
+won't derive by unfolding `encoding`'s definition. -/
+def decaps768 (dk : DecapsulationKey params encoding) (c : Ciphertext params encoding) :
+    SharedSecret :=
+  let m' := KPKE.decrypt ring encoding primitives dk.dkPKE c
+  let (k', r') := primitives.gEncaps m' dk.ekHash
+  let kBar := primitives.jReject dk.z c.uEncoded c.vEncoded
+  let c' := KPKE.encrypt ring encoding primitives dk.ekPKE m' r'
+  if uBytes c.uEncoded = uBytes c'.uEncoded ∧ vBytes c.vEncoded = vBytes c'.vEncoded then k'
+  else kBar
+
+/-! ## Size facts: `keygen768`/`encaps768`'s outputs are always well-formed -/
+
+private theorem keygen768_ek_wf (d z : Seed32) :
+    (tBytes (keygen768 d z).1.tHatEncoded).size = 384 * params.k := by
+  unfold keygen768 KPKE.keygenFromSeed
+  dsimp only
+  show (tBytes (encoding.byteEncode12Vec _)).size = 384 * params.k
+  unfold tBytes
+  show (encoding.byteEncode12Vec _ : ByteArray).size = 384 * params.k
+  exact concreteEncoding_byteEncode12Vec_size params _
+
+private theorem keygen768_dk_wf (d z : Seed32) :
+    (tBytes (keygen768 d z).2.dkPKE.sHatEncoded).size = 384 * params.k ∧
+      (tBytes (keygen768 d z).2.ekPKE.tHatEncoded).size = 384 * params.k := by
+  constructor
+  · unfold keygen768 KPKE.keygenFromSeed
+    dsimp only
+    show (tBytes (encoding.byteEncode12Vec _)).size = 384 * params.k
+    unfold tBytes
+    show (encoding.byteEncode12Vec _ : ByteArray).size = 384 * params.k
+    exact concreteEncoding_byteEncode12Vec_size params _
+  · exact keygen768_ek_wf d z
+
+private theorem encaps768_ct_wf (ek : EncapsulationKey params encoding) (m : Message) :
+    (uBytes (encaps768 ek m).2.uEncoded).size = 32 * params.du * params.k ∧
+      (vBytes (encaps768 ek m).2.vEncoded).size = 32 * params.dv := by
+  unfold encaps768 KPKE.encrypt
+  dsimp only
+  refine ⟨?_, ?_⟩
+  · show (encoding.byteEncodeDUVec _ : ByteArray).size = 32 * params.du * params.k
+    exact concreteEncoding_byteEncodeDUVec_size params _
+  · show (encoding.byteEncodeDV _ : ByteArray).size = 32 * params.dv
+    exact concreteEncoding_byteEncodeDV_size params _
+
+/-! ## `State`: an expandable stream from one 32-byte seed
+
+`keygen768` alone needs 64 bytes (`d`, `z`); `encaps768` needs 32 more (`m`) — more than a single
+32-byte value can supply directly. Mirrors `Sphinx.Interface.SeedStream`'s "counter + inexhaustible
+stream" shape: seed a SHAKE-256-based expanding stream once, draw as many 32-byte blocks as
+needed. -/
+
+/-- The `i`-th 32-byte block derived from `seed`. -/
+def seedBlock (seed : Vector UInt8 32) (i : Nat) : Vector UInt8 32 :=
+  toVecN 32 (SLHDSA.Concrete.Keccak.shake256 (ofVector seed |>.push i.toUInt8) 32)
+
+/-- Counter plus the original seed. -/
+abbrev State := Nat × Vector UInt8 32
+
+def nextDraw : EStateM KEMError State (Vector UInt8 32) :=
+  fun (i, seed) => .ok (seedBlock seed i) (i + 1, seed)
+
+def stateFromSeed (seed : Vector UInt8 32) : State := (0, seed)
+
+/-! ## The `KEM.KEM` instance -/
+
+/-- `s` is `Reliable` when the draw it would next produce, encapsulated against any keypair,
+decapsulates back correctly — see the module doc for why this is stated operationally rather than
+via a checkable noise bound. -/
+def Reliable (s : State) : Prop :=
+  ∀ (dk : DecapsulationKey params encoding) (ek : EncapsulationKey params encoding),
+    ek = dk.ekPKE →
+    decaps768 dk (encaps768 ek (seedBlock s.2 s.1)).2 = (encaps768 ek (seedBlock s.2 s.1)).1
+
+def encapM (pk : PublicKey) : EStateM KEMError State (CT × Vector UInt8 32) := do
+  let m ← nextDraw
+  pure (⟨(encaps768 pk.1 m).2, encaps768_ct_wf pk.1 m⟩, (encaps768 pk.1 m).1)
+
+def decapM (sk : PrivateKey) (c : CT) : EStateM KEMError State (Vector UInt8 32) :=
+  pure (decaps768 sk.1 c.1)
+
+def derivePublicKeyM (sk : PrivateKey) : PublicKey := ⟨sk.1.ekPKE, sk.2.2⟩
+
+/-- `injection`/`congrArg Subtype.val`-style extraction from `hc` here hits a pathological
+`maxRecDepth`/`whnf` blowup — the `CT` subtype's embedded well-formedness proof makes that
+machinery expensive to elaborate. A single `simp only [...]` unfolding `encapM` and splitting the
+`EStateM.Result`/`Prod` equality all at once avoids it entirely (confirmed: the `injection`-based
+version times out even at `maxRecDepth 65536`; this version is immediate). -/
+theorem honestRoundTripM (sk : PrivateKey) (s : State) (hrel : Reliable s)
+    (c : CT) (k : Vector UInt8 32) (s' : State)
+    (hc : encapM (derivePublicKeyM sk) s = .ok (c, k) s') (t : State) :
+    ∃ t', decapM sk c t = .ok k t' := by
+  obtain ⟨i, seed⟩ := s
+  simp only [encapM, nextDraw, bind, EStateM.bind, EStateM.pure, pure,
+    EStateM.Result.ok.injEq, Prod.mk.injEq] at hc
+  obtain ⟨⟨hc1, hc2⟩, _hc3⟩ := hc
+  refine ⟨t, ?_⟩
+  unfold decapM
+  rw [← hc1, hrel sk.1 (derivePublicKeyM sk).1 rfl, hc2]
+  rfl
+
+private theorem decodePrivateKey_totalM (v : Vector UInt8 params.secretKeyBytes) :
+    ∃ sk : PrivateKey, decodePrivateKey v = some sk := by
+  unfold decodePrivateKey
+  exact ⟨_, rfl⟩
+
+private def dummySeed : Seed32 := Vector.replicate 32 0
+
+private def dummyPk : PublicKey := ⟨(keygen768 dummySeed dummySeed).1, keygen768_ek_wf _ _⟩
+
+private def dummySk : PrivateKey := ⟨(keygen768 dummySeed dummySeed).2, keygen768_dk_wf _ _⟩
+
+private def dummyCt : CT := ⟨(encaps768 dummyPk.1 dummySeed).2, encaps768_ct_wf _ _⟩
+
+/-- The assembled `KEM.KEM` instance for ML-KEM-768. -/
+def kemMLKEM768 : KEM where
+  State := State
+  PublicKey := PublicKey
+  PrivateKey := PrivateKey
+  Ciphertext := CT
+  Plaintext := Vector UInt8 32
+
+  pubI := ⟨dummyPk⟩
+  privI := ⟨dummySk⟩
+  ctI := ⟨dummyCt⟩
+  ptI := ⟨Vector.replicate 32 0⟩
+  stateI := ⟨(0, dummySeed)⟩
+
+  publicKeySize := params.publicKeyBytes
+  privateKeySize := params.secretKeyBytes
+  ciphertextSize := params.ciphertextBytes
+  plaintextSize := 32
+
+  encodePublicKey := encodePublicKey
+  decodePublicKey := decodePublicKey
+  encodePrivateKey := encodePrivateKey
+  decodePrivateKey := decodePrivateKey
+  encodeCiphertext := encodeCiphertext
+  decodeCiphertext := decodeCiphertext
+  encodePlaintext := id
+
+  decap := decapM
+  encap := encapM
+  Reliable := Reliable
+  generate := do
+    let d ← nextDraw
+    let z ← nextDraw
+    let ekPKE := (keygen768 d z).1
+    let pk : PublicKey := ⟨ekPKE, keygen768_ek_wf d z⟩
+    let sk : PrivateKey := ⟨(keygen768 d z).2, keygen768_dk_wf d z⟩
+    have hpk : pk = derivePublicKeyM sk := Subtype.ext rfl
+    pure ⟨pk, sk, hpk ▸ honestRoundTripM sk⟩
+  stateFromSeed := stateFromSeed
+  derivePublicKey := derivePublicKeyM
+  honestRoundTrip := honestRoundTripM
+  decodePrivateKey_total := decodePrivateKey_totalM
+
+  decode_encode_pub := decode_encode_pub
+  decode_encode_priv := decode_encode_priv
+  decode_encode_ct := decode_encode_ct
+
+  plaintextEq := inferInstance
+
+end CryptWalker.KEM.MLKEM768

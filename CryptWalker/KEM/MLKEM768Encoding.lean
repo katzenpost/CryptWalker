@@ -74,18 +74,18 @@ theorem bytesV_vBytes (x : encoding.EncodedV) : bytesV (vBytes x) = x := rfl
 
 /-- A well-formed ML-KEM-768 encapsulation key: `tHatEncoded` is exactly `384 * k = 1152` bytes,
 matching what `byteEncode12Vec` (the only thing that ever produces one) guarantees. -/
-def PublicKey : Type :=
+abbrev PublicKey : Type :=
   {ek : EncapsulationKey params encoding // (tBytes ek.tHatEncoded).size = 384 * params.k}
 
 /-- A well-formed decapsulation key: both 12-bit-packed polynomial vectors it carries
 (`dkPKE`'s and its bundled `ekPKE`'s) are exactly `384 * k` bytes. -/
-def PrivateKey : Type := {dk : DecapsulationKey params encoding //
+abbrev PrivateKey : Type := {dk : DecapsulationKey params encoding //
   (tBytes dk.dkPKE.sHatEncoded).size = 384 * params.k ∧
     (tBytes dk.ekPKE.tHatEncoded).size = 384 * params.k}
 
 /-- A well-formed ciphertext: `uEncoded`/`vEncoded` are exactly `32 * du * k`/`32 * dv` bytes,
 matching `byteEncodeDUVec`/`byteEncodeDV`. -/
-def CT : Type := {c : Ciphertext params encoding //
+abbrev CT : Type := {c : Ciphertext params encoding //
   (uBytes c.uEncoded).size = 32 * params.du * params.k ∧ (vBytes c.vEncoded).size = 32 * params.dv}
 
 /-! ## `PublicKey` -/
