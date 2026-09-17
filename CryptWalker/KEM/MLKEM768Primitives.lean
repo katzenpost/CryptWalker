@@ -142,4 +142,15 @@ def primitives : Primitives params encoding :=
 `Concrete.NTT`. -/
 abbrev ring : NTTRingOps := concreteNTTRingOps
 
+/-- `encoding`'s associated types are all literally `ByteArray` for the concrete encoding — the
+same three facts `concretePrimitives` above takes as explicit hypotheses. Typeclass search (e.g.
+resolving `++`/`HAppend`) won't unfold `encoding`'s definition on its own to discover this (it
+uses a stricter transparency than plain elaboration), so `MLKEM768Encoding.lean` casts through
+these explicitly wherever it needs to treat an `EncodedTHat`/`EncodedU`/`EncodedV` value as a
+plain `ByteArray` — mirroring exactly how `Extern.MLKEM.Instance.concretePrimitives` itself
+threads the same three equalities through as parameters, for the same reason. -/
+theorem hEncEq : encoding.EncodedTHat = ByteArray := rfl
+theorem hUEq : encoding.EncodedU = ByteArray := rfl
+theorem hVEq : encoding.EncodedV = ByteArray := rfl
+
 end CryptWalker.KEM.MLKEM768

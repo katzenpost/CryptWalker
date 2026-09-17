@@ -28,6 +28,33 @@ def ofVector {n : Nat} (v : Vector UInt8 n) : ByteArray := ⟨v.toArray⟩
 knows its input is exactly `n` bytes). -/
 def toVecN (n : Nat) (a : ByteArray) : Vector UInt8 n := Vector.ofFn fun i : Fin n => a.get! i.val
 
+/-- `toVecN` undoes `ofVector`: reinterpreting an already-fixed-width vector's own bytes at that
+width recovers it exactly. Bridges an encode/decode round trip stated over `Vector UInt8 n` into
+one stated over a raw `ByteArray`. -/
+@[simp] theorem toVecN_ofVector {n : Nat} (v : Vector UInt8 n) : toVecN n (ofVector v) = v := by
+  apply Vector.ext
+  intro i hi
+  simp only [toVecN, Vector.getElem_ofFn]
+  show (ofVector v).get! i = v[i]
+  show v.toArray[i]! = v[i]
+  simp [getElem!_pos, hi]
+
+/-- `ofVector` undoes `toVecN`, the other direction from `toVecN_ofVector`. -/
+theorem ofVector_toVecN {n : Nat} (X : ByteArray) (h : X.size = n) : ofVector (toVecN n X) = X := by
+  apply ByteArray.ext_getElem
+  · show (Array.ofFn (fun i : Fin n => X.get! i.val)).size = X.size
+    rw [Array.size_ofFn, h]
+  · intro i hi hi'
+    rw [size_ofVector] at hi
+    have hi2 : i < (Array.ofFn (fun i : Fin n => X.get! i.val)).size := by
+      rw [Array.size_ofFn]; exact hi
+    show (Array.ofFn (fun i : Fin n => X.get! i.val))[i]'hi2 = X[i]'hi'
+    rw [Array.getElem_ofFn]
+    obtain ⟨bs⟩ := X
+    show bs[i]! = (⟨bs⟩ : ByteArray)[i]'hi'
+    rw [getElem!_pos bs i hi']
+    rfl
+
 /-- The left half of a concatenation. -/
 theorem extract_append_left (a b : ByteArray) : (a ++ b).extract 0 a.size = a := by
   apply ByteArray.ext_getElem
