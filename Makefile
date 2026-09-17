@@ -43,7 +43,7 @@ EXES := $(TESTS) CryptWalker.NIKE.benchmark CryptWalker.Sphinx.gen_nike_vectors 
 .PHONY: all build test bench bench-sphinx sorries clean help
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
-.PHONY: gen-sphinx-vectors test-mlkem
+.PHONY: gen-sphinx-vectors test-mlkem test-mlkem-kat test-hybrid-sphinx
 
 all: build ## build everything, library and executables
 
@@ -113,6 +113,12 @@ gen-sphinx-vectors: build ## build Sphinx packets with the Lean port, for cross-
 test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer vectors
 	@$(BIN)/CryptWalker-Sphinx-kem_selftest
 	@$(BIN)/CryptWalker-KEM-mlkem768_test
+
+test-mlkem-kat: build ## ML-KEM-768: NIST ACVP known-answer vectors only
+	@$(BIN)/CryptWalker-KEM-mlkem768_test
+
+test-hybrid-sphinx: build ## KEM-Sphinx round-trip self-test for the X25519+ML-KEM-768 hybrid only
+	@$(BIN)/CryptWalker-Sphinx-kem_selftest mlkem768-x25519-kem
 
 bench: build ## run the NIKE benchmarks
 	@$(BIN)/CryptWalker-NIKE-benchmark

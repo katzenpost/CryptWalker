@@ -389,18 +389,26 @@ def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
 
   pure ok
 
-def main : IO UInt32 := do
-  let okLadder ← runSuite "x25519-ladder-kem" x25519Ladder
-  IO.println ""
-  let okGroup ← runSuite "x25519-kem" x25519Group
-  IO.println ""
-  let okMLKEM ← runSuite "mlkem768-kem" mlkem768
-  IO.println ""
-  let okHybrid ← runSuite "mlkem768-x25519-kem" mlkem768X25519
-  IO.println ""
-  if okLadder && okGroup && okMLKEM && okHybrid then
-    IO.println "all KEM-Sphinx round-trip self-tests passed (all four schemes)"
-    pure 0
-  else
-    IO.eprintln "KEM-Sphinx round-trip self-tests FAILED"
-    pure 1
+def main (args : List String) : IO UInt32 := do
+  match args with
+  | [schemeName] =>
+    match CryptWalker.KEM.byName schemeName with
+    | none => IO.eprintln s!"unknown KEM scheme: {schemeName}"; pure 1
+    | some kem =>
+      let ok ← runSuite schemeName kem
+      if ok then pure 0 else IO.eprintln "KEM-Sphinx round-trip self-tests FAILED"; pure 1
+  | _ =>
+    let okLadder ← runSuite "x25519-ladder-kem" x25519Ladder
+    IO.println ""
+    let okGroup ← runSuite "x25519-kem" x25519Group
+    IO.println ""
+    let okMLKEM ← runSuite "mlkem768-kem" mlkem768
+    IO.println ""
+    let okHybrid ← runSuite "mlkem768-x25519-kem" mlkem768X25519
+    IO.println ""
+    if okLadder && okGroup && okMLKEM && okHybrid then
+      IO.println "all KEM-Sphinx round-trip self-tests passed (all four schemes)"
+      pure 0
+    else
+      IO.eprintln "KEM-Sphinx round-trip self-tests FAILED"
+      pure 1
