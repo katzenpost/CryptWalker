@@ -5,6 +5,7 @@ import CryptWalker.NIKE.NIKE
 import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Combiner
+import CryptWalker.KEM.MLKEM768
 import CryptWalker.Hash.Sha2
 
 open CryptWalker.NIKE
@@ -102,7 +103,14 @@ def x25519LadderEntry : RegistryEntry := { hpqcName := "x25519-ladder-kem", sche
 
 def x25519GroupEntry : RegistryEntry := { hpqcName := "x25519-kem", scheme := kemX25519 }
 
-def registry : List RegistryEntry := [x25519LadderEntry, x25519GroupEntry]
+/-- ML-KEM-768 (FIPS 203), post-quantum — `CryptWalker.KEM.MLKEM768.kemMLKEM768`. Unlike the two
+X25519 entries above (Diffie-Hellman-based, so `KEM.Reliable` stays at its trivial default), this
+one's `Reliable` is a real, non-trivial condition (see `MLKEM768.lean`'s module doc) — any caller
+building a `KEMSphinxScheme` from this entry must discharge it, not just `trivial`. -/
+def mlkem768Entry : RegistryEntry :=
+  { hpqcName := "mlkem768-kem", scheme := CryptWalker.KEM.MLKEM768.kemMLKEM768 }
+
+def registry : List RegistryEntry := [x25519LadderEntry, x25519GroupEntry, mlkem768Entry]
 
 /-- `hpqc/kem/schemes.ByName`, ported: case-insensitive lookup, `none` for any name not in
 `registry` — which, unlike `hpqc`'s own registry, is most of `hpqc/kem/schemes.All()`: this
