@@ -4,6 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
  -/
 
 import CryptWalker.KEM.KEM
+import CryptWalker.Util.Bytes
 
 namespace CryptWalker.KEM.Combiner
 open CryptWalker.KEM.KEM
@@ -143,171 +144,492 @@ theorem splitPRF_pair (F : PRF) (s₁ c₁ s₂ c₂ : ByteArray) :
                (F.keyed (F.deriveKey s₂) (transcript [c₁, c₂])) := by
   simp [splitPRF, splitPRFCore, zero_xorBytes]
 
-/-! ### The combined KEM -/
+/-! ### The combined KEM, over one KEM plus a (possibly empty) list of more
 
-variable (F : PRF) (k₁ k₂ : KEM)
+`splitPRF` above is already `n`-ary, matching hpqc's `kem/combiner` (a plain `[]kem.Scheme`,
+rejected if empty). The shape here is the same one `splitPRF` itself takes — one required
+component plus a list of the rest — rather than a `List KEM` with a separate nonemptiness proof:
+`combineKEM F k₀ [k₁, k₂]` is the three-way combiner, `combineKEM F k₀ []` degenerates to `k₀`
+alone (`splitPRFCore [_]` already reduces to a single keyed hash, `zero_xorBytes`).
 
-/-- Run a `k₁` action against the left half of a product state. -/
-def liftFst {α} (x : EStateM KEMError k₁.State α) :
-    EStateM KEMError (k₁.State × k₂.State) α :=
-  fun (s₁, s₂) => match x s₁ with
-    | .ok a s₁'    => .ok a (s₁', s₂)
-    | .error e s₁' => .error e (s₁', s₂)
+The combined `State`/`PublicKey`/`PrivateKey`/`Ciphertext` for the tail list are nested products,
+one component per ingredient KEM, built by recursion on that list (`PUnit` closes an empty tail);
+the head component `k₀` is threaded alongside as a plain pair, not folded into the same recursion,
+since a nonempty list already needs no separate "at least one" apparatus once split this way. -/
 
-def liftSnd {α} (x : EStateM KEMError k₂.State α) :
-    EStateM KEMError (k₁.State × k₂.State) α :=
-  fun (s₁, s₂) => match x s₂ with
-    | .ok a s₂'    => .ok a (s₁, s₂')
-    | .error e s₂' => .error e (s₁, s₂')
+open CryptWalker.Util.Bytes (ofVector toVecN size_ofVector ofVector_toVecN toVecN_ofVector
+  extract_append_left extract_append_right)
 
-/-- The combined shared secret, as a pure function of both secrets and both
-ciphertexts. Both ciphertexts enter *both* component hashes. -/
-def combine (p₁ : k₁.Plaintext) (p₂ : k₂.Plaintext)
-    (c₁ : k₁.Ciphertext) (c₂ : k₂.Ciphertext) : Bytes32 :=
-  splitPRF F
-    (toBytes (k₁.encodePlaintext p₁), toBytes (k₁.encodeCiphertext c₁))
-    [(toBytes (k₂.encodePlaintext p₂), toBytes (k₂.encodeCiphertext c₂))]
+def CombinedState : List KEM → Type
+  | [] => PUnit
+  | k :: ks => k.State × CombinedState ks
 
-def encapM (pk : k₁.PublicKey × k₂.PublicKey) :
-    EStateM KEMError (k₁.State × k₂.State)
-      ((k₁.Ciphertext × k₂.Ciphertext) × Bytes32) := do
-  let (c₁, p₁) ← liftFst k₁ k₂ (k₁.encap pk.1)
-  let (c₂, p₂) ← liftSnd k₁ k₂ (k₂.encap pk.2)
-  pure ((c₁, c₂), combine F k₁ k₂ p₁ p₂ c₁ c₂)
+def CombinedPublicKey : List KEM → Type
+  | [] => PUnit
+  | k :: ks => k.PublicKey × CombinedPublicKey ks
 
-def decapM (sk : k₁.PrivateKey × k₂.PrivateKey)
-    (ct : k₁.Ciphertext × k₂.Ciphertext) :
-    EStateM KEMError (k₁.State × k₂.State) Bytes32 := do
-  let p₁ ← liftFst k₁ k₂ (k₁.decap sk.1 ct.1)
-  let p₂ ← liftSnd k₁ k₂ (k₂.decap sk.2 ct.2)
-  pure (combine F k₁ k₂ p₁ p₂ ct.1 ct.2)
+def CombinedPrivateKey : List KEM → Type
+  | [] => PUnit
+  | k :: ks => k.PrivateKey × CombinedPrivateKey ks
 
-/-- Correctness: if both ingredient KEMs round-trip, so does the combination.
-`combine` is a pure function of the plaintexts and ciphertexts, so both sides
-derive the same shared secret from the same inputs. -/
-theorem combinedRoundTrip
-    (pk₁ : k₁.PublicKey) (pk₂ : k₂.PublicKey)
-    (sk₁ : k₁.PrivateKey) (sk₂ : k₂.PrivateKey)
-    (h₁ : ∀ s, k₁.Reliable s → ∀ c p s', k₁.encap pk₁ s = .ok (c, p) s' →
-            ∀ t, ∃ t', k₁.decap sk₁ c t = .ok p t')
-    (h₂ : ∀ s, k₂.Reliable s → ∀ c p s', k₂.encap pk₂ s = .ok (c, p) s' →
-            ∀ t, ∃ t', k₂.decap sk₂ c t = .ok p t') :
-    ∀ s, k₁.Reliable s.1 ∧ k₂.Reliable s.2 → ∀ c k s', encapM F k₁ k₂ (pk₁, pk₂) s = .ok (c, k) s' →
-      ∀ t, ∃ t', decapM F k₁ k₂ (sk₁, sk₂) c t = .ok k t' := by
-  rintro ⟨s₁, s₂⟩ ⟨hrel1, hrel2⟩ c k s' hEnc ⟨t₁, t₂⟩
-  simp only [encapM, decapM, bind, EStateM.bind, liftFst, liftSnd] at hEnc ⊢
-  cases hE1 : k₁.encap pk₁ s₁ with
-  | error e sa => rw [hE1] at hEnc; simp at hEnc
+def CombinedCiphertext : List KEM → Type
+  | [] => PUnit
+  | k :: ks => k.Ciphertext × CombinedCiphertext ks
+
+def defaultState : (ks : List KEM) → CombinedState ks
+  | [] => ⟨⟩
+  | k :: ks => (k.stateI.default, defaultState ks)
+
+def defaultPublicKey : (ks : List KEM) → CombinedPublicKey ks
+  | [] => ⟨⟩
+  | k :: ks => (k.pubI.default, defaultPublicKey ks)
+
+def defaultPrivateKey : (ks : List KEM) → CombinedPrivateKey ks
+  | [] => ⟨⟩
+  | k :: ks => (k.privI.default, defaultPrivateKey ks)
+
+def defaultCiphertext : (ks : List KEM) → CombinedCiphertext ks
+  | [] => ⟨⟩
+  | k :: ks => (k.ctI.default, defaultCiphertext ks)
+
+def sumPublicKeySize : List KEM → Nat
+  | [] => 0
+  | k :: ks => k.publicKeySize + sumPublicKeySize ks
+
+def sumPrivateKeySize : List KEM → Nat
+  | [] => 0
+  | k :: ks => k.privateKeySize + sumPrivateKeySize ks
+
+def sumCiphertextSize : List KEM → Nat
+  | [] => 0
+  | k :: ks => k.ciphertextSize + sumCiphertextSize ks
+
+def stateFromSeedN : (ks : List KEM) → Vector UInt8 32 → CombinedState ks
+  | [], _ => ⟨⟩
+  | k :: ks, seed => (k.stateFromSeed seed, stateFromSeedN ks seed)
+
+def derivePublicKeyN : (ks : List KEM) → CombinedPrivateKey ks → CombinedPublicKey ks
+  | [], _ => ⟨⟩
+  | k :: ks, (sk, sks) => (k.derivePublicKey sk, derivePublicKeyN ks sks)
+
+def ReliableN : (ks : List KEM) → CombinedState ks → Prop
+  | [], _ => True
+  | k :: ks, (s, ss) => k.Reliable s ∧ ReliableN ks ss
+
+/-! #### Wire encoding: `ByteArray` throughout, converted to/from a fixed-width `Vector` only at
+the top-level `combineKEM` record (matching `MLKEM768Encoding.lean`'s convention) — avoids ever
+needing a size-indexed `Vector` append, which structural recursion on `ks` can't produce directly. -/
+
+def encodePublicKeyN : (ks : List KEM) → CombinedPublicKey ks → ByteArray
+  | [], _ => ByteArray.empty
+  | k :: ks, (pk, pks) => ofVector (k.encodePublicKey pk) ++ encodePublicKeyN ks pks
+
+def decodePublicKeyN : (ks : List KEM) → ByteArray → Option (CombinedPublicKey ks)
+  | [], _ => some ⟨⟩
+  | k :: ks, buf => do
+      let pk ← k.decodePublicKey (toVecN k.publicKeySize (buf.extract 0 k.publicKeySize))
+      let pks ← decodePublicKeyN ks (buf.extract k.publicKeySize buf.size)
+      pure (pk, pks)
+
+def encodePrivateKeyN : (ks : List KEM) → CombinedPrivateKey ks → ByteArray
+  | [], _ => ByteArray.empty
+  | k :: ks, (sk, sks) => ofVector (k.encodePrivateKey sk) ++ encodePrivateKeyN ks sks
+
+def decodePrivateKeyN : (ks : List KEM) → ByteArray → Option (CombinedPrivateKey ks)
+  | [], _ => some ⟨⟩
+  | k :: ks, buf => do
+      let sk ← k.decodePrivateKey (toVecN k.privateKeySize (buf.extract 0 k.privateKeySize))
+      let sks ← decodePrivateKeyN ks (buf.extract k.privateKeySize buf.size)
+      pure (sk, sks)
+
+def encodeCiphertextN : (ks : List KEM) → CombinedCiphertext ks → ByteArray
+  | [], _ => ByteArray.empty
+  | k :: ks, (c, cs) => ofVector (k.encodeCiphertext c) ++ encodeCiphertextN ks cs
+
+def decodeCiphertextN : (ks : List KEM) → ByteArray → Option (CombinedCiphertext ks)
+  | [], _ => some ⟨⟩
+  | k :: ks, buf => do
+      let c ← k.decodeCiphertext (toVecN k.ciphertextSize (buf.extract 0 k.ciphertextSize))
+      let cs ← decodeCiphertextN ks (buf.extract k.ciphertextSize buf.size)
+      pure (c, cs)
+
+theorem encodePublicKeyN_size : ∀ (ks : List KEM) (pk : CombinedPublicKey ks),
+    (encodePublicKeyN ks pk).size = sumPublicKeySize ks
+  | [], _ => rfl
+  | k :: ks, (pk, pks) => by
+      show (ofVector (k.encodePublicKey pk) ++ encodePublicKeyN ks pks).size
+        = k.publicKeySize + sumPublicKeySize ks
+      rw [ByteArray.size_append, size_ofVector, encodePublicKeyN_size ks pks]
+
+theorem encodePrivateKeyN_size : ∀ (ks : List KEM) (sk : CombinedPrivateKey ks),
+    (encodePrivateKeyN ks sk).size = sumPrivateKeySize ks
+  | [], _ => rfl
+  | k :: ks, (sk, sks) => by
+      show (ofVector (k.encodePrivateKey sk) ++ encodePrivateKeyN ks sks).size
+        = k.privateKeySize + sumPrivateKeySize ks
+      rw [ByteArray.size_append, size_ofVector, encodePrivateKeyN_size ks sks]
+
+theorem encodeCiphertextN_size : ∀ (ks : List KEM) (c : CombinedCiphertext ks),
+    (encodeCiphertextN ks c).size = sumCiphertextSize ks
+  | [], _ => rfl
+  | k :: ks, (c, cs) => by
+      show (ofVector (k.encodeCiphertext c) ++ encodeCiphertextN ks cs).size
+        = k.ciphertextSize + sumCiphertextSize ks
+      rw [ByteArray.size_append, size_ofVector, encodeCiphertextN_size ks cs]
+
+theorem decode_encode_pub_N : ∀ (ks : List KEM) (pk : CombinedPublicKey ks),
+    decodePublicKeyN ks (encodePublicKeyN ks pk) = some pk
+  | [], ⟨⟩ => rfl
+  | k :: ks, (pk, pks) => by
+      have hleft : (ofVector (k.encodePublicKey pk) ++ encodePublicKeyN ks pks).extract 0
+          k.publicKeySize = ofVector (k.encodePublicKey pk) := by
+        have h := extract_append_left (ofVector (k.encodePublicKey pk)) (encodePublicKeyN ks pks)
+        rwa [size_ofVector] at h
+      have hright : (ofVector (k.encodePublicKey pk) ++ encodePublicKeyN ks pks).extract
+          k.publicKeySize (ofVector (k.encodePublicKey pk) ++ encodePublicKeyN ks pks).size
+          = encodePublicKeyN ks pks := by
+        have h := extract_append_right (ofVector (k.encodePublicKey pk)) (encodePublicKeyN ks pks)
+        rwa [← ByteArray.size_append, size_ofVector] at h
+      show decodePublicKeyN (k :: ks)
+        (ofVector (k.encodePublicKey pk) ++ encodePublicKeyN ks pks) = some (pk, pks)
+      unfold decodePublicKeyN
+      rw [hleft, hright, toVecN_ofVector, k.decode_encode_pub pk, decode_encode_pub_N ks pks]
+      rfl
+
+theorem decode_encode_priv_N : ∀ (ks : List KEM) (sk : CombinedPrivateKey ks),
+    decodePrivateKeyN ks (encodePrivateKeyN ks sk) = some sk
+  | [], ⟨⟩ => rfl
+  | k :: ks, (sk, sks) => by
+      have hleft : (ofVector (k.encodePrivateKey sk) ++ encodePrivateKeyN ks sks).extract 0
+          k.privateKeySize = ofVector (k.encodePrivateKey sk) := by
+        have h := extract_append_left (ofVector (k.encodePrivateKey sk)) (encodePrivateKeyN ks sks)
+        rwa [size_ofVector] at h
+      have hright : (ofVector (k.encodePrivateKey sk) ++ encodePrivateKeyN ks sks).extract
+          k.privateKeySize (ofVector (k.encodePrivateKey sk) ++ encodePrivateKeyN ks sks).size
+          = encodePrivateKeyN ks sks := by
+        have h := extract_append_right (ofVector (k.encodePrivateKey sk)) (encodePrivateKeyN ks sks)
+        rwa [← ByteArray.size_append, size_ofVector] at h
+      show decodePrivateKeyN (k :: ks)
+        (ofVector (k.encodePrivateKey sk) ++ encodePrivateKeyN ks sks) = some (sk, sks)
+      unfold decodePrivateKeyN
+      rw [hleft, hright, toVecN_ofVector, k.decode_encode_priv sk, decode_encode_priv_N ks sks]
+      rfl
+
+theorem decode_encode_ct_N : ∀ (ks : List KEM) (c : CombinedCiphertext ks),
+    decodeCiphertextN ks (encodeCiphertextN ks c) = some c
+  | [], ⟨⟩ => rfl
+  | k :: ks, (c, cs) => by
+      have hleft : (ofVector (k.encodeCiphertext c) ++ encodeCiphertextN ks cs).extract 0
+          k.ciphertextSize = ofVector (k.encodeCiphertext c) := by
+        have h := extract_append_left (ofVector (k.encodeCiphertext c)) (encodeCiphertextN ks cs)
+        rwa [size_ofVector] at h
+      have hright : (ofVector (k.encodeCiphertext c) ++ encodeCiphertextN ks cs).extract
+          k.ciphertextSize (ofVector (k.encodeCiphertext c) ++ encodeCiphertextN ks cs).size
+          = encodeCiphertextN ks cs := by
+        have h := extract_append_right (ofVector (k.encodeCiphertext c)) (encodeCiphertextN ks cs)
+        rwa [← ByteArray.size_append, size_ofVector] at h
+      show decodeCiphertextN (k :: ks)
+        (ofVector (k.encodeCiphertext c) ++ encodeCiphertextN ks cs) = some (c, cs)
+      unfold decodeCiphertextN
+      rw [hleft, hright, toVecN_ofVector, k.decode_encode_ct c, decode_encode_ct_N ks cs]
+      rfl
+
+/-! #### Running the tail list's `encap`/`decap`, threading each component's own state -/
+
+def liftHead {k : KEM} {ks : List KEM} {α} (x : EStateM KEMError k.State α) :
+    EStateM KEMError (k.State × CombinedState ks) α :=
+  fun (s, rest) => match x s with
+    | .ok a s'    => .ok a (s', rest)
+    | .error e s' => .error e (s', rest)
+
+def liftTail {k : KEM} {ks : List KEM} {α} (x : EStateM KEMError (CombinedState ks) α) :
+    EStateM KEMError (k.State × CombinedState ks) α :=
+  fun (s, rest) => match x rest with
+    | .ok a rest'    => .ok a (s, rest')
+    | .error e rest' => .error e (s, rest')
+
+/-- Each tail component's own `(shared secret, ciphertext)`, both encoded to `ByteArray` — the
+shape `splitPRF` needs. -/
+def encapAllM : (ks : List KEM) → CombinedPublicKey ks →
+    EStateM KEMError (CombinedState ks) (CombinedCiphertext ks × List (ByteArray × ByteArray))
+  | [], _ => pure (⟨⟩, [])
+  | k :: ks, (pk, pks) => do
+      let (c, p) ← liftHead (k.encap pk)
+      let (cs, comps) ← liftTail (encapAllM ks pks)
+      pure ((c, cs), (ofVector (k.encodePlaintext p), ofVector (k.encodeCiphertext c)) :: comps)
+
+def decapAllM : (ks : List KEM) → CombinedPrivateKey ks → CombinedCiphertext ks →
+    EStateM KEMError (CombinedState ks) (List (ByteArray × ByteArray))
+  | [], _, _ => pure []
+  | k :: ks, (sk, sks), (c, cs) => do
+      let p ← liftHead (k.decap sk c)
+      let comps ← liftTail (decapAllM ks sks cs)
+      pure ((ofVector (k.encodePlaintext p), ofVector (k.encodeCiphertext c)) :: comps)
+
+variable (F : PRF)
+
+def encapM (k₀ : KEM) (ks : List KEM) (pk : k₀.PublicKey × CombinedPublicKey ks) :
+    EStateM KEMError (k₀.State × CombinedState ks)
+      ((k₀.Ciphertext × CombinedCiphertext ks) × Bytes32) := do
+  let (c₀, p₀) ← liftHead (k₀.encap pk.1)
+  let (cs, comps) ← liftTail (encapAllM ks pk.2)
+  pure ((c₀, cs), splitPRF F (ofVector (k₀.encodePlaintext p₀), ofVector (k₀.encodeCiphertext c₀)) comps)
+
+def decapM (k₀ : KEM) (ks : List KEM) (sk : k₀.PrivateKey × CombinedPrivateKey ks)
+    (ct : k₀.Ciphertext × CombinedCiphertext ks) :
+    EStateM KEMError (k₀.State × CombinedState ks) Bytes32 := do
+  let p₀ ← liftHead (k₀.decap sk.1 ct.1)
+  let comps ← liftTail (decapAllM ks sk.2 ct.2)
+  pure (splitPRF F (ofVector (k₀.encodePlaintext p₀), ofVector (k₀.encodeCiphertext ct.1)) comps)
+
+/-! #### Correctness -/
+
+/-- Each tail component's own round-trip law, for a *specific* `(pk, sk)` pair per component —
+generic over any pairing, not just `pk = derivePublicKey sk`, matching what `generate`'s own
+embedded proof gives (a specific drawn `pk`, not necessarily syntactically `derivePublicKey sk`). -/
+def AllHonestFor : (ks : List KEM) → CombinedPublicKey ks → CombinedPrivateKey ks → Prop
+  | [], _, _ => True
+  | k :: ks, (pk, pks), (sk, sks) =>
+      (∀ s, k.Reliable s → ∀ c p s', k.encap pk s = .ok (c, p) s' →
+        ∀ t, ∃ t', k.decap sk c t = .ok p t') ∧ AllHonestFor ks pks sks
+
+theorem allHonestFor_derivePublicKey :
+    ∀ (ks : List KEM) (sks : CombinedPrivateKey ks), AllHonestFor ks (derivePublicKeyN ks sks) sks
+  | [], _ => trivial
+  | k :: ks, (sk, sks) => ⟨k.honestRoundTrip sk, allHonestFor_derivePublicKey ks sks⟩
+
+/-- `decapAllM` recovers exactly the `(shared secret, ciphertext)` list `encapAllM` produced —
+the invariant that lets `combinedRoundTrip` avoid reasoning about `splitPRF` at all, since equal
+lists give an equal combined key for free. -/
+theorem encapAllM_decapAllM :
+    ∀ (ks : List KEM) (pks : CombinedPublicKey ks) (sks : CombinedPrivateKey ks),
+      AllHonestFor ks pks sks →
+      ∀ s, ReliableN ks s → ∀ ct comps s',
+        encapAllM ks pks s = .ok (ct, comps) s' →
+        ∀ t, ∃ t', decapAllM ks sks ct t = .ok comps t'
+  | [], _, _, _, s, _, ct, comps, s', hEnc, t => by
+      simp only [encapAllM, pure, EStateM.pure] at hEnc
+      injection hEnc with h1 h2
+      injection h1 with _ hcomps
+      subst hcomps
+      exact ⟨t, by simp [decapAllM, pure, EStateM.pure]⟩
+  | k :: ks, (pk, pks), (sk, sks), ⟨hk, hks⟩, (s0, srest), ⟨hrelk, hrelks⟩, ct, comps, s', hEnc,
+      (t0, trest) => by
+      simp only [encapAllM, liftHead, liftTail, bind, EStateM.bind] at hEnc
+      cases hE0 : k.encap pk s0 with
+      | error e sa => rw [hE0] at hEnc; simp at hEnc
+      | ok a sa =>
+        obtain ⟨c0, p0⟩ := a
+        rw [hE0] at hEnc
+        simp only at hEnc
+        cases hEr : encapAllM ks pks srest with
+        | error e sb => rw [hEr] at hEnc; simp at hEnc
+        | ok b sb =>
+          obtain ⟨cs, comps'⟩ := b
+          rw [hEr] at hEnc
+          simp only at hEnc
+          injection hEnc with h1 h2
+          injection h1 with hct hcomps
+          obtain ⟨t0', hd0⟩ := hk s0 hrelk c0 p0 sa hE0 t0
+          obtain ⟨trest', hdRest⟩ :=
+            encapAllM_decapAllM ks pks sks hks srest hrelks cs comps' sb hEr trest
+          refine ⟨(t0', trest'), ?_⟩
+          show decapAllM (k :: ks) (sk, sks) ct (t0, trest) = .ok comps (t0', trest')
+          obtain rfl : ct = (c0, cs) := hct.symm
+          simp only [decapAllM, liftHead, liftTail, bind, EStateM.bind]
+          rw [hd0]
+          simp only
+          rw [hdRest]
+          simp only
+          rw [← hcomps]
+          rfl
+
+/-- Correctness: if the head KEM and every tail KEM round-trip for the given `(pk, sk)` pairs, so
+does the combination. Generic over `pk`/`pks`, not hardwired to `derivePublicKey` — `generate`
+below needs it at whatever `pk` it actually drew; `honestRoundTrip` needs it at `derivePublicKey`. -/
+theorem combinedRoundTrip (k₀ : KEM) (ks : List KEM)
+    (pk₀ : k₀.PublicKey) (pks : CombinedPublicKey ks)
+    (sk₀ : k₀.PrivateKey) (sks : CombinedPrivateKey ks)
+    (h₀ : ∀ s, k₀.Reliable s → ∀ c p s', k₀.encap pk₀ s = .ok (c, p) s' →
+            ∀ t, ∃ t', k₀.decap sk₀ c t = .ok p t')
+    (hs : AllHonestFor ks pks sks) :
+    ∀ s, k₀.Reliable s.1 ∧ ReliableN ks s.2 → ∀ ct key s',
+      encapM F k₀ ks (pk₀, pks) s = .ok (ct, key) s' →
+      ∀ t, ∃ t', decapM F k₀ ks (sk₀, sks) ct t = .ok key t' := by
+  rintro ⟨s0, srest⟩ ⟨hrel0, hrelrest⟩ ct key s' hEnc ⟨t0, trest⟩
+  simp only [encapM, liftHead, liftTail, bind, EStateM.bind] at hEnc
+  cases hE0 : k₀.encap pk₀ s0 with
+  | error e sa => rw [hE0] at hEnc; simp at hEnc
   | ok a sa =>
-    obtain ⟨c₁, p₁⟩ := a
-    rw [hE1] at hEnc
+    obtain ⟨c0, p0⟩ := a
+    rw [hE0] at hEnc
     simp only at hEnc
-    cases hE2 : k₂.encap pk₂ s₂ with
-    | error e sb => rw [hE2] at hEnc; simp at hEnc
+    cases hEr : encapAllM ks pks srest with
+    | error e sb => rw [hEr] at hEnc; simp at hEnc
     | ok b sb =>
-      obtain ⟨c₂, p₂⟩ := b
-      rw [hE2] at hEnc
+      obtain ⟨cs, comps⟩ := b
+      rw [hEr] at hEnc
       simp only at hEnc
-      obtain ⟨t₁', hd₁⟩ := h₁ s₁ hrel1 c₁ p₁ sa hE1 t₁
-      obtain ⟨t₂', hd₂⟩ := h₂ s₂ hrel2 c₂ p₂ sb hE2 t₂
-      cases hEnc
-      simp only [hd₁, hd₂]
-      exact ⟨_, rfl⟩
+      injection hEnc with h1 h2
+      injection h1 with hct hkey
+      obtain ⟨t0', hd0⟩ := h₀ s0 hrel0 c0 p0 sa hE0 t0
+      obtain ⟨trest', hdRest⟩ :=
+        encapAllM_decapAllM ks pks sks hs srest hrelrest cs comps sb hEr trest
+      refine ⟨(t0', trest'), ?_⟩
+      show decapM F k₀ ks (sk₀, sks) ct (t0, trest) = .ok key (t0', trest')
+      obtain rfl : ct = (c0, cs) := hct.symm
+      simp only [decapM, liftHead, liftTail, bind, EStateM.bind]
+      rw [hd0]
+      simp only
+      rw [hdRest]
+      simp only
+      rw [← hkey]
+      rfl
 
-def splitL {a b : Nat} (v : Vector UInt8 (a + b)) : Vector UInt8 a :=
-  (v.take a).cast (by omega)
+/-- `generate`, run for the tail list: each component's own keypair, plus each component's own
+`AllHonestFor` witness (its own `generate`'s embedded proof, threaded through unchanged). -/
+def generateN : (ks : List KEM) → EStateM KEMError (CombinedState ks)
+    (Σ' (pk : CombinedPublicKey ks), {sk : CombinedPrivateKey ks // AllHonestFor ks pk sk})
+  | [] => pure ⟨⟨⟩, ⟨⟩, trivial⟩
+  | k :: ks => do
+      let ⟨pk, sk, h⟩ ← liftHead k.generate
+      let ⟨pks, sks, hs⟩ ← liftTail (generateN ks)
+      pure ⟨(pk, pks), (sk, sks), h, hs⟩
 
-def splitR {a b : Nat} (v : Vector UInt8 (a + b)) : Vector UInt8 b :=
-  (v.drop a).cast (by omega)
+theorem decodePrivateKeyN_total : ∀ (ks : List KEM) (b : ByteArray), ∃ sk, decodePrivateKeyN ks b = some sk
+  | [], _ => ⟨⟨⟩, rfl⟩
+  | k :: ks, b => by
+      obtain ⟨sk, hsk⟩ := k.decodePrivateKey_total
+        (toVecN k.privateKeySize (b.extract 0 k.privateKeySize))
+      obtain ⟨sks, hsks⟩ := decodePrivateKeyN_total ks (b.extract k.privateKeySize b.size)
+      refine ⟨(sk, sks), ?_⟩
+      show decodePrivateKeyN (k :: ks) b = some (sk, sks)
+      unfold decodePrivateKeyN
+      rw [hsk, hsks]
+      rfl
 
-theorem splitL_append {a b : Nat} (v : Vector UInt8 a) (w : Vector UInt8 b) :
-    splitL (v ++ w) = v := by
-  apply Vector.ext; intro i hi; simp [splitL, hi]
-
-theorem splitR_append {a b : Nat} (v : Vector UInt8 a) (w : Vector UInt8 b) :
-    splitR (v ++ w) = w := by
-  apply Vector.ext; intro i hi; simp [splitR]
-
-def combineKEM : KEM where
-  State      := k₁.State × k₂.State
-  PublicKey  := k₁.PublicKey × k₂.PublicKey
-  PrivateKey := k₁.PrivateKey × k₂.PrivateKey
-  Ciphertext := k₁.Ciphertext × k₂.Ciphertext
+/-- One KEM plus a (possibly empty) list of more, combined via the split-PRF combiner. Matches
+hpqc's `kem/combiner.New(name, []kem.Scheme)`. -/
+def combineKEM (k₀ : KEM) (ks : List KEM) : KEM where
+  State      := k₀.State × CombinedState ks
+  PublicKey  := k₀.PublicKey × CombinedPublicKey ks
+  PrivateKey := k₀.PrivateKey × CombinedPrivateKey ks
+  Ciphertext := k₀.Ciphertext × CombinedCiphertext ks
   Plaintext  := Bytes32
 
-  pubI  := ⟨(k₁.pubI.default,  k₂.pubI.default)⟩
-  privI := ⟨(k₁.privI.default, k₂.privI.default)⟩
-  ctI   := ⟨(k₁.ctI.default,   k₂.ctI.default)⟩
+  pubI  := ⟨(k₀.pubI.default, defaultPublicKey ks)⟩
+  privI := ⟨(k₀.privI.default, defaultPrivateKey ks)⟩
+  ctI   := ⟨(k₀.ctI.default, defaultCiphertext ks)⟩
   ptI   := ⟨zero32⟩
+  stateI := ⟨(k₀.stateI.default, defaultState ks)⟩
 
-  publicKeySize  := k₁.publicKeySize  + k₂.publicKeySize
-  privateKeySize := k₁.privateKeySize + k₂.privateKeySize
-  ciphertextSize := k₁.ciphertextSize + k₂.ciphertextSize
+  publicKeySize  := k₀.publicKeySize  + sumPublicKeySize ks
+  privateKeySize := k₀.privateKeySize + sumPrivateKeySize ks
+  ciphertextSize := k₀.ciphertextSize + sumCiphertextSize ks
   plaintextSize  := splitPRFOutputSize
 
-  decodePublicKey  := fun v => do
-    let a ← k₁.decodePublicKey (splitL v)
-    let b ← k₂.decodePublicKey (splitR v)
-    pure (a, b)
+  encodePublicKey := fun (pk0, pks) =>
+    toVecN _ (ofVector (k₀.encodePublicKey pk0) ++ encodePublicKeyN ks pks)
+  decodePublicKey := fun v => do
+    let b := ofVector v
+    let pk0 ← k₀.decodePublicKey (toVecN k₀.publicKeySize (b.extract 0 k₀.publicKeySize))
+    let pks ← decodePublicKeyN ks (b.extract k₀.publicKeySize b.size)
+    pure (pk0, pks)
+  encodePrivateKey := fun (sk0, sks) =>
+    toVecN _ (ofVector (k₀.encodePrivateKey sk0) ++ encodePrivateKeyN ks sks)
   decodePrivateKey := fun v => do
-    let a ← k₁.decodePrivateKey (splitL v)
-    let b ← k₂.decodePrivateKey (splitR v)
-    pure (a, b)
+    let b := ofVector v
+    let sk0 ← k₀.decodePrivateKey (toVecN k₀.privateKeySize (b.extract 0 k₀.privateKeySize))
+    let sks ← decodePrivateKeyN ks (b.extract k₀.privateKeySize b.size)
+    pure (sk0, sks)
+  encodeCiphertext := fun (c0, cs) =>
+    toVecN _ (ofVector (k₀.encodeCiphertext c0) ++ encodeCiphertextN ks cs)
   decodeCiphertext := fun v => do
-    let a ← k₁.decodeCiphertext (splitL v)
-    let b ← k₂.decodeCiphertext (splitR v)
-    pure (a, b)
+    let b := ofVector v
+    let c0 ← k₀.decodeCiphertext (toVecN k₀.ciphertextSize (b.extract 0 k₀.ciphertextSize))
+    let cs ← decodeCiphertextN ks (b.extract k₀.ciphertextSize b.size)
+    pure (c0, cs)
+  encodePlaintext := id
 
-  encodePublicKey  := fun p => k₁.encodePublicKey p.1 ++ k₂.encodePublicKey p.2
-  encodePrivateKey := fun p => k₁.encodePrivateKey p.1 ++ k₂.encodePrivateKey p.2
-  encodeCiphertext := fun c => k₁.encodeCiphertext c.1 ++ k₂.encodeCiphertext c.2
-  encodePlaintext  := id
+  encap := encapM F k₀ ks
+  decap := decapM F k₀ ks
+  -- Every component seeded from the *same* 32 bytes: adequate for distinct sub-KEMs (the
+  -- intended use of a combiner), but would correlate their ephemeral randomness if two components
+  -- happened to be the same scheme — not a case this combiner is meant for.
+  stateFromSeed := fun seed => (k₀.stateFromSeed seed, stateFromSeedN ks seed)
+  derivePublicKey := fun (sk0, sks) => (k₀.derivePublicKey sk0, derivePublicKeyN ks sks)
 
-  encap := encapM F k₁ k₂
-  decap := decapM F k₁ k₂
-  -- Inhabitance only, inherited from the components. A real combined state is
-  -- the pair of the components' own caller-supplied states.
-  stateI := ⟨(k₁.stateI.default, k₂.stateI.default)⟩
-  -- Both components seeded from the *same* 32 bytes: adequate for two different sub-KEMs
-  -- (the intended use of a combiner), but would correlate their ephemeral randomness if `k₁`
-  -- and `k₂` happened to be the same scheme — not a case this combiner is meant for.
-  stateFromSeed := fun seed => (k₁.stateFromSeed seed, k₂.stateFromSeed seed)
-  derivePublicKey := fun sk => (k₁.derivePublicKey sk.1, k₂.derivePublicKey sk.2)
+  Reliable := fun (s0, ss) => k₀.Reliable s0 ∧ ReliableN ks ss
 
-  -- The combined state is reliable exactly when both components' states are — reduces to
-  -- `True ∧ True` when both `k₁`/`k₂` are perfect-correctness KEMs (their own `Reliable`s at the
-  -- trivial default), so this generalizes without weakening the trivial case.
-  Reliable := fun s => k₁.Reliable s.1 ∧ k₂.Reliable s.2
-
-  -- Both components' own `honestRoundTrip` witnesses, combined exactly as `generate`'s embedded
-  -- proof below combines `k₁.generate`/`k₂.generate`'s — `combinedRoundTrip` already proves this
-  -- shape generically, so no new argument is needed here.
-  honestRoundTrip := fun sk =>
-    combinedRoundTrip F k₁ k₂ (k₁.derivePublicKey sk.1) (k₂.derivePublicKey sk.2) sk.1 sk.2
-      (k₁.honestRoundTrip sk.1) (k₂.honestRoundTrip sk.2)
+  honestRoundTrip := fun (sk0, sks) =>
+    combinedRoundTrip F k₀ ks (k₀.derivePublicKey sk0) (derivePublicKeyN ks sks) sk0 sks
+      (k₀.honestRoundTrip sk0) (allHonestFor_derivePublicKey ks sks)
 
   decodePrivateKey_total := fun v => by
-    obtain ⟨a, ha⟩ := k₁.decodePrivateKey_total (splitL v)
-    obtain ⟨b, hb⟩ := k₂.decodePrivateKey_total (splitR v)
-    exact ⟨(a, b), by simp [ha, hb]⟩
+    obtain ⟨a, ha⟩ := k₀.decodePrivateKey_total (toVecN k₀.privateKeySize
+      ((ofVector v).extract 0 k₀.privateKeySize))
+    obtain ⟨b, hb⟩ := decodePrivateKeyN_total ks ((ofVector v).extract k₀.privateKeySize
+      (ofVector v).size)
+    refine ⟨(a, b), ?_⟩
+    show (do
+      let sk0 ← k₀.decodePrivateKey (toVecN k₀.privateKeySize
+        ((ofVector v).extract 0 k₀.privateKeySize))
+      let sks ← decodePrivateKeyN ks ((ofVector v).extract k₀.privateKeySize (ofVector v).size)
+      pure (sk0, sks) : Option _) = some (a, b)
+    rw [ha, hb]
+    rfl
 
   generate := do
-    let ⟨pk₁, sk₁, h₁⟩ ← liftFst k₁ k₂ k₁.generate
-    let ⟨pk₂, sk₂, h₂⟩ ← liftSnd k₁ k₂ k₂.generate
-    pure ⟨(pk₁, pk₂), (sk₁, sk₂),
-      combinedRoundTrip F k₁ k₂ pk₁ pk₂ sk₁ sk₂ h₁ h₂⟩
+    let ⟨pk0, sk0, h0⟩ ← liftHead k₀.generate
+    let ⟨pks, sks, hs⟩ ← liftTail (generateN ks)
+    pure ⟨(pk0, pks), (sk0, sks), combinedRoundTrip F k₀ ks pk0 pks sk0 sks h0 hs⟩
 
   decode_encode_pub := by
-    intro p
-    simp [splitL_append, splitR_append, k₁.decode_encode_pub, k₂.decode_encode_pub]
+    intro (pk0, pks)
+    dsimp only
+    rw [ofVector_toVecN _ (by simp [ByteArray.size_append, size_ofVector, encodePublicKeyN_size])]
+    have hleft : (ofVector (k₀.encodePublicKey pk0) ++ encodePublicKeyN ks pks).extract 0
+        k₀.publicKeySize = ofVector (k₀.encodePublicKey pk0) := by
+      have h := extract_append_left (ofVector (k₀.encodePublicKey pk0)) (encodePublicKeyN ks pks)
+      rwa [size_ofVector] at h
+    have hright : (ofVector (k₀.encodePublicKey pk0) ++ encodePublicKeyN ks pks).extract
+        k₀.publicKeySize (ofVector (k₀.encodePublicKey pk0) ++ encodePublicKeyN ks pks).size
+        = encodePublicKeyN ks pks := by
+      have h := extract_append_right (ofVector (k₀.encodePublicKey pk0)) (encodePublicKeyN ks pks)
+      rwa [← ByteArray.size_append, size_ofVector] at h
+    rw [hleft, hright, toVecN_ofVector, k₀.decode_encode_pub pk0, decode_encode_pub_N ks pks]
+    rfl
 
   decode_encode_priv := by
-    intro p
-    simp [splitL_append, splitR_append, k₁.decode_encode_priv, k₂.decode_encode_priv]
+    intro (sk0, sks)
+    dsimp only
+    rw [ofVector_toVecN _ (by simp [ByteArray.size_append, size_ofVector, encodePrivateKeyN_size])]
+    have hleft : (ofVector (k₀.encodePrivateKey sk0) ++ encodePrivateKeyN ks sks).extract 0
+        k₀.privateKeySize = ofVector (k₀.encodePrivateKey sk0) := by
+      have h := extract_append_left (ofVector (k₀.encodePrivateKey sk0)) (encodePrivateKeyN ks sks)
+      rwa [size_ofVector] at h
+    have hright : (ofVector (k₀.encodePrivateKey sk0) ++ encodePrivateKeyN ks sks).extract
+        k₀.privateKeySize (ofVector (k₀.encodePrivateKey sk0) ++ encodePrivateKeyN ks sks).size
+        = encodePrivateKeyN ks sks := by
+      have h := extract_append_right (ofVector (k₀.encodePrivateKey sk0)) (encodePrivateKeyN ks sks)
+      rwa [← ByteArray.size_append, size_ofVector] at h
+    rw [hleft, hright, toVecN_ofVector, k₀.decode_encode_priv sk0, decode_encode_priv_N ks sks]
+    rfl
 
   decode_encode_ct := by
-    intro c
-    simp [splitL_append, splitR_append, k₁.decode_encode_ct, k₂.decode_encode_ct]
-
+    intro (c0, cs)
+    dsimp only
+    rw [ofVector_toVecN _ (by simp [ByteArray.size_append, size_ofVector, encodeCiphertextN_size])]
+    have hleft : (ofVector (k₀.encodeCiphertext c0) ++ encodeCiphertextN ks cs).extract 0
+        k₀.ciphertextSize = ofVector (k₀.encodeCiphertext c0) := by
+      have h := extract_append_left (ofVector (k₀.encodeCiphertext c0)) (encodeCiphertextN ks cs)
+      rwa [size_ofVector] at h
+    have hright : (ofVector (k₀.encodeCiphertext c0) ++ encodeCiphertextN ks cs).extract
+        k₀.ciphertextSize (ofVector (k₀.encodeCiphertext c0) ++ encodeCiphertextN ks cs).size
+        = encodeCiphertextN ks cs := by
+      have h := extract_append_right (ofVector (k₀.encodeCiphertext c0)) (encodeCiphertextN ks cs)
+      rwa [← ByteArray.size_append, size_ofVector] at h
+    rw [hleft, hright, toVecN_ofVector, k₀.decode_encode_ct c0, decode_encode_ct_N ks cs]
+    rfl
 
 end CryptWalker.KEM.Combiner

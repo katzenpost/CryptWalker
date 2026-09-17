@@ -7,6 +7,7 @@ import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Combiner
 import CryptWalker.KEM.MLKEM768
 import CryptWalker.Hash.Sha2
+import CryptWalker.Hash.Blake2b
 import CryptWalker.MAC.HMAC
 
 open CryptWalker.NIKE
@@ -122,23 +123,20 @@ agility); and `"MLKEM768-X25519"`, built via hpqc's *generic* `kem/combiner` —
 is not the PQ Hybrid KEM you are looking for then we recommend using our secure generic KEM
 combiner." This is that one, not X-Wing. -/
 
-/-- `Combiner.PRF`, instantiated with SHA-256 (unkeyed) for key derivation and HMAC-SHA256 for the
-per-component keyed hash. hpqc's deployed combiner (`kem/combiner/split_prf.go`) uses BLAKE2b-256
-in keyed mode; this project's `Hash.Blake2b` only has BLAKE2b-512 (a different parameter block,
-not simply truncatable to a BLAKE2b-256 result), so — exactly as `sha256v1PRF` above already does
-for the KEM adapter's PRF — this is a portable stand-in for implementations with SHA-256 but no
-BLAKE2b-256, not the deployed construction. -/
-def sha256CombinerPRF : Combiner.PRF where
-  hash  := sha256V
-  keyed := fun key msg => hmacSha256 (Combiner.toBytes key) msg
+/-- `Combiner.PRF`, instantiated with BLAKE2b-256 -- matching hpqc's deployed combiner
+(`kem/combiner/split_prf.go`) exactly: an unkeyed BLAKE2b-256 hash for key derivation, and a keyed
+BLAKE2b-256 hash for the per-component PRF. -/
+def blake2b256CombinerPRF : Combiner.PRF where
+  hash  := CryptWalker.Hash.Blake2b.hash256
+  keyed := fun key msg => CryptWalker.Hash.Blake2b.hash256Keyed (Combiner.toBytes key) msg
 
 /-- X25519 combined with ML-KEM-768 via `Combiner.combineKEM` — IND-CCA2 as long as *at least
 one* component is (Giacon, Heuer & Poettering, https://eprint.iacr.org/2018/024.pdf, Theorem 1).
-`Reliable` is `combineKEM`'s generic `k₁.Reliable s.1 ∧ k₂.Reliable s.2` — trivial on the X25519
+`Reliable` is `combineKEM`'s generic `k₀.Reliable s.1 ∧ ReliableN [k₁] s.2` — trivial on the X25519
 half, ML-KEM-768's genuine noise-dependent condition on the other; any caller building a
 `KEMSphinxScheme` from this entry must still discharge that, exactly as for `mlkem768Entry` alone. -/
 def kemMLKEM768X25519 : KEM :=
-  Combiner.combineKEM sha256CombinerPRF kemX25519 CryptWalker.KEM.MLKEM768.kemMLKEM768
+  Combiner.combineKEM blake2b256CombinerPRF kemX25519 [CryptWalker.KEM.MLKEM768.kemMLKEM768]
 
 def mlkem768X25519Entry : RegistryEntry :=
   { hpqcName := "mlkem768-x25519-kem", scheme := kemMLKEM768X25519 }
