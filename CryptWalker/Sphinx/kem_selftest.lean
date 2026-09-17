@@ -17,14 +17,20 @@ As `NIKESphinx.nike_selftest`: `createKEMHeader`'s output can't be cross-checked
 (the per-hop KEM encapsulations aren't recorded anywhere), so this builds a packet with fresh
 Lean-side keys and confirms `Unwrap` recovers exactly what was built.
 
-A `kemX25519`/`kemX25519Ladder` keypair *is* an X25519 keypair (`Adapter.kemOfNike`'s
-`PublicKey`/`PrivateKey` are `nike.PublicKey`/`nike.PrivateKey` verbatim), so node generation is
-identical in shape to `nike_selftest`'s.
+Node keys come from `kem.generate`, not from treating arbitrary random bytes as a private key.
+The two are equivalent for `kemX25519`/`kemX25519Ladder` (any 32 bytes is a valid X25519 scalar),
+but not in general: an ML-KEM private key is only meaningful as genuine `keygen` output, since
+its correctness relies on an actual algebraic relationship between the secret and public halves
+(`tHat = A·sHat + eHat`) that zero-padded or otherwise-arbitrary bytes don't satisfy — confirmed
+directly, the first attempt at this file's ML-KEM round using the old "random 32 bytes as a
+private key" shortcut failed with a MAC mismatch, exactly as `KEM.Reliable`'s design predicts for
+a non-`Reliable` keypair. Using `kem.generate` uniformly is also simply more representative of
+how a real Sphinx mix node actually gets its keys.
 
 Runs the full round set once per registered KEM-Sphinx scheme — `"x25519-ladder-kem"`
-(`KEM.kemX25519Ladder`) and `"x25519-kem"` (`KEM.kemX25519`) — since `createKEMHeader`/
-`unwrapKEM` are generic over any `KEM`, not just the ladder implementation `kem_vectors_test`'s
-Go-cross-checked vectors happen to use. -/
+(`KEM.kemX25519Ladder`), `"x25519-kem"` (`KEM.kemX25519`), and `"mlkem768-kem"`
+(`MLKEM768.kemMLKEM768`) — since `createKEMHeader`/`unwrapKEM` are generic over any `KEM`, not
+just the ladder implementation `kem_vectors_test`'s Go-cross-checked vectors happen to use. -/
 
 open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
@@ -32,10 +38,11 @@ open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.KEMSphinx
 open CryptWalker.KEM.KEM (KEM)
-open CryptWalker.Util.Bytes (ofVector toVecN)
+open CryptWalker.Util.Bytes (ofVector)
 
 private def x25519Ladder := CryptWalker.KEM.kemX25519Ladder
 private def x25519Group := CryptWalker.KEM.kemX25519
+private def mlkem768 := CryptWalker.KEM.MLKEM768.kemMLKEM768
 
 -- `kemSphinxSchemeOf` (used below) takes these four explicitly rather than wiring one concrete
 -- choice up internally; the direct `createKEMHeader`/`newKEMPacket`/`unwrapKEM`/`newKEMSURB` calls
@@ -53,23 +60,21 @@ private def randomBytes (n : Nat) : IO ByteArray := IO.getRandomBytes (USize.ofN
 
 structure Node where
   id : Vector UInt8 32
-  priv : Vector UInt8 32
+  /-- Raw `kem.privateKeySize` bytes — not fixed to 32, since that's only true for the X25519
+  entries (ML-KEM-768's is 2400). -/
+  priv : ByteArray
   pub : ByteArray
   deriving Inhabited
 
-/-- As `nike_selftest.lean`'s `derivePubBytes`: the public key `priv` derives under `kem`, via
-`kem.derivePublicKey`/`encodePublicKey` rather than any one scheme's raw arithmetic, so this
-works for both registered KEM-Sphinx entries. `decodePrivateKey` never actually fails here. -/
-private def derivePubBytes (kem : KEM) (priv : Vector UInt8 32) : IO ByteArray := do
-  match kem.decodePrivateKey (toVecN kem.privateKeySize (ofVector priv)) with
-  | none => throw (IO.userError "derivePubBytes: decodePrivateKey failed")
-  | some sk => pure (ofVector (kem.encodePublicKey (kem.derivePublicKey sk)))
-
+/-- A fresh node keypair, via `kem.generate` — see the module doc for why this replaces the
+earlier "any random 32 bytes is a valid private key" shortcut. -/
 private def newNode (kem : KEM) : IO Node := do
-  let priv ← randomVector 32
+  let seed ← randomVector 32
   let id ← randomVector 32
-  let pub ← derivePubBytes kem priv
-  pure { id, priv, pub }
+  match kem.generate (kem.stateFromSeed seed) with
+  | .error _ _ => throw (IO.userError "newNode: kem.generate failed")
+  | .ok ⟨pk, sk, _⟩ _ =>
+    pure { id, priv := ofVector (kem.encodePrivateKey sk), pub := ofVector (kem.encodePublicKey pk) }
 
 private def buildPath (nodes : Array Node) (isSURB : Bool := false) : IO (Array PathHop) := do
   let n := nodes.size
@@ -98,7 +103,7 @@ def unwrapAll (kem : KEM) (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArr
   for i in [0:n] do
     if !stop then
       let node := nodes[i]!
-      match unwrapKEM kem wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
+      match unwrapKEM kem wbCipher macS kdfS streamS geom node.priv pkt with
       | .error e =>
         IO.eprintln s!"  hop {i}: unwrap failed: {e}"
         ok := false
@@ -192,7 +197,7 @@ def runCompletenessRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKE
     IO.eprintln s!"completeness: wrap failed: {e}"
     pure false
   | .ok pkt _ =>
-    let privKeys := (nodes.map (fun n => ofVector n.priv)).toList
+    let privKeys := (nodes.map (fun n => n.priv)).toList
     match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapKEM kem wbCipher macS kdfS streamS geom) privKeys (ofVector pkt) with
     | .error e =>
       IO.eprintln s!"completeness: unwrapChainAux failed: {e}"
@@ -239,7 +244,7 @@ def runAbstractSURBRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKE
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapKEM kem wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
+          match unwrapKEM kem wbCipher macS kdfS streamS geom node.priv pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -301,7 +306,7 @@ def runSURBRound (kem : KEM) (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapKEM kem wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
+          match unwrapKEM kem wbCipher macS kdfS streamS geom node.priv pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -386,8 +391,10 @@ def main : IO UInt32 := do
   IO.println ""
   let okGroup ← runSuite "x25519-kem" x25519Group
   IO.println ""
-  if okLadder && okGroup then
-    IO.println "all KEM-Sphinx round-trip self-tests passed (both schemes)"
+  let okMLKEM ← runSuite "mlkem768-kem" mlkem768
+  IO.println ""
+  if okLadder && okGroup && okMLKEM then
+    IO.println "all KEM-Sphinx round-trip self-tests passed (all three schemes)"
     pure 0
   else
     IO.eprintln "KEM-Sphinx round-trip self-tests FAILED"
