@@ -30,21 +30,22 @@ TESTS := \
 	CryptWalker.Sphinx.nike_vectors_test \
 	CryptWalker.Sphinx.kem_vectors_test \
 	CryptWalker.KEM.mlkem768_test \
-	CryptWalker.Hash.blake2b_256_test
+	CryptWalker.Hash.blake2b_256_test \
+	CryptWalker.KEM.mlkem768_x25519_combiner_test
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 
 # Bare `lake build` builds only defaultTargets, which is the library. The
 # executables have to be named or the test targets run whatever binary was left
 # in .lake/build/bin by an earlier build.
-EXES := $(TESTS) CryptWalker.NIKE.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.Sphinx.benchmark
+EXES := $(TESTS) CryptWalker.NIKE.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.Sphinx.benchmark CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors
 
 .DEFAULT_GOAL := help
 
 .PHONY: all build test bench bench-sphinx sorries clean help
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
-.PHONY: gen-sphinx-vectors test-mlkem test-mlkem-kat test-hybrid-sphinx
+.PHONY: gen-sphinx-vectors gen-hybrid-vectors test-mlkem test-mlkem-kat test-hybrid-sphinx
 
 all: build ## build everything, library and executables
 
@@ -110,6 +111,9 @@ test-sphinx-crypto: build ## Sphinx primitive-layer vectors (hash/MAC/stream/KDF
 gen-sphinx-vectors: build ## build Sphinx packets with the Lean port, for cross-checking against katzenpost's Unwrap
 	@$(BIN)/CryptWalker-Sphinx-gen_nike_vectors
 	@$(BIN)/CryptWalker-Sphinx-gen_kem_vectors
+
+gen-hybrid-vectors: build ## build X25519+ML-KEM-768 combiner vectors, for cross-checking against hpqc
+	@$(BIN)/CryptWalker-KEM-gen_mlkem768_x25519_combiner_vectors
 
 test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer vectors
 	@$(BIN)/CryptWalker-Sphinx-kem_selftest

@@ -96,3 +96,9 @@ name = "CryptWalker.KEM.mlkem768_test"
 
 [[lean_exe]]
 name = "CryptWalker.Hash.blake2b_256_test"
+
+[[lean_exe]]
+name = "CryptWalker.KEM.mlkem768_x25519_combiner_test"
+
+[[lean_exe]]
+name = "CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors"
