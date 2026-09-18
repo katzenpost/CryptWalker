@@ -38,3 +38,12 @@ import CryptWalker.BACAP.Protocol
 import CryptWalker.BACAP.Impl
 import CryptWalker.BACAP.API
 import CryptWalker.BACAP.test
+import CryptWalker.Sphinx.sphinx
+import CryptWalker.Sphinx.geometry
+import CryptWalker.Sphinx.integrity
+import CryptWalker.Sphinx.indistinguishability
+import CryptWalker.Sphinx.wrap_resistance
+import CryptWalker.Sphinx.nike_sphinx_theorems
+import CryptWalker.Sphinx.kem_sphinx_theorems
+import CryptWalker.Sphinx.schemes
+import CryptWalker.Sphinx.bench_registry

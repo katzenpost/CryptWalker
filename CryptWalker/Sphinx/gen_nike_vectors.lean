@@ -4,10 +4,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Lean.Data.Json
-import CryptWalker.Sphinx.Geometry
-import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.NIKESphinx
-import CryptWalker.Sphinx.SURB
+import CryptWalker.Sphinx.geometry
+import CryptWalker.Sphinx.types
+import CryptWalker.Sphinx.nike_sphinx_theorems
+import CryptWalker.Sphinx.surb
 import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
@@ -33,6 +33,13 @@ open CryptWalker.Sphinx.NIKESphinx
 open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.NIKE.X25519_montgomery_ladder (curve25519 basepointBytes)
 open CryptWalker.Util.Bytes (ofVector)
+
+private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
+
+private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
+private def macS := CryptWalker.MAC.HMAC.hmacSha256MAC
+private def kdfS := CryptWalker.KDF.HKDF.hkdfSha256Expand
+private def streamS := CryptWalker.StreamCipher.AES256CTR.aes256CTR
 
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)
@@ -66,7 +73,7 @@ private def buildPath (nodes : Array Node) (isSURB : Bool) : IO (Array PathHop) 
           pure [.recipient rid, .surbReply sid]
         else
           pure [.recipient rid]
-    path := path.push { id := node.id, publicKey := node.pub, commands := cmds }
+    path := path.push { id := node.id, publicKey := ofVector node.pub, commands := cmds }
   pure path
 
 private def hexNode (n : Node) : Json :=
@@ -75,7 +82,7 @@ private def hexNode (n : Node) : Json :=
 
 private def hexPathHop (h : PathHop) : Json :=
   Json.mkObj [("ID", Json.str (byteArrayToHex (ofVector h.id))),
-              ("PublicKey", Json.str (byteArrayToHex (ofVector h.publicKey))),
+              ("PublicKey", Json.str (byteArrayToHex h.publicKey)),
               ("Commands", Json.arr (h.commands.toArray.map (fun c => Json.str (byteArrayToHex c.toBytes))))]
 
 /-- One vector entry: create a path of `nrHops` hops (out of `geom.nrHops` slots) and, for
@@ -94,11 +101,11 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
     let clientSeed ← randomVector 32
     let kp1 ← randomVector 32
     let kp2 ← randomVector 32
-    match newNIKESURB geom clientSeed (kp1 ++ kp2) filler path with
+    match newNIKESURB x25519Nike macS kdfS streamS geom (ofVector clientSeed) (kp1 ++ kp2) filler path with
     | .error e => throw (IO.userError s!"newNIKESURB failed: {e}")
     | .ok (s, k) =>
       surb := s; surbKeys := k
-      match newPacketFromSURB geom surb payload with
+      match newPacketFromSURB wbCipher geom surb payload with
       | .error e => throw (IO.userError s!"newPacketFromSURB failed: {e}")
       | .ok (p, firstHop) =>
         if byteArrayToHex (ofVector firstHop) ≠ byteArrayToHex (ofVector nodes[0]!.id) then
@@ -106,7 +113,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
         pkt0 := p
   else
     let clientPriv ← randomVector 32
-    match newNIKEPacket geom clientPriv filler path payload with
+    match newNIKEPacket x25519Nike wbCipher macS kdfS streamS geom (ofVector clientPriv) filler path payload with
     | .error e => throw (IO.userError s!"newNIKEPacket failed: {e}")
     | .ok p => pkt0 := p
 
@@ -115,7 +122,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   let mut finalPayload : ByteArray := ByteArray.empty
   for i in [0:nrHops] do
     let node := nodes[i]!
-    match unwrapNIKE geom node.priv pkt with
+    match unwrapNIKE x25519Nike wbCipher macS kdfS streamS geom (ofVector node.priv) pkt with
     | .error e => throw (IO.userError s!"hop {i}: unwrap failed: {e}")
     | .ok (payloadOut, _replayTag, _cmds, forwardPkt) =>
       if i < nrHops - 1 then
@@ -127,7 +134,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
         | none => throw (IO.userError s!"hop {i}: expected terminal payload")
         | some p =>
           if withSURB then
-            match decryptSURBPayload geom surbKeys p with
+            match decryptSURBPayload wbCipher geom surbKeys p with
             | .error e => throw (IO.userError s!"decryptSURBPayload failed: {e}")
             | .ok final => finalPayload := final
           else
@@ -147,7 +154,7 @@ def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
 def main : IO UInt32 := do
   let mut vecs : Array Json := #[]
   for withSURB in [false, true] do
-    let geom := ofNIKE 32 103 withSURB 5
+    let geom ← IO.ofExcept (ofNIKE "x25519-ladder" 103 withSURB 5)
     for nrHops in [1, 2, 3, 4, 5] do
       let v ← buildVec geom withSURB nrHops
       vecs := vecs.push v

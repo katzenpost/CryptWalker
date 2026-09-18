@@ -3,11 +3,10 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Sphinx.Geometry
-import CryptWalker.Sphinx.Types
-import CryptWalker.Sphinx.KEMSphinx
-import CryptWalker.Sphinx.SURB
-import CryptWalker.NIKE.X25519_montgomery_ladder
+import CryptWalker.Sphinx.geometry
+import CryptWalker.Sphinx.types
+import CryptWalker.Sphinx.kem_sphinx_theorems
+import CryptWalker.Sphinx.surb
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
 
@@ -18,17 +17,43 @@ As `NIKESphinx.nike_selftest`: `createKEMHeader`'s output can't be cross-checked
 (the per-hop KEM encapsulations aren't recorded anywhere), so this builds a packet with fresh
 Lean-side keys and confirms `Unwrap` recovers exactly what was built.
 
-A `kemX25519` keypair *is* an X25519 keypair (`Adapter.kemOfNike`'s `PublicKey`/`PrivateKey` are
-`nike.PublicKey`/`nike.PrivateKey` verbatim), so node generation is identical to
-`nike_selftest`'s. -/
+Node keys come from `kem.generate`, not from treating arbitrary random bytes as a private key.
+The two are equivalent for `kemX25519`/`kemX25519Ladder` (any 32 bytes is a valid X25519 scalar),
+but not in general: an ML-KEM private key is only meaningful as genuine `keygen` output, since
+its correctness relies on an actual algebraic relationship between the secret and public halves
+(`tHat = A·sHat + eHat`) that zero-padded or otherwise-arbitrary bytes don't satisfy — confirmed
+directly, the first attempt at this file's ML-KEM round using the old "random 32 bytes as a
+private key" shortcut failed with a MAC mismatch, exactly as `KEM.Reliable`'s design predicts for
+a non-`Reliable` keypair. Using `kem.generate` uniformly is also simply more representative of
+how a real Sphinx mix node actually gets its keys.
+
+Runs the full round set once per registered KEM-Sphinx scheme — `"x25519-ladder-kem"`
+(`KEM.kemX25519Ladder`), `"x25519-kem"` (`KEM.kemX25519`), `"mlkem768-kem"`
+(`MLKEM768.kemMLKEM768`), and `"mlkem768-x25519-kem"` (`KEM.kemMLKEM768X25519`, the classical/
+post-quantum hybrid built by `Combiner.combineKEM` — see `KEM/Schemes.lean`'s module doc) — since
+`createKEMHeader`/`unwrapKEM` are generic over any `KEM`, not just the ladder implementation
+`kem_vectors_test`'s Go-cross-checked vectors happen to use. -/
 
 open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
 open CryptWalker.Sphinx.Types
 open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.KEMSphinx
-open CryptWalker.NIKE.X25519_montgomery_ladder (curve25519 basepointBytes)
+open CryptWalker.KEM.KEM (KEM)
 open CryptWalker.Util.Bytes (ofVector)
+
+private def x25519Ladder := CryptWalker.KEM.kemX25519Ladder
+private def x25519Group := CryptWalker.KEM.kemX25519
+private def mlkem768 := CryptWalker.KEM.MLKEM768.kemMLKEM768
+private def mlkem768X25519 := CryptWalker.KEM.kemMLKEM768X25519
+
+-- `kemSphinxSchemeOf` (used below) takes these four explicitly rather than wiring one concrete
+-- choice up internally; the direct `createKEMHeader`/`newKEMPacket`/`unwrapKEM`/`newKEMSURB` calls
+-- below (bypassing the abstract `Sphinx.Interface` scheme) need the same four threaded through.
+private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
+private def macS := CryptWalker.MAC.HMAC.hmacSha256MAC
+private def kdfS := CryptWalker.KDF.HKDF.hkdfSha256Expand
+private def streamS := CryptWalker.StreamCipher.AES256CTR.aes256CTR
 
 private def randomVector (n : Nat) : IO (Vector UInt8 n) := do
   let bs ← IO.getRandomBytes (USize.ofNat n)
@@ -38,14 +63,21 @@ private def randomBytes (n : Nat) : IO ByteArray := IO.getRandomBytes (USize.ofN
 
 structure Node where
   id : Vector UInt8 32
-  priv : Vector UInt8 32
-  pub : Vector UInt8 32
+  /-- Raw `kem.privateKeySize` bytes — not fixed to 32, since that's only true for the X25519
+  entries (ML-KEM-768's is 2400). -/
+  priv : ByteArray
+  pub : ByteArray
   deriving Inhabited
 
-private def newNode : IO Node := do
-  let priv ← randomVector 32
+/-- A fresh node keypair, via `kem.generate` — see the module doc for why this replaces the
+earlier "any random 32 bytes is a valid private key" shortcut. -/
+private def newNode (kem : KEM) : IO Node := do
+  let seed ← randomVector 32
   let id ← randomVector 32
-  pure { id, priv, pub := curve25519 priv basepointBytes }
+  match kem.generate (kem.stateFromSeed seed) with
+  | .error _ _ => throw (IO.userError "newNode: kem.generate failed")
+  | .ok ⟨pk, sk, _⟩ _ =>
+    pure { id, priv := ofVector (kem.encodePrivateKey sk), pub := ofVector (kem.encodePublicKey pk) }
 
 private def buildPath (nodes : Array Node) (isSURB : Bool := false) : IO (Array PathHop) := do
   let n := nodes.size
@@ -65,8 +97,8 @@ private def buildPath (nodes : Array Node) (isSURB : Bool := false) : IO (Array 
     path := path.push { id := node.id, publicKey := node.pub, commands := cmds }
   pure path
 
-def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPayload : ByteArray) :
-    IO Bool := do
+def unwrapAll (kem : KEM) (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray)
+    (wantPayload : ByteArray) : IO Bool := do
   let n := nodes.size
   let mut pkt := pkt0
   let mut ok := true
@@ -74,7 +106,7 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
   for i in [0:n] do
     if !stop then
       let node := nodes[i]!
-      match unwrapKEM geom node.priv pkt with
+      match unwrapKEM kem wbCipher macS kdfS streamS geom node.priv pkt with
       | .error e =>
         IO.eprintln s!"  hop {i}: unwrap failed: {e}"
         ok := false
@@ -106,12 +138,12 @@ def unwrapAll (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray) (wantPay
               ok := false
   pure ok
 
-def runRound (geom : Geometry) : IO Bool := do
-  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
+def runRound (kem : KEM) (geom : Geometry) : IO Bool := do
+  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode kem)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomBytes geom.forwardPayloadLength
-  match newKEMPacket geom seeds ByteArray.empty path payload with
+  match newKEMPacket kem wbCipher macS kdfS streamS geom seeds ByteArray.empty path payload with
   | .error e =>
     IO.eprintln s!"newKEMPacket failed: {e}"
     pure false
@@ -120,54 +152,56 @@ def runRound (geom : Geometry) : IO Bool := do
       IO.eprintln s!"packet length mismatch: got {pkt0.size}, want {geom.packetLength}"
       pure false
     else
-      unwrapAll geom nodes pkt0 payload
+      unwrapAll kem geom nodes pkt0 payload
 
-def runFillerRound : IO Bool := do
-  let geom := ofKEM 32 103 false 5
-  let nodes ← (List.range 3).toArray.mapM (fun _ => newNode)
+def runFillerRound (schemeName : String) (kem : KEM) : IO Bool := do
+  let geom ← IO.ofExcept (ofKEM schemeName 103 false 5)
+  let nodes ← (List.range 3).toArray.mapM (fun _ => newNode kem)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomBytes geom.forwardPayloadLength
   let filler ← randomBytes ((geom.nrHops - 3) * geom.perHopRoutingInfoLength)
-  match newKEMPacket geom seeds filler path payload with
+  match newKEMPacket kem wbCipher macS kdfS streamS geom seeds filler path payload with
   | .error e =>
     IO.eprintln s!"filler round: newKEMPacket failed: {e}"
     pure false
-  | .ok pkt0 => unwrapAll geom nodes pkt0 payload
+  | .ok pkt0 => unwrapAll kem geom nodes pkt0 payload
 
-/-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`KEMSphinxScheme`
+/-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`kemSphinxScheme`
 instead of calling `newKEMPacket` directly. `wrapKEM` draws one seed *per hop*, so the stream
 must actually vary with the counter — unlike `NIKESphinx`'s version of this check, which draws
 only one seed total and can get away with a constant stream. -/
-def runAbstractWrapRound (geom : Geometry) : IO Bool := do
-  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
+def runAbstractWrapRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
+  let scheme := kemSphinxSchemeOf kem wbCipher macS kdfS streamS geom hvalid rfl h16
+  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode kem)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomVector geom.forwardPayloadLength
-  let scheme := KEMSphinxScheme geom
   let stream := fun i => seeds[i]!
   match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
     IO.eprintln s!"abstract wrap failed: {e}"
     pure false
-  | .ok pkt _ => unwrapAll geom nodes (ofVector pkt) (ofVector payload)
+  | .ok pkt _ => unwrapAll kem geom nodes (ofVector pkt) (ofVector payload)
 
 /-- As `NIKESphinx.nike_selftest`'s: empirical check of `Sphinx.Interface.unwrap_complete` (the
-property `wrapKEM_unwrapKEM_complete` axiomatizes). -/
-def runCompletenessRound (geom : Geometry) : IO Bool := do
-  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
+property `wrapKEM_unwrapKEM_complete_valid` proves, for real). -/
+def runCompletenessRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
+  let scheme := kemSphinxSchemeOf kem wbCipher macS kdfS streamS geom hvalid rfl h16
+  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode kem)
   let path ← buildPath nodes
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomVector geom.forwardPayloadLength
-  let scheme := KEMSphinxScheme geom
   let stream := fun i => seeds[i]!
   match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
     IO.eprintln s!"completeness: wrap failed: {e}"
     pure false
   | .ok pkt _ =>
-    let privKeys := (nodes.map (·.priv)).toList
-    match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapKEM geom) privKeys (ofVector pkt) with
+    let privKeys := (nodes.map (fun n => n.priv)).toList
+    match CryptWalker.Sphinx.Interface.unwrapChainAux (unwrapKEM kem wbCipher macS kdfS streamS geom) privKeys (ofVector pkt) with
     | .error e =>
       IO.eprintln s!"completeness: unwrapChainAux failed: {e}"
       pure false
@@ -184,11 +218,12 @@ def runCompletenessRound (geom : Geometry) : IO Bool := do
 /-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
 round-trip through `unwrapKEM`/`SURB.decryptSURBPayload`. `wrapKEMSURB` draws one seed per hop
 plus two more (`keyPayload`), so the stream needs `nodes.size + 2` distinct entries. -/
-def runAbstractSURBRound (geom : Geometry) : IO Bool := do
-  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
+def runAbstractSURBRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
+  let scheme := kemSphinxSchemeOf kem wbCipher macS kdfS streamS geom hvalid rfl h16
+  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode kem)
   let path ← buildPath nodes true
   let seeds ← (List.range (nodes.size + 2)).toArray.mapM (fun _ => randomVector 32)
-  let scheme := KEMSphinxScheme geom
   let stream := fun i => seeds[i]!
   match scheme.newSURB path.toList ByteArray.empty (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
@@ -212,7 +247,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapKEM geom node.priv pkt with
+          match unwrapKEM kem wbCipher macS kdfS streamS geom node.priv pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -229,7 +264,7 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
                 IO.eprintln s!"hop {i}: expected terminal payload"
                 ok := false
               | some p =>
-                match CryptWalker.Sphinx.SURB.decryptSURBPayload geom surbKeys p with
+                match CryptWalker.Sphinx.SURB.decryptSURBPayload wbCipher geom surbKeys p with
                 | .error e =>
                   IO.eprintln s!"decryptSURBPayload failed: {e}"
                   ok := false
@@ -242,13 +277,13 @@ def runAbstractSURBRound (geom : Geometry) : IO Bool := do
 /-- Full SURB round trip, as `NIKESphinx.nike_selftest`'s: build a SURB (`newKEMSURB`), use it
 to build a reply packet (`SURB.newPacketFromSURB`), unwrap that reply through every hop, and
 confirm `SURB.decryptSURBPayload` recovers the original payload. -/
-def runSURBRound (geom : Geometry) : IO Bool := do
-  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode)
+def runSURBRound (kem : KEM) (geom : Geometry) : IO Bool := do
+  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode kem)
   let path ← buildPath nodes true
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let kp1 ← randomVector 32
   let kp2 ← randomVector 32
-  match newKEMSURB geom seeds (kp1 ++ kp2) ByteArray.empty path with
+  match newKEMSURB kem macS kdfS streamS geom seeds (kp1 ++ kp2) ByteArray.empty path with
   | .error e =>
     IO.eprintln s!"newKEMSURB failed: {e}"
     pure false
@@ -258,7 +293,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
       pure false
     else
     let payload ← randomBytes geom.forwardPayloadLength
-    match CryptWalker.Sphinx.SURB.newPacketFromSURB geom surb payload with
+    match CryptWalker.Sphinx.SURB.newPacketFromSURB wbCipher geom surb payload with
     | .error e =>
       IO.eprintln s!"newPacketFromSURB failed: {e}"
       pure false
@@ -274,7 +309,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
       for i in [0:n] do
         if !stop then
           let node := nodes[i]!
-          match unwrapKEM geom node.priv pkt with
+          match unwrapKEM kem wbCipher macS kdfS streamS geom node.priv pkt with
           | .error e =>
             IO.eprintln s!"hop {i}: unwrap failed: {e}"
             ok := false; stop := true
@@ -294,7 +329,7 @@ def runSURBRound (geom : Geometry) : IO Bool := do
                 IO.eprintln s!"hop {i}: expected terminal payload"
                 ok := false
               | some p =>
-                match CryptWalker.Sphinx.SURB.decryptSURBPayload geom surbKeys p with
+                match CryptWalker.Sphinx.SURB.decryptSURBPayload wbCipher geom surbKeys p with
                 | .error e =>
                   IO.eprintln s!"decryptSURBPayload failed: {e}"
                   ok := false
@@ -304,40 +339,76 @@ def runSURBRound (geom : Geometry) : IO Bool := do
                     ok := false
       pure ok
 
-def main : IO UInt32 := do
+/-- The full round set above, run against one registered KEM-Sphinx scheme. As
+`nike_selftest.lean`'s `runSuite`: the abstract/completeness/SURB rounds build their geometry via
+`ofKEMWith` (no `byName` witness needed, since it's handed `kem` directly) to sidestep `byName`'s
+`String.toLower` comparison being unable to reduce inside a kernel proof for anything but the
+registry's first entry; the concrete `runRound`/`runFillerRound`/`runSURBRound` calls still go
+through the real string-keyed `ofKEM`, exercising that resolution path at runtime. -/
+def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
+  IO.println s!"-- {schemeName} --"
   let mut ok := true
   for nrHops in [1, 2, 3, 5] do
-    let geom := ofKEM 32 103 false nrHops
-    let roundOk ← runRound geom
+    let geom ← IO.ofExcept (ofKEM schemeName 103 false nrHops)
+    let roundOk ← runRound kem geom
     IO.println s!"{nrHops} hop(s), no filler: {if roundOk then "ok" else "FAIL"}"
     ok := ok && roundOk
 
-  let fillerOk ← runFillerRound
+  let fillerOk ← runFillerRound schemeName kem
   IO.println s!"3 hop(s) of 5 (filler path): {if fillerOk then "ok" else "FAIL"}"
   ok := ok && fillerOk
 
-  let abstractOk ← runAbstractWrapRound (ofKEM 32 103 false 3)
+  let geom3 := ofKEMWith schemeName kem 103 false 3
+  let hvalid3 := ofKEMWith_validForKEM schemeName kem 103 false 3
+  let h163 : 16 ≤ geom3.payloadTagLength + geom3.forwardPayloadLength := by
+    rw [ofKEMWith_payloadTagLength schemeName kem 103 false 3]
+    unfold CryptWalker.Sphinx.Constants.payloadTagLength; omega
+
+  let abstractOk ← runAbstractWrapRound kem geom3 hvalid3 h163
   IO.println s!"abstract Sphinx.Interface.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
   ok := ok && abstractOk
 
-  let completeOk ← runCompletenessRound (ofKEM 32 103 false 3)
+  let completeOk ← runCompletenessRound kem geom3 hvalid3 h163
   IO.println s!"Sphinx.Interface.unwrap_complete via unwrapChainAux (3 hops): {if completeOk then "ok" else "FAIL"}"
   ok := ok && completeOk
 
-  let abstractSurbOk ← runAbstractSURBRound (ofKEM 32 103 true 3)
+  let geom3surb := ofKEMWith schemeName kem 103 true 3
+  let hvalid3s := ofKEMWith_validForKEM schemeName kem 103 true 3
+  let h163s : 16 ≤ geom3surb.payloadTagLength + geom3surb.forwardPayloadLength := by
+    rw [ofKEMWith_payloadTagLength schemeName kem 103 true 3]
+    unfold CryptWalker.Sphinx.Constants.payloadTagLength; omega
+  let abstractSurbOk ← runAbstractSURBRound kem geom3surb hvalid3s h163s
   IO.println s!"abstract Sphinx.Interface.newSURB/newPacketFromSURB (3 hops): {if abstractSurbOk then "ok" else "FAIL"}"
   ok := ok && abstractSurbOk
 
   for nrHops in [1, 2, 3, 5] do
-    let geom := ofKEM 32 103 true nrHops
-    let surbOk ← runSURBRound geom
+    let geom ← IO.ofExcept (ofKEM schemeName 103 true nrHops)
+    let surbOk ← runSURBRound kem geom
     IO.println s!"SURB round trip ({nrHops} hop(s)): {if surbOk then "ok" else "FAIL"}"
     ok := ok && surbOk
 
-  IO.println ""
-  if ok then
-    IO.println "all KEM-Sphinx round-trip self-tests passed"
-    pure 0
-  else
-    IO.eprintln "KEM-Sphinx round-trip self-tests FAILED"
-    pure 1
+  pure ok
+
+def main (args : List String) : IO UInt32 := do
+  match args with
+  | [schemeName] =>
+    match CryptWalker.KEM.byName schemeName with
+    | none => IO.eprintln s!"unknown KEM scheme: {schemeName}"; pure 1
+    | some kem =>
+      let ok ← runSuite schemeName kem
+      if ok then pure 0 else IO.eprintln "KEM-Sphinx round-trip self-tests FAILED"; pure 1
+  | _ =>
+    let okLadder ← runSuite "x25519-ladder-kem" x25519Ladder
+    IO.println ""
+    let okGroup ← runSuite "x25519-kem" x25519Group
+    IO.println ""
+    let okMLKEM ← runSuite "mlkem768-kem" mlkem768
+    IO.println ""
+    let okHybrid ← runSuite "mlkem768-x25519-kem" mlkem768X25519
+    IO.println ""
+    if okLadder && okGroup && okMLKEM && okHybrid then
+      IO.println "all KEM-Sphinx round-trip self-tests passed (all four schemes)"
+      pure 0
+    else
+      IO.eprintln "KEM-Sphinx round-trip self-tests FAILED"
+      pure 1

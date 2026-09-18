@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Lean.Data.Json
-import CryptWalker.Sphinx.Commands
+import CryptWalker.Sphinx.commands
 import CryptWalker.Util.newhex
 
 /-!

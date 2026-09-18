@@ -4,9 +4,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Lean.Data.Json
-import CryptWalker.Sphinx.Geometry
-import CryptWalker.Sphinx.KEMSphinx
-import CryptWalker.Sphinx.SURB
+import CryptWalker.Sphinx.geometry
+import CryptWalker.Sphinx.kem_sphinx_theorems
+import CryptWalker.Sphinx.surb
+import CryptWalker.NIKE.X25519_montgomery_ladder
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
 
@@ -29,6 +30,12 @@ open CryptWalker.Sphinx.Commands
 open CryptWalker.Sphinx.KEMSphinx
 open CryptWalker.Sphinx.SURB (decryptSURBPayload newPacketFromSURB)
 open CryptWalker.Util.Bytes (ofVector)
+
+private def x25519Kem := CryptWalker.KEM.kemX25519Ladder
+private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
+private def macS := CryptWalker.MAC.HMAC.hmacSha256MAC
+private def kdfS := CryptWalker.KDF.HKDF.hkdfSha256Expand
+private def streamS := CryptWalker.StreamCipher.AES256CTR.aes256CTR
 
 def field (j : Json) (k : String) : Except String ByteArray := do
   let s ← (← j.getObjVal? k).getStr?
@@ -89,7 +96,7 @@ def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   let geom := if withSurb then geomSurb else geomNoSurb
   let mut ok := true
   if withSurb then
-    match newPacketFromSURB geom v.surb v.payload with
+    match newPacketFromSURB wbCipher geom v.surb v.payload with
     | .error e =>
       IO.eprintln s!"    newPacketFromSURB failed: {e}"
       ok := false
@@ -106,7 +113,7 @@ def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   for i in [0:n] do
     if !stop then
       let node := v.nodes[i]!
-      match unwrapKEM geom node.privateKey pkt with
+      match unwrapKEM x25519Kem wbCipher macS kdfS streamS geom (ofVector node.privateKey) pkt with
       | .error e =>
         IO.eprintln s!"    hop {i}: unwrap failed: {e}"
         ok := false; stop := true
@@ -144,7 +151,7 @@ def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
               IO.eprintln s!"    hop {i}: expected terminal payload, got forwarding"
               ok := false
             | some p =>
-              match decryptSURBPayload geom v.surbKeys p with
+              match decryptSURBPayload wbCipher geom v.surbKeys p with
               | .error e =>
                 IO.eprintln s!"    hop {i}: DecryptSURBPayload failed: {e}"
                 ok := false
@@ -179,8 +186,8 @@ def main : IO UInt32 := do
       | .error e => do IO.eprintln e; pure 1
       | .ok vecs =>
         IO.println s!"KEM-Sphinx full-packet vectors ({vecs.size} from katzenpost)"
-        let geomNoSurb := ofKEM 32 103 false 5
-        let geomSurb := ofKEM 32 103 true 5
+        let geomNoSurb ← IO.ofExcept (ofKEM "x25519-kem" 103 false 5)
+        let geomSurb ← IO.ofExcept (ofKEM "x25519-kem" 103 true 5)
         let mut ok := true
         for i in [0:vecs.size] do
           let v := vecs[i]!

@@ -103,4 +103,4 @@ def main : IO Unit := do
   testX25519Vector
   testX25519GroupVector
   testX25519GroupAgreesWithLadder
-  testAllNIKEs CryptWalker.NIKE.Schemes
+  testAllNIKEs CryptWalker.NIKE.implementations

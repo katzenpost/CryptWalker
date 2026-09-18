@@ -22,32 +22,37 @@ TESTS := \
 	CryptWalker.Sign.test \
 	CryptWalker.Sign.blinded_test \
 	CryptWalker.BACAP.test \
-	CryptWalker.Sphinx.Crypto.test \
-	CryptWalker.Sphinx.Crypto.aez_test \
+	CryptWalker.Sphinx.crypto_test \
+	CryptWalker.WideBlockCipher.test \
 	CryptWalker.Sphinx.commands_test \
 	CryptWalker.Sphinx.nike_selftest \
 	CryptWalker.Sphinx.kem_selftest \
 	CryptWalker.Sphinx.nike_vectors_test \
-	CryptWalker.Sphinx.kem_vectors_test
+	CryptWalker.Sphinx.kem_vectors_test \
+	CryptWalker.KEM.mlkem768_test \
+	CryptWalker.Hash.blake2b_256_test \
+	CryptWalker.KEM.mlkem768_x25519_combiner_test \
+	CryptWalker.Sphinx.kem_hybrid_vectors_test
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 
 # Bare `lake build` builds only defaultTargets, which is the library. The
 # executables have to be named or the test targets run whatever binary was left
 # in .lake/build/bin by an earlier build.
-EXES := $(TESTS) CryptWalker.NIKE.benchmark
+EXES := $(TESTS) CryptWalker.NIKE.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.Sphinx.benchmark CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors
 
 .DEFAULT_GOAL := help
 
-.PHONY: all build test bench sorries clean help
+.PHONY: all build test bench bench-sphinx sorries clean help
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
-.PHONY: gen-sphinx-vectors
+.PHONY: gen-sphinx-vectors gen-hybrid-vectors test-mlkem test-mlkem-kat test-hybrid-sphinx
+.PHONY: verify-vectors
 
 all: build ## build everything, library and executables
 
 build: ## build everything, library and executables
-	$(LAKE) build CryptWalker $(EXES)
+	$(LAKE) build --log-level=warning CryptWalker $(EXES)
 
 # A suite counts as failed if it exits non-zero or prints anything matching
 # "fail". Most suites signal a mismatch by throwing, which exits 1, but
@@ -103,14 +108,38 @@ test-bacap: build ## BACAP vectors from hpqc
 	@$(BIN)/CryptWalker-BACAP-test
 
 test-sphinx-crypto: build ## Sphinx primitive-layer vectors (hash/MAC/stream/KDF) from katzenpost
-	@$(BIN)/CryptWalker-Sphinx-Crypto-test
+	@$(BIN)/CryptWalker-Sphinx-crypto_test
 
 gen-sphinx-vectors: build ## build Sphinx packets with the Lean port, for cross-checking against katzenpost's Unwrap
 	@$(BIN)/CryptWalker-Sphinx-gen_nike_vectors
 	@$(BIN)/CryptWalker-Sphinx-gen_kem_vectors
 
+gen-hybrid-vectors: build ## build X25519+ML-KEM-768 combiner vectors, for cross-checking against hpqc
+	@$(BIN)/CryptWalker-KEM-gen_mlkem768_x25519_combiner_vectors
+
+# Override with `make verify-vectors HPQC_DIR=... KATZENPOST_DIR=...` if the sibling repos aren't
+# checked out at ../hpqc, ../katzenpost.
+HPQC_DIR ?= ../hpqc
+KATZENPOST_DIR ?= ../katzenpost
+
+verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc/katzenpost source copies
+	@./scripts/verify-vectors.sh "$(HPQC_DIR)" "$(KATZENPOST_DIR)"
+
+test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer vectors
+	@$(BIN)/CryptWalker-Sphinx-kem_selftest
+	@$(BIN)/CryptWalker-KEM-mlkem768_test
+
+test-mlkem-kat: build ## ML-KEM-768: NIST ACVP known-answer vectors only
+	@$(BIN)/CryptWalker-KEM-mlkem768_test
+
+test-hybrid-sphinx: build ## KEM-Sphinx round-trip self-test for the X25519+ML-KEM-768 hybrid only
+	@$(BIN)/CryptWalker-Sphinx-kem_selftest mlkem768-x25519-kem
+
 bench: build ## run the NIKE benchmarks
 	@$(BIN)/CryptWalker-NIKE-benchmark
+
+bench-sphinx: build ## run the Sphinx packet-creation/unwrap benchmarks (all 4 schemes x 3 payload sizes)
+	@$(BIN)/CryptWalker-Sphinx-benchmark
 
 sorries: ## list every declaration still standing on sorry
 	@$(LAKE) build 2>&1 | grep 'declaration uses' | sort -u || echo "no sorries"

@@ -62,10 +62,10 @@ name = "CryptWalker.Hash.hkdf_structured_test"
 name = "CryptWalker.BACAP.test"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.Crypto.test"
+name = "CryptWalker.Sphinx.crypto_test"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.Crypto.aez_test"
+name = "CryptWalker.WideBlockCipher.test"
 
 [[lean_exe]]
 name = "CryptWalker.Sphinx.commands_test"
@@ -87,3 +87,21 @@ name = "CryptWalker.Sphinx.gen_nike_vectors"
 
 [[lean_exe]]
 name = "CryptWalker.Sphinx.gen_kem_vectors"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.benchmark"
+
+[[lean_exe]]
+name = "CryptWalker.KEM.mlkem768_test"
+
+[[lean_exe]]
+name = "CryptWalker.Hash.blake2b_256_test"
+
+[[lean_exe]]
+name = "CryptWalker.KEM.mlkem768_x25519_combiner_test"
+
+[[lean_exe]]
+name = "CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.kem_hybrid_vectors_test"

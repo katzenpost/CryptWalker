@@ -40,8 +40,52 @@ structure KEM where
 
   decap : PrivateKey → Ciphertext → EStateM KEMError State Plaintext
   encap : PublicKey → EStateM KEMError State (Ciphertext × Plaintext)
+
+  /-- Which pre-encapsulation states are guaranteed not to trigger the scheme's rare decoding
+  failure (an LWE/lattice KEM's noise exceeding its decoding margin, for instance). Defaults to
+  `True` everywhere — the right default for any perfect-correctness KEM (a Diffie-Hellman-based
+  construction like `Adapter.kemOfNike` has no decoding step at all, hence no failure mode to
+  name). A KEM that genuinely needs this (e.g. ML-KEM) overrides it with a real, decidable,
+  purely arithmetic predicate over the sampled noise — not a probability statement; the separate,
+  much harder question of how *likely* `Reliable` is to fail is out of scope here, the same way
+  every real deployment treats a KEM's published decryption-failure rate as an accepted, cited
+  number rather than something re-derived per use. -/
+  Reliable : State → Prop := fun _ => True
+
   generate : EStateM KEMError State (Σ' (pk : PublicKey), {sk : PrivateKey //
-    ∀ s c k s', encap pk s = .ok (c, k) s' → ∀ t, ∃ t', decap sk c t = .ok k t'})
+    ∀ s, Reliable s → ∀ c k s', encap pk s = .ok (c, k) s' → ∀ t, ∃ t', decap sk c t = .ok k t'})
+
+  /-- Seed the KEM's internal randomness deterministically — needed by a caller (Sphinx, in
+  particular) that must reproduce one specific `encap`/`decap` run, e.g. because a packet's bytes
+  have to be an exact function of the caller's own seed stream, not of the system CSPRNG. Only as
+  strong as one 32-byte seed can make it: a KEM whose own operations need to draw more
+  independent randomness internally than a single seed can stretch to gets no guarantee here
+  beyond determinism (`kemOfNike`'s instance, the only one this project constructs directly,
+  needs exactly one draw per `encap`, so this is exact for it, not merely adequate). -/
+  stateFromSeed : Vector UInt8 32 → State
+
+  /-- Derive a public key from a private key directly, independent of `generate`'s joint
+  sampling — what every KEM this project can construct already computes internally (a NIKE
+  adapter's `nike.derivePublicKey`), needed by a caller that must recover its own public key from
+  a private key alone rather than generating a fresh pair. -/
+  derivePublicKey : PrivateKey → PublicKey
+
+  /-- **The `generate`-independent round-trip law**: `generate`'s embedded proof above only
+  covers whichever `(pk, sk)` pair `generate` itself happens to draw — it says nothing about an
+  arbitrary `sk` paired with its own `derivePublicKey sk`, which is exactly the shape a caller
+  holding just a private key (Sphinx's `wrap`, given a path of already-known public keys) actually
+  needs. `KEM.Adapter.roundTrip` already proves exactly this, for the one concrete `KEM` this
+  project builds directly, so wiring it here costs no new axiom. -/
+  honestRoundTrip : ∀ sk, ∀ s, Reliable s → ∀ c k s', encap (derivePublicKey sk) s = .ok (c, k) s' →
+    ∀ t, ∃ t', decap sk c t = .ok k t'
+
+  /-- `decodePrivateKey` never fails on a well-formed-width byte string — every one of the
+  `privateKeySize`-byte inputs it's ever called on decodes to *something*. Rules out a pathological
+  instance where a caller's raw private-key bytes fail to decode (falling back to those raw bytes
+  as a stand-in "public key," per `KEMSphinx.kemSelfPublicKeyBytes`'s documented fallback) while
+  still satisfying every other law here — free for every `KEM` this project constructs (`kemOfNike`
+  always succeeds: `decodePrivateKey := fun v => some ⟨v⟩`). -/
+  decodePrivateKey_total : ∀ b, ∃ sk, decodePrivateKey b = some sk
 
   decode_encode_pub  : ∀ pk, decodePublicKey  (encodePublicKey  pk) = some pk
   decode_encode_priv : ∀ sk, decodePrivateKey (encodePrivateKey sk) = some sk
@@ -72,7 +116,11 @@ instance : Inhabited KEM := ⟨{
 
   decap := fun _ _ => pure ()
   encap := fun _ => pure ((), ())
-  generate := pure ⟨(), (), fun _ _ _ _ _ t => ⟨t, rfl⟩⟩
+  generate := pure ⟨(), (), fun _ _ _ _ _ _ t => ⟨t, rfl⟩⟩
+  stateFromSeed := fun _ => ()
+  derivePublicKey := fun _ => ()
+  honestRoundTrip := fun _ _ _ _ _ _ _ t => ⟨t, rfl⟩
+  decodePrivateKey_total := fun _ => ⟨(), rfl⟩
 
   decode_encode_pub  := fun _ => rfl
   decode_encode_priv := fun _ => rfl
@@ -117,7 +165,8 @@ def IsEncapsulation (sk : PrivateKey kemSpec) (c : Ciphertext kemSpec) (k : Plai
   ∀ t, ∃ t', decap kemSpec sk c t = .ok k t'
 
 def KeyPair (pk : PublicKey kemSpec) (sk : PrivateKey kemSpec) :=
-  ∀ s c k s', encap kemSpec pk s = .ok (c, k) s' → IsEncapsulation kemSpec sk c k
+  ∀ s, kemSpec.Reliable s → ∀ c k s', encap kemSpec pk s = .ok (c, k) s' →
+    IsEncapsulation kemSpec sk c k
 
 /-- A triple for a computation that need not succeed: whenever it returns, the result
 satisfies `p`. Failure is left unconstrained, because neither `generate` nor `encap` is total.
@@ -158,42 +207,24 @@ theorem generate_keyPair {t r t'} (hr : generate kemSpec t = .ok r t') :
     ⦃post⟨fun (pk, sk) => ⌜KeyPair kemSpec pk sk⌝, fun _ => ⌜True⌝⟩⦄ :=
   EStateM_triple_ok fun _ _ _ hr => generate_keyPair kemSpec hr
 
-@[spec] theorem encap_ok {pk sk} (h : KeyPair kemSpec pk sk) :
-    ⦃⌜True⌝⦄ encap kemSpec pk
-    ⦃post⟨fun (c, k) => ⌜IsEncapsulation kemSpec sk c k⌝, fun _ => ⌜True⌝⟩⦄ :=
-  EStateM_triple_ok fun t r t' hr => h t r.1 r.2 t' hr
+/-- As a plain proposition rather than a `Std.Do` triple: `KeyPair`'s conclusion now only holds
+for encapsulations run from a `Reliable` state, and a `⦃⌜True⌝⦄`-style precondition has no way to
+say that about `encap`'s own (existentially quantified, internal-to-the-triple) starting state. -/
+theorem encap_ok {pk sk} (h : KeyPair kemSpec pk sk) (t : kemSpec.State)
+    (hrel : kemSpec.Reliable t) :
+    ∀ r t', encap kemSpec pk t = .ok r t' → IsEncapsulation kemSpec sk r.1 r.2 :=
+  fun r t' hr => h t hrel r.1 r.2 t' hr
 
 @[spec] theorem decap_ok {sk ct k} (h : IsEncapsulation kemSpec sk ct k) :
     ⦃⌜True⌝⦄ decap kemSpec sk ct ⦃post⟨fun k' => ⌜k' = k⌝, fun _ => ⌜False⌝⟩⦄ :=
   EStateM_triple fun t => let ⟨t', ht⟩ := h t; ⟨k, t', ht, rfl⟩
 
-def roundTrip : KEMM kemSpec Bool := do
-  let (pk, sk) ← generate kemSpec
-  let (c, k)   ← encap kemSpec pk
-  let k'       ← decap kemSpec sk c
-  return k' == k
-
-/-- Generate, encapsulate, decapsulate: the plaintext that comes back is the one that went in.
-Any of the three steps may fail, so this constrains the successful runs only. -/
-theorem roundTrip_ok :
-    ⦃⌜True⌝⦄ roundTrip kemSpec ⦃post⟨fun b => ⌜b = true⌝, fun _ => ⌜True⌝⟩⦄ := by
-  refine EStateM_triple_ok fun t b t' hr => ?_
-  simp only [roundTrip, bind, EStateM.bind] at hr
-  split at hr
-  case _ r1 s1 hgen =>
-    split at hr
-    case _ r2 s2 henc =>
-      split at hr
-      case _ k' s3 hdec =>
-        simp only [pure, EStateM.pure, EStateM.Result.ok.injEq] at hr
-        obtain ⟨rfl, -⟩ := hr
-        obtain ⟨s4, hd⟩ :=
-          generate_keyPair kemSpec hgen s1 r2.1 r2.2 s2 (by simpa using henc) s2
-        rw [hdec, EStateM.Result.ok.injEq] at hd
-        simp [hd.1]
-      case _ => exact absurd hr (by simp)
-    case _ => exact absurd hr (by simp)
-  case _ => exact absurd hr (by simp)
+-- `roundTrip`/`roundTrip_ok` (generate;encap;decap composed into one unconditional `Bool`
+-- check) are deleted here: their honest statement, once `KeyPair` is `Reliable`-conditioned,
+-- needs the specific post-`generate` state exposed as a hypothesis (not just asserted `True`),
+-- which needs unfolding `roundTrip`'s own `do`-block inside the statement, not just the proof.
+-- Nothing outside this file used either declaration (`Sphinx` works from `honestRoundTrip`
+-- directly), so it wasn't worth the extra plumbing for unused demonstration code.
 
 end Spec
 

@@ -1,16 +1,21 @@
 
 import CryptWalker.NIKE.X25519_montgomery_ladder
+import CryptWalker.NIKE.X25519
 import CryptWalker.NIKE.NIKE
 import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Combiner
+import CryptWalker.KEM.MLKEM768
 import CryptWalker.Hash.Sha2
+import CryptWalker.Hash.Blake2b
+import CryptWalker.MAC.HMAC
 
 open CryptWalker.NIKE
 open CryptWalker.NIKE.NIKE
 open CryptWalker.KEM.KEM
 open CryptWalker.KEM.Adapter
 open CryptWalker.Hash.Sha2
+open CryptWalker.MAC.HMAC (hmacSha256)
 
 namespace CryptWalker.KEM
 
@@ -57,9 +62,98 @@ def sha256v1PRF : Adapter.PRF where
   name   := "sha256-v1"
   derive := sha256v1Derive
 
-def kemX25519 : KEM := kemOfNike sha256v1PRF X25519_montgomery_ladder.LadderScheme
+/-- The Montgomery-ladder X25519 implementation, wrapped into a KEM. Registered under
+`"x25519-ladder-kem"` — see the registry section below for why this diverges from `hpqc`'s own
+naming. -/
+def kemX25519Ladder : KEM := kemOfNike sha256v1PRF X25519_montgomery_ladder.LadderScheme
 
-def Schemes : List String := ["X25519"]
+/-- The group-formulation X25519 implementation, wrapped into a KEM. Registered under
+`"x25519-kem"` — the two NIKEs agree byte-for-byte
+(`CryptWalker.NIKE.test`'s `testX25519GroupAgreesWithLadder`), so either can serve as *the*
+`"x25519-kem"` KEM; picking the group one here is purely for naming symmetry with
+`NIKE.Schemes`'s own `x25519GroupEntry`. -/
+def kemX25519 : KEM := kemOfNike sha256v1PRF CryptWalker.NIKE.X25519.Scheme
 
+/-! ## The `hpqc/kem/schemes` registry, ported (names deliberately diverge from `hpqc`)
+
+`hpqc/kem/schemes.All()` lists ~30 schemes (MLKEM768, sntrup, HQC, FrodoKEM, the Classic McEliece
+family, X-Wing, and many hybrid combiners — see `hpqc/kem/schemes/schemes.go`); this project
+ports `hpqc`'s one X25519 adapter twice over, once per X25519 implementation
+(`kemX25519`/`kemX25519Ladder`). `hpqc/kem/adapter`'s own `Scheme.Name()`
+(`kem/adapter/kem.go:120`) just returns the wrapped NIKE's name unchanged (`a.nike.Name()`), so
+in `hpqc` a KEM-adapter scheme and its underlying NIKE share one string — harmless there only
+because `nike/schemes` and `kem/schemes` are two independent Go maps. This port's `NIKE.registry`
+and `KEM.registry` get merged into one flat `Sphinx.Schemes.schemeNames` list
+(`schemes.lean`), where that collision would be real and confusing (two different entries named
+`"x25519"`, one NIKE-backed and one KEM-backed). So, unlike `hpqc`, every KEM-adapter entry here
+carries an explicit `-kem` suffix its underlying NIKE entry lacks — a deliberate naming choice,
+not a port of anything `hpqc` does. (Earlier this file exposed a bare
+`Schemes : List String := ["X25519"]`, wrong on both counts — capitalized unlike `hpqc`'s own
+name, and not actually paired with a scheme.) -/
+
+/-- One entry in the scheme registry: a scheme's registry name paired with the actual
+implementation `byName` should return for it. Named `hpqcName` for parallelism with
+`NIKE.RegistryEntry`, though the KEM-side value is this port's own `-kem`-suffixed name, not
+`hpqc`'s (see the registry section above). `KEM.KEM` carries everything a caller (including
+`Sphinx.KEMSphinx`) needs directly — `derivePublicKey`, `stateFromSeed` — so, unlike an earlier
+version of this structure, there is no need to also carry the `prf`/`nike` a `kemOfNike`-built
+scheme happens to be made from; that stays an internal detail of `Adapter.kemOfNike`. -/
+structure RegistryEntry where
+  hpqcName : String
+  scheme : KEM
+
+def x25519LadderEntry : RegistryEntry := { hpqcName := "x25519-ladder-kem", scheme := kemX25519Ladder }
+
+def x25519GroupEntry : RegistryEntry := { hpqcName := "x25519-kem", scheme := kemX25519 }
+
+/-- ML-KEM-768 (FIPS 203), post-quantum — `CryptWalker.KEM.MLKEM768.kemMLKEM768`. Unlike the two
+X25519 entries above (Diffie-Hellman-based, so `KEM.Reliable` stays at its trivial default), this
+one's `Reliable` is a real, non-trivial condition (see `MLKEM768.lean`'s module doc) — any caller
+building a `KEMSphinxScheme` from this entry must discharge it, not just `trivial`. -/
+def mlkem768Entry : RegistryEntry :=
+  { hpqcName := "mlkem768-kem", scheme := CryptWalker.KEM.MLKEM768.kemMLKEM768 }
+
+/-! ## Hybrid: X25519 + ML-KEM-768, via the generic split-PRF combiner
+
+hpqc's `kem/schemes` registers exactly this pairing twice, via two different mechanisms
+(`schemes.go`): `"Xwing"`, the fixed, non-generic construction from draft-connolly-cfrg-xwing (a
+single SHA3-256 hash over both raw secrets and both public keys, no split-PRF, no sub-KEM
+agility); and `"MLKEM768-X25519"`, built via hpqc's *generic* `kem/combiner` — the same
+`Combiner.combineKEM` this project already has. hpqc's own comment on that second entry: "If Xwing
+is not the PQ Hybrid KEM you are looking for then we recommend using our secure generic KEM
+combiner." This is that one, not X-Wing. -/
+
+/-- `Combiner.PRF`, instantiated with BLAKE2b-256 -- matching hpqc's deployed combiner
+(`kem/combiner/split_prf.go`) exactly: an unkeyed BLAKE2b-256 hash for key derivation, and a keyed
+BLAKE2b-256 hash for the per-component PRF. -/
+def blake2b256CombinerPRF : Combiner.PRF where
+  hash  := CryptWalker.Hash.Blake2b.hash256
+  keyed := fun key msg => CryptWalker.Hash.Blake2b.hash256Keyed (Combiner.toBytes key) msg
+
+/-- X25519 combined with ML-KEM-768 via `Combiner.combineKEM` — IND-CCA2 as long as *at least
+one* component is (Giacon, Heuer & Poettering, https://eprint.iacr.org/2018/024.pdf, Theorem 1).
+`Reliable` is `combineKEM`'s generic `k₀.Reliable s.1 ∧ ReliableN [k₁] s.2` — trivial on the X25519
+half, ML-KEM-768's genuine noise-dependent condition on the other; any caller building a
+`KEMSphinxScheme` from this entry must still discharge that, exactly as for `mlkem768Entry` alone.
+
+Uses `MLKEM768.kemMLKEM768Seed`, not the plain `mlkem768Entry`'s `kemMLKEM768` — the private-key
+wire format needs to match Go's `crypto/mlkem` (`ek ‖ d ‖ z`, 1248 bytes) for real KEM-Sphinx
+packets built by katzenpost to be decodable here at all; `kemMLKEM768`'s FIPS 203 *expanded*
+private-key format (2400 bytes) cannot represent Go's compact one (see `MLKEM768.lean`'s module
+doc on `kemMLKEM768Seed`). -/
+def kemMLKEM768X25519 : KEM :=
+  Combiner.combineKEM blake2b256CombinerPRF kemX25519 [CryptWalker.KEM.MLKEM768.kemMLKEM768Seed]
+
+def mlkem768X25519Entry : RegistryEntry :=
+  { hpqcName := "mlkem768-x25519-kem", scheme := kemMLKEM768X25519 }
+
+def registry : List RegistryEntry :=
+  [x25519LadderEntry, x25519GroupEntry, mlkem768Entry, mlkem768X25519Entry]
+
+/-- `hpqc/kem/schemes.ByName`, ported: case-insensitive lookup, `none` for any name not in
+`registry` — which, unlike `hpqc`'s own registry, is most of `hpqc/kem/schemes.All()`: this
+project has not ported the post-quantum KEMs or the hybrid combiners. -/
+def byName (name : String) : Option KEM :=
+  (registry.find? (·.hpqcName.toLower == name.toLower)).map (·.scheme)
 
 end CryptWalker.KEM

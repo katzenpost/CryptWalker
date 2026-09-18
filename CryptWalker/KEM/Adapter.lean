@@ -136,11 +136,14 @@ theorem encap_seeds_distinct (i : Nat) (str : Nat → Bytes32)
 
 /-- Decapsulation recovers what encapsulation produced, for honestly generated
 keys. Both sides derive the key from the same three inputs: the static recipient
-key, the ephemeral key, and — by `NIKE.commutes` — the same shared secret. -/
+key, the ephemeral key, and — by `NIKE.commutes` — the same shared secret. The
+`True` hypothesis is `kemOfNike`'s `Reliable` (the default: a Diffie-Hellman-based
+KEM has no decoding step, hence no failure mode to name), kept explicit here only
+because `KEM.KEM.honestRoundTrip`'s type demands it. -/
 theorem roundTrip (sk : nike.PrivateKey) :
-    ∀ s c k s', encapM F nike (nike.derivePublicKey sk) s = .ok (c, k) s' →
+    ∀ s, True → ∀ c k s', encapM F nike (nike.derivePublicKey sk) s = .ok (c, k) s' →
       ∀ t, ∃ t', decapM F nike sk c t = .ok k t' := by
-  rintro ⟨i, str⟩ c k s' hEnc t
+  rintro ⟨i, str⟩ - c k s' hEnc t
   simp only [encapM, nextSeed, bind, EStateM.bind, pure, EStateM.pure,
              dif_pos (nike.derive_safe sk)] at hEnc
   injection hEnc with hval _
@@ -178,6 +181,10 @@ def kemOfNike : KEM where
 
   encap := encapM F nike
   decap := decapM F nike
+  stateFromSeed := fun seed => initWith (fun _ => seed)
+  derivePublicKey := nike.derivePublicKey
+  honestRoundTrip := roundTrip F nike
+  decodePrivateKey_total := nike.decodePrivateKey_total
 
   -- Inhabitance only: a constant stream, hence degenerate (every keypair and
   -- every ephemeral would coincide). Honest runs start from `initWith`.
