@@ -47,6 +47,7 @@ EXES := $(TESTS) CryptWalker.NIKE.benchmark CryptWalker.Sphinx.gen_nike_vectors 
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors test-mlkem test-mlkem-kat test-hybrid-sphinx
+.PHONY: verify-vectors
 
 all: build ## build everything, library and executables
 
@@ -115,6 +116,14 @@ gen-sphinx-vectors: build ## build Sphinx packets with the Lean port, for cross-
 
 gen-hybrid-vectors: build ## build X25519+ML-KEM-768 combiner vectors, for cross-checking against hpqc
 	@$(BIN)/CryptWalker-KEM-gen_mlkem768_x25519_combiner_vectors
+
+# Override with `make verify-vectors HPQC_DIR=... KATZENPOST_DIR=...` if the sibling repos aren't
+# checked out at ../hpqc, ../katzenpost.
+HPQC_DIR ?= ../hpqc
+KATZENPOST_DIR ?= ../katzenpost
+
+verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc/katzenpost source copies
+	@./scripts/verify-vectors.sh "$(HPQC_DIR)" "$(KATZENPOST_DIR)"
 
 test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer vectors
 	@$(BIN)/CryptWalker-Sphinx-kem_selftest

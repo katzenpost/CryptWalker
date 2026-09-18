@@ -7,13 +7,13 @@ import Lean.Data.Json
 import CryptWalker.Hash.Blake2b
 import CryptWalker.Util.newhex
 
-/-! # BLAKE2b-256 (unkeyed and keyed) known-answer tests, against `golang.org/x/crypto/blake2b`
+/-! # BLAKE2b-256 (unkeyed and keyed) known-answer tests, against `hpqc`
 
-Checks `Blake2b.hash256`/`hash256Keyed` against reference vectors from a throwaway Go script (see
-`testdata/blake2b_256.json`'s `"generator"` field) -- needed since `Hash/Blake2b.lean`'s BLAKE2b-512
-implementation was generalized to support keying and arbitrary digest lengths for
-`KEM.Schemes.blake2b256CombinerPRF`, and self-consistency with the pre-existing BLAKE2b-512 tests
-doesn't cover the new keyed/256 code paths at all. -/
+Checks `Blake2b.hash256`/`hash256Keyed` against `testdata/blake2b_256.json`, vendored from
+`hpqc/testvectors/cmd/generate`'s `genBLAKE2b256` (`hpqc/testvectors/primitives/blake2b_256.json`)
+-- needed since `Hash/Blake2b.lean`'s BLAKE2b-512 implementation was generalized to support keying
+and arbitrary digest lengths for `KEM.Schemes.blake2b256CombinerPRF`, and self-consistency with the
+pre-existing BLAKE2b-512 tests doesn't cover the new keyed/256 code paths at all. -/
 
 open Lean
 open CryptWalker.Util.newhex
