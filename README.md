@@ -47,7 +47,12 @@ Classical NIKEs, two independent implementations of the same exchange:
 |:---:|
 
 * X25519, adapted to KEM via hashed ElGamal (NIKE-to-KEM adapter, `sha256-v1` PRF)
-* A security-preserving KEM combiner (Giacon–Heuer–Poettering split-PRF, BLAKE2b-256 keyed)
+* ML-KEM-768 (FIPS 203), a from-scratch pure-Lean implementation (no native/FFI dependency),
+  checked against the official NIST ACVP known-answer vectors — keygen, encapsulation,
+  decapsulation (including implicit rejection), and both key-validity checks
+* A security-preserving KEM combiner (Giacon–Heuer–Poettering split-PRF, real BLAKE2b-256 keyed),
+  generic over any number of ingredient KEMs — instantiated as an X25519 + ML-KEM-768 hybrid,
+  cross-checked byte-for-byte against [hpqc](https://github.com/katzenpost/hpqc)'s own combiner
 
 | SIGN: Cryptographic Signature Scheme |
 |:---:|
@@ -62,7 +67,8 @@ Classical NIKEs, two independent implementations of the same exchange:
 |:---:|
 * SHA-512, and its truncated SHA-512/256 variant
 * SHA-256
-* BLAKE2b-512
+* BLAKE2b, parameterized over digest length and an optional key (RFC 7693's keyed mode) — used at
+  512 bits unkeyed (BACAP, HKDF) and at 256 bits both unkeyed and keyed (the KEM combiner's PRF)
 
 | MAC: Message Authentication Code |
 |:---:|
@@ -93,7 +99,7 @@ Classical NIKEs, two independent implementations of the same exchange:
 
 ## cryptographic protocol components
 
-* The Sphinx cryptographic packet format: KEM Sphinx and NIKE Sphinx, configurable to any number of hops, any KEM or NIKE, any payload size. Binary compatible with the Katzenpost mixnet's golang Sphinx implementation.
+* The Sphinx cryptographic packet format: KEM Sphinx and NIKE Sphinx, configurable to any number of hops, any KEM or NIKE, any payload size. Binary compatible with the Katzenpost mixnet's golang Sphinx implementation — including with a post-quantum/classical hybrid KEM (X25519 + ML-KEM-768) as the per-hop KEM.
 
 * BACAP: Blinded Cryptographic Capability. It's like having a private distributed hash table. Useful for building messaging systems.
 
@@ -136,35 +142,68 @@ lake exe CryptWalker.Sphinx.nike_selftest    # NIKE-Sphinx round-trip self-tests
 lake exe CryptWalker.Sphinx.kem_selftest     # KEM-Sphinx round-trip self-tests
 lake exe CryptWalker.Sphinx.nike_vectors_test  # NIKE-Sphinx full-packet vectors from katzenpost
 lake exe CryptWalker.Sphinx.kem_vectors_test   # KEM-Sphinx full-packet vectors from katzenpost
+lake exe CryptWalker.KEM.mlkem768_test         # ML-KEM-768 NIST ACVP known-answer vectors
+lake exe CryptWalker.Hash.blake2b_256_test     # BLAKE2b-256 (unkeyed and keyed) vectors from hpqc
+lake exe CryptWalker.KEM.mlkem768_x25519_combiner_test  # X25519+ML-KEM-768 hybrid vectors from hpqc
+lake exe CryptWalker.Sphinx.kem_hybrid_vectors_test     # KEM-Sphinx hybrid full-packet vectors from katzenpost
+```
+
+A few suites also have their own dedicated `make` target, for running just that piece:
+
+```bash
+make test-mlkem-kat      # just the ML-KEM-768 NIST ACVP known-answer vectors
+make test-hybrid-sphinx  # just the KEM-Sphinx round-trip self-test for the hybrid KEM
+make test-mlkem          # both of the above, together
 ```
 
 ### test vector files
 
-These JSON files in `CryptWalker/testdata/` are vendored from hpqc's
-`hpqc/testvectors/cmd/generate` or katzenpost's
-`katzenpost/core/sphinx/testvectors/cmd/generate`, and are binary-compatible with the
-corresponding upstream test vectors:
+These JSON files in `CryptWalker/testdata/` are vendored from hpqc's or katzenpost's own
+`testvectors/cmd/generate` tools, and are binary-compatible with the corresponding upstream test
+vectors — the `Source` column below is each file's canonical path in its own repo (what
+`scripts/verify-vectors.sh` actually compares against, not a symlink or a consuming test file):
 
 | File | Primitive | Source |
 |------|-----------|--------|
-| `sha512.json` | SHA-512 | Go's `crypto/sha512` |
-| `hkdf_blake2b.json` | HKDF-BLAKE2b-512 (RFC 5869) | `hpqc/bacap/testdata/hkdf_blake2b.json` |
-| `aes_gcm_siv.json` | AES-256-GCM-SIV (RFC 8452) | `hpqc/bacap/testdata/aes_gcm_siv.json` |
-| `blinded_ed25519.json` | Blinded Ed25519 signatures | `hpqc/sign/ed25519/testdata/blinded_ed25519.json` |
-| `adapter_test_vectors.json` | NIKE-to-KEM adapter | `hpqc/kem/adapter/adapter_vectors_test.go` |
-| `sphinx_hash_sha512_256.json` | SHA-512/256 (Sphinx's replay-tag hash) | `katzenpost/core/sphinx/testvectors/cmd/generate` |
-| `sphinx_mac_hmac_sha256.json` | HMAC-SHA256 (Sphinx's header MAC) | `katzenpost/core/sphinx/testvectors/cmd/generate` |
-| `sphinx_stream_aes256ctr.json` | AES-256-CTR (Sphinx's header stream cipher) | `katzenpost/core/sphinx/testvectors/cmd/generate` |
-| `sphinx_kdf.json` | HKDF-SHA256 (Sphinx's `PacketKeys` derivation) | `katzenpost/core/sphinx/testvectors/cmd/generate` |
-| `sphinx_chacha20_deterministic_rand.json` | ChaCha20 deterministic RNG | `katzenpost/core/sphinx/testvectors/cmd/generate` |
-| `sphinx_sprp_aez.json` | AEZ v5 (Sphinx's SPRP) | `katzenpost/core/sphinx/testvectors/cmd/generate` |
+| `sha512.json` | SHA-512 | `hpqc/testvectors/primitives/sha512.json` |
+| `hkdf_blake2b.json` | HKDF-BLAKE2b-512 (RFC 5869) | `hpqc/testvectors/primitives/hkdf_blake2b.json` |
+| `aes_gcm_siv.json` | AES-256-GCM-SIV (RFC 8452) | `hpqc/testvectors/primitives/aes_gcm_siv.json` |
+| `blinded_ed25519.json` | Blinded Ed25519 signatures | `hpqc/testvectors/primitives/blinded_ed25519.json` |
+| `blake2b_256.json` | BLAKE2b-256, unkeyed and keyed (RFC 7693) | `hpqc/testvectors/primitives/blake2b_256.json` |
+| `adapter_test_vectors.json` | NIKE-to-KEM adapter | `hpqc/testvectors/kem/adapter_test_vectors.json` |
+| `mlkem768_x25519_combiner.json` | X25519+ML-KEM-768 hybrid combiner (both components' raw inputs and every intermediate/combined output) | `hpqc/testvectors/kem/mlkem768_x25519_combiner.json` |
+| `sphinx_hash_sha512_256.json` | SHA-512/256 (Sphinx's replay-tag hash) | `katzenpost/core/sphinx/testvectors/primitives/hash_sha512_256.json` |
+| `sphinx_mac_hmac_sha256.json` | HMAC-SHA256 (Sphinx's header MAC) | `katzenpost/core/sphinx/testvectors/primitives/mac_hmac_sha256.json` |
+| `sphinx_stream_aes256ctr.json` | AES-256-CTR (Sphinx's header stream cipher) | `katzenpost/core/sphinx/testvectors/primitives/stream_aes256ctr.json` |
+| `sphinx_kdf.json` | HKDF-SHA256 (Sphinx's `PacketKeys` derivation) | `katzenpost/core/sphinx/testvectors/primitives/kdf_sphinx.json` |
+| `sphinx_chacha20_deterministic_rand.json` | ChaCha20 deterministic RNG | `katzenpost/core/sphinx/testvectors/primitives/chacha20_deterministic_rand.json` |
+| `sphinx_sprp_aez.json` | AEZ v5 (Sphinx's SPRP) | `katzenpost/core/sphinx/testvectors/primitives/sprp_aez.json` |
 | `sphinx_commands_vectors.json` | Sphinx routing-command wire format | `katzenpost/core/sphinx/commands/testdata/sphinx_commands_vectors.json` |
 | `sphinx_nike_vectors.json` | NIKE-Sphinx full packets (10: every hop count × `withSURB`) | `katzenpost/core/sphinx/testdata/sphinx_vectors.json` |
 | `sphinx_kem_vectors.json` | KEM-Sphinx full packets (10: every hop count × `withSURB`) | `katzenpost/core/sphinx/testdata/kemsphinx_vectors.json` |
+| `sphinx_kem_hybrid_vectors.json` | KEM-Sphinx full packets, X25519+ML-KEM-768 hybrid (10: every hop count × `withSURB`) | `katzenpost/core/sphinx/testdata/kemsphinx_mlkem768x25519_vectors.json` |
+| `mlkem768_keygen.json`, `mlkem768_encapdecap.json`, `mlkem768_keycheck.json` | ML-KEM-768 (FIPS 203) — NIST's own official ACVP known-answer vectors, not from hpqc or katzenpost | [NIST's `usnistgov/ACVP-Server`](https://github.com/usnistgov/ACVP-Server) |
 
-Two more files in that directory aren't vendored input — they're output, written by this
-repo's own `gen_nike_vectors`/`gen_kem_vectors` (Lean-built packets, for katzenpost's own
-`Unwrap` to check against): `lean_nike_vectors.json`, `lean_kem_vectors.json`.
+A few more files in that directory aren't vendored input — they're output, written by this
+repo's own `gen_nike_vectors`/`gen_kem_vectors`/`gen_mlkem768_x25519_combiner_vectors` (Lean-built
+packets and combiner vectors, for hpqc's and katzenpost's own test suites to check against):
+`lean_nike_vectors.json`, `lean_kem_vectors.json`, `lean_kem_hybrid_vectors.json`,
+`lean_mlkem768_x25519_combiner_vectors.json`.
+
+### proving the vendored vectors actually match upstream
+
+`scripts/verify-vectors.sh` (or `make verify-vectors`) `sha256sum`-compares every vendored file
+above against its source copy in a sibling `hpqc`/`katzenpost` checkout, printing both hashes side
+by side:
+
+```bash
+make verify-vectors                                          # expects ../hpqc, ../katzenpost
+make verify-vectors HPQC_DIR=~/hpqc KATZENPOST_DIR=~/katzenpost
+```
+
+This is nothing CryptWalker-specific — it is the same check anyone can run by hand with two
+`sha256sum` invocations per file; the script just automates going through the whole list and
+reports a clean pass/fail.
 
 ## benchmarks: how to run the benchmark tests
 
