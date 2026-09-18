@@ -48,7 +48,8 @@ namespace CryptWalker.KEM.MLKEM768
 open MLKEM
 open MLKEM.Concrete
 open CryptWalker.KEM.KEM (KEM KEMError)
-open CryptWalker.Util.Bytes (ofVector toVecN size_ofVector)
+open CryptWalker.Util.Bytes (ofVector toVecN size_ofVector ofVector_toVecN toVecN_ofVector
+  extract_append_left extract_append_right)
 
 /-! ## `keygen768` / `encaps768` / `decaps768` -/
 
@@ -248,6 +249,125 @@ def kemMLKEM768 : KEM where
 
   decode_encode_pub := decode_encode_pub
   decode_encode_priv := decode_encode_priv
+  decode_encode_ct := decode_encode_ct
+
+  plaintextEq := inferInstance
+
+/-! ## A second instance, for wire compatibility with Go's `crypto/mlkem`
+
+`kemMLKEM768`'s `PrivateKey` retains the FIPS 203 *expanded* key (`sHat`, `tHat`, `rho`, `ekHash`,
+`z`) and serializes exactly that — the right choice for the standalone `"mlkem768-kem"` entry, and
+what NIST's own ACVP vectors are stated in terms of. But `d` (`keygen768`'s other seed half) is
+discarded once `dkPKE`/`ekPKE` are computed — it is nowhere in `PrivateKey`'s value — so this
+format cannot round-trip through the *compact* seed-based encoding Go's standard-library
+`crypto/mlkem` uses instead (`DecapsulationKey.Bytes()`: "the decapsulation key as a 64-byte seed
+in the 'd ‖ z' form", re-expanded on every operation rather than cached). Cross-checking real
+KEM-Sphinx packets against Go needs that compact format, since a packet's recorded private key is
+literal wire bytes a real Go node would hold — hence this second instance, `kemMLKEM768Seed`,
+whose `PrivateKey` is `(d, z)` directly and whose wire encoding is `ek ‖ d ‖ z` (`1184 + 64 = 1248`
+bytes), matching Go exactly. Everything else (`PublicKey`, `Ciphertext`, `State`, `Reliable`) is
+unchanged from `kemMLKEM768`; only the private-key type and everything that mentions it change. -/
+
+abbrev SeedPrivateKey := Seed32 × Seed32
+
+def derivePublicKeyFromSeed (sk : SeedPrivateKey) : PublicKey :=
+  ⟨(keygen768 sk.1 sk.2).1, keygen768_ek_wf sk.1 sk.2⟩
+
+/-- The full expanded decapsulation key `dk` this seed determines — recomputed on every call,
+exactly as Go's `Decapsulate` recomputes it from the stored seed rather than caching it. -/
+private def expandSeed (sk : SeedPrivateKey) : PrivateKey :=
+  ⟨(keygen768 sk.1 sk.2).2, keygen768_dk_wf sk.1 sk.2⟩
+
+def decapMFromSeed (sk : SeedPrivateKey) (c : CT) : EStateM KEMError State (Vector UInt8 32) :=
+  decapM (expandSeed sk) c
+
+theorem honestRoundTripFromSeed (sk : SeedPrivateKey) : ∀ s, Reliable s → ∀ c k s',
+    encapM (derivePublicKeyFromSeed sk) s = .ok (c, k) s' → ∀ t, ∃ t', decapMFromSeed sk c t = .ok k t' :=
+  honestRoundTripM (expandSeed sk)
+
+def encodePrivateKeyFromSeed (sk : SeedPrivateKey) : Vector UInt8 (params.publicKeyBytes + 64) :=
+  toVecN _
+    (ofVector (encodePublicKey (derivePublicKeyFromSeed sk)) ++ (ofVector sk.1 ++ ofVector sk.2))
+
+def decodePrivateKeyFromSeed (v : Vector UInt8 (params.publicKeyBytes + 64)) :
+    Option SeedPrivateKey :=
+  let b := ofVector v
+  let rest := b.extract params.publicKeyBytes b.size
+  some (toVecN 32 (rest.extract 0 32), toVecN 32 (rest.extract 32 rest.size))
+
+theorem decodePrivateKeyFromSeed_total (v : Vector UInt8 (params.publicKeyBytes + 64)) :
+    ∃ sk, decodePrivateKeyFromSeed v = some sk := ⟨_, rfl⟩
+
+theorem decode_encode_privFromSeed (sk : SeedPrivateKey) :
+    decodePrivateKeyFromSeed (encodePrivateKeyFromSeed sk) = some sk := by
+  obtain ⟨d, z⟩ := sk
+  unfold encodePrivateKeyFromSeed decodePrivateKeyFromSeed
+  dsimp only
+  generalize hekdef : ofVector (encodePublicKey (derivePublicKeyFromSeed (d, z))) = ek
+  have hek : ek.size = params.publicKeyBytes := by rw [← hekdef]; exact size_ofVector _
+  have hd : (ofVector d).size = 32 := size_ofVector _
+  have hz : (ofVector z).size = 32 := size_ofVector _
+  have hsize : (ek ++ (ofVector d ++ ofVector z)).size = params.publicKeyBytes + 64 := by
+    rw [ByteArray.size_append, ByteArray.size_append, hek, hd, hz]
+  rw [ofVector_toVecN _ hsize]
+  have hrest : (ek ++ (ofVector d ++ ofVector z)).extract params.publicKeyBytes
+      (ek ++ (ofVector d ++ ofVector z)).size = ofVector d ++ ofVector z := by
+    have h := extract_append_right ek (ofVector d ++ ofVector z)
+    rw [← ByteArray.size_append, hek] at h
+    exact h
+  rw [hrest]
+  have hpeel1 : (ofVector d ++ ofVector z).extract 0 32 = ofVector d := by
+    have h := extract_append_left (ofVector d) (ofVector z)
+    rwa [hd] at h
+  have hpeel2 : (ofVector d ++ ofVector z).extract 32 (ofVector d ++ ofVector z).size
+      = ofVector z := by
+    have h := extract_append_right (ofVector d) (ofVector z)
+    rw [hd] at h
+    rw [ByteArray.size_append, hd]
+    exact h
+  rw [hpeel1, hpeel2, toVecN_ofVector, toVecN_ofVector]
+
+/-- The assembled `KEM.KEM` instance for ML-KEM-768, wire-compatible with Go's `crypto/mlkem`. -/
+def kemMLKEM768Seed : KEM where
+  State := State
+  PublicKey := PublicKey
+  PrivateKey := SeedPrivateKey
+  Ciphertext := CT
+  Plaintext := Vector UInt8 32
+
+  pubI := ⟨dummyPk⟩
+  privI := ⟨(dummySeed, dummySeed)⟩
+  ctI := ⟨dummyCt⟩
+  ptI := ⟨Vector.replicate 32 0⟩
+  stateI := ⟨(0, dummySeed)⟩
+
+  publicKeySize := params.publicKeyBytes
+  privateKeySize := params.publicKeyBytes + 64
+  ciphertextSize := params.ciphertextBytes
+  plaintextSize := 32
+
+  encodePublicKey := encodePublicKey
+  decodePublicKey := decodePublicKey
+  encodePrivateKey := encodePrivateKeyFromSeed
+  decodePrivateKey := decodePrivateKeyFromSeed
+  encodeCiphertext := encodeCiphertext
+  decodeCiphertext := decodeCiphertext
+  encodePlaintext := id
+
+  decap := decapMFromSeed
+  encap := encapM
+  Reliable := Reliable
+  generate := do
+    let d ← nextDraw
+    let z ← nextDraw
+    pure ⟨derivePublicKeyFromSeed (d, z), (d, z), honestRoundTripFromSeed (d, z)⟩
+  stateFromSeed := stateFromSeed
+  derivePublicKey := derivePublicKeyFromSeed
+  honestRoundTrip := honestRoundTripFromSeed
+  decodePrivateKey_total := decodePrivateKeyFromSeed_total
+
+  decode_encode_pub := decode_encode_pub
+  decode_encode_priv := decode_encode_privFromSeed
   decode_encode_ct := decode_encode_ct
 
   plaintextEq := inferInstance

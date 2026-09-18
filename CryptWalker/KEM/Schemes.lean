@@ -134,9 +134,15 @@ def blake2b256CombinerPRF : Combiner.PRF where
 one* component is (Giacon, Heuer & Poettering, https://eprint.iacr.org/2018/024.pdf, Theorem 1).
 `Reliable` is `combineKEM`'s generic `k₀.Reliable s.1 ∧ ReliableN [k₁] s.2` — trivial on the X25519
 half, ML-KEM-768's genuine noise-dependent condition on the other; any caller building a
-`KEMSphinxScheme` from this entry must still discharge that, exactly as for `mlkem768Entry` alone. -/
+`KEMSphinxScheme` from this entry must still discharge that, exactly as for `mlkem768Entry` alone.
+
+Uses `MLKEM768.kemMLKEM768Seed`, not the plain `mlkem768Entry`'s `kemMLKEM768` — the private-key
+wire format needs to match Go's `crypto/mlkem` (`ek ‖ d ‖ z`, 1248 bytes) for real KEM-Sphinx
+packets built by katzenpost to be decodable here at all; `kemMLKEM768`'s FIPS 203 *expanded*
+private-key format (2400 bytes) cannot represent Go's compact one (see `MLKEM768.lean`'s module
+doc on `kemMLKEM768Seed`). -/
 def kemMLKEM768X25519 : KEM :=
-  Combiner.combineKEM blake2b256CombinerPRF kemX25519 [CryptWalker.KEM.MLKEM768.kemMLKEM768]
+  Combiner.combineKEM blake2b256CombinerPRF kemX25519 [CryptWalker.KEM.MLKEM768.kemMLKEM768Seed]
 
 def mlkem768X25519Entry : RegistryEntry :=
   { hpqcName := "mlkem768-x25519-kem", scheme := kemMLKEM768X25519 }
