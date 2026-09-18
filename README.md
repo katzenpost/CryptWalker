@@ -47,9 +47,12 @@ Classical NIKEs, two independent implementations of the same exchange:
 |:---:|
 
 * X25519, adapted to KEM via hashed ElGamal (NIKE-to-KEM adapter, `sha256-v1` PRF)
-* ML-KEM-768 (FIPS 203), a from-scratch pure-Lean implementation (no native/FFI dependency),
-  checked against the official NIST ACVP known-answer vectors — keygen, encapsulation,
-  decapsulation (including implicit rejection), and both key-validity checks
+* ML-KEM-768 (FIPS 203), built from [VCVio](https://github.com/dtumad/VCV-io)'s pure-Lean
+  primitives (NTT, CBD, encoding) with our own `keygen`/`encaps`/`decaps` composition — checked
+  against the official NIST ACVP known-answer vectors (keygen, encapsulation, decapsulation
+  including implicit rejection, and both key-validity checks). A future variant will also hash the
+  encapsulation message `m` before use, restoring a randomness-hedging step NIST dropped when
+  standardizing ML-KEM from Kyber.
 * A security-preserving KEM combiner (Giacon–Heuer–Poettering split-PRF, real BLAKE2b-256 keyed),
   generic over any number of ingredient KEMs — instantiated as an X25519 + ML-KEM-768 hybrid,
   cross-checked byte-for-byte against [hpqc](https://github.com/katzenpost/hpqc)'s own combiner
