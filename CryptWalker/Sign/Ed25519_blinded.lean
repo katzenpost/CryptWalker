@@ -30,7 +30,6 @@ abbrev SigBytes : Type := Vector UInt8 64
 
 axiom ell_prime : Nat.Prime ell
 instance : Fact (Nat.Prime ell) := ⟨ell_prime⟩
-instance : NeZero ell := ⟨ell_prime.pos.ne'⟩
 
 private def scalarBytes (s : Scalar) : Vector UInt8 32 :=
   Vector.ofFn fun i : Fin 32 => (s.val >>> (8 * i.val)).toUInt8
@@ -80,19 +79,6 @@ axiom blind_assoc : ∀ pk f g,
   blindPub (blindPub pk f) g = blindPub pk (f * g)
 axiom blind_inv : ∀ pk f,
   blindPub (blindPub pk f) (inv f) = pk
-
-/-- **`publicKey s`'s blinding is a bijection, for any nonzero root scalar `s`.** RFC 8032's
-basepoint has prime order `ell` (standard, published, the same trust tier as `ell_prime` above);
-`publicKey s` for `s ≠ 0` is then a nonzero point generating that whole order-`ell` subgroup, and
-blinding by a factor in `ZMod ell` is scalar multiplication on it — bijective on a prime-order
-cyclic group by the standard argument (injective by Lagrange + primality, surjective for free by
-matching finite cardinalities). Every BACAP box ID reduces to exactly this case: iterated
-blinding of a root public key collapses to one blinding by a product factor (`blind_assoc`), so
-this one fact is what `Blindable.blind_unlinkable` needs to say anything about Ed25519. Not
-derived from `Sign.Ed25519_group`'s transport, which is a strictly larger (and still open)
-claim about *all* pairs of curve points, not just this one scalar action. -/
-axiom blindPub_publicKey_bijective (s : Scalar) (hs : s ≠ 0) :
-  Function.Bijective (blindPub (publicKey s))
 
 def signature : Signature where
   State := Unit

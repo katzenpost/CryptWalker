@@ -9,7 +9,7 @@ import CryptWalker.Util.UniformHit
 namespace CryptWalker.Sign.Blindable
 
 open CryptWalker.Sign.Sign
-open CryptWalker.Util.UniformHit (uniformHit_eq)
+open CryptWalker.Util.UniformHit (uniformHit_eq_of_injective)
 open OracleComp OracleSpec ENNReal
 
 /-! # Blindable signature schemes
@@ -105,23 +105,21 @@ theorem blindPub_swap (pk : B.base.PublicKey) (f g : B.Scalar) :
     B.blindPub (B.blindPub pk f) g = B.blindPub (B.blindPub pk g) f := by
   rw [B.blind_assoc, B.blind_assoc, B.blind_comm]
 
-/-- **Unlinkability** (Echomix §4.3): whenever blinding a public key `pk` is itself a bijection
-on `PublicKey` (the case for any `pk` that generates the whole scalar group's worth of
-blindings — true of every honestly-derived, nonzero root public key), a freshly drawn blinding
-factor hits a chosen `target` with probability exactly `1/|Scalar|`. One application of
-`uniformHit_eq`, the same fact `NIKESphinx.wrap_resistant` uses for Sphinx's own re-blinding
-step. Stated standalone rather than as a `Blindable` field — a field here would force
-`Fintype`/`SampleableType`/`DecidableEq` onto every instance and, worse, would pull VCVio's
-classical probability foundations (`propext`/`Classical.choice`/`Quot.sound`) into the trusted
-surface of `verify_blinded`/`blindPriv_assoc` above, which `Sign.Check` audits as depending on
-nothing beyond `Blindable`'s own fields. An instance only pays for this when it actually invokes
-it — see `Ed25519Blinded.blindPub_publicKey_bijective` for the hypothesis Ed25519 needs to. -/
+/-- **Unlinkability** (Echomix §4.3): whenever blinding a public key `pk` is injective (any
+nonzero point of a prime-order group), a freshly drawn blinding factor hits each box ID in its
+image with probability exactly `1/|Scalar|`. One application of `uniformHit_eq_of_injective`,
+the fact `NIKESphinx.wrap_resistant` uses for Sphinx's own re-blinding step. Stated standalone
+rather than as a `Blindable` field: a field would force `Fintype`/`SampleableType`/`DecidableEq`
+onto every instance and pull VCVio's classical foundations into the axiom surface of
+`verify_blinded`/`blindPriv_assoc`, which `Sign.Check` audits. Injectivity is a hypothesis for
+the caller to discharge, not an axiom. -/
 theorem blind_unlinkable [Fintype B.Scalar] [SampleableType B.Scalar]
-    [DecidableEq B.base.PublicKey] (pk target : B.base.PublicKey)
-    (hbij : Function.Bijective (B.blindPub pk)) :
+    [DecidableEq B.base.PublicKey] (pk : B.base.PublicKey)
+    (hinj : Function.Injective (B.blindPub pk)) {target : B.base.PublicKey}
+    (htarget : target ∈ Set.range (B.blindPub pk)) :
     Pr[= true | ($ᵗ B.Scalar) >>= fun f => pure (decide (B.blindPub pk f = target))] =
       (Fintype.card B.Scalar : ℝ≥0∞)⁻¹ :=
-  uniformHit_eq hbij target
+  uniformHit_eq_of_injective hinj htarget
 
 /-- The trivial blindable scheme, over the trivial signature scheme: every blinding is the
 identity. Present only to witness inhabitation. -/
