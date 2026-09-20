@@ -23,7 +23,19 @@ The map, in both directions:
 where `c := sqrtNeg486664` satisfies `c ^ 2 = -486664` — `486664 = 486662 + 2` is `X25519`'s curve
 coefficient plus 2, and its negation is the constant this specific pair of curves needs (Ed25519 is
 a *twisted* Edwards curve, `a = -1`; the untwisted case would use `sqrt 486664` instead). The
-identity `(0, 1)` is the map's only exceptional point: every other Edwards point has `y ≠ 1`. -/
+identity `(0, 1)` is the map's only exceptional point: every other Edwards point has `y ≠ 1`.
+
+**What's here and what isn't.** `toWeierstrass` and its on-curve compatibility (`montgomery_onCurve`)
+are complete: no `sorry`, no axiom. The addition-homomorphism `toWeierstrass (add p q) =
+toWeierstrass p + toWeierstrass q` — needed to transport `X25519.Point`'s `AddCommGroup` onto
+`Ed25519Math.Point` and, from there, to discharge `Ed25519_blinded.lean`'s `blind_hom`/
+`blind_assoc`/`blind_inv` axioms as real theorems — is not proved here. It's true (this is the
+classical Bernstein–Lange birational-equivalence theorem, checked numerically against this repo's
+actual constants at the basepoint, `2·G`, and `3·G`), but cross-multiplying the two curves'
+addition formulas for two distinct symbolic points produces a polynomial identity substantially
+larger than `montgomery_onCurve`'s — the Weierstrass-side numerator alone runs to ~40 terms of
+degree 5–6 in four variables before even clearing against the Edwards-side denominator. Mechanizing
+it is future work, not attempted here. -/
 
 namespace CryptWalker.Sign.Ed25519Group
 
