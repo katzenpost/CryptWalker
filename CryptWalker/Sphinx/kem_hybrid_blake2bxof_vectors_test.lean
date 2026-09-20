@@ -11,16 +11,11 @@ import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
 
 /-!
-# KEM-Sphinx full-packet cross-implementation vectors: X25519 + ML-KEM-768 hybrid, blake2b-xof
+# KEM-Sphinx full-packet vectors: X25519 + ML-KEM-768 hybrid, blake2b-xof
 
-As `kem_hybrid_vectors_test`, but for `kemMLKEM768X25519Blake2b` instead of `kemMLKEM768X25519`:
-`testdata/sphinx_kem_hybrid_blake2bxof_vectors.json` is
-`katzenpost/core/sphinx/testdata/kemsphinx_mlkem768x25519_blake2bxof_vectors.json` (vendored
-as-is, `.sha256` records which copy) — 10 real KEM-Sphinx packets built by *Go*'s `NewKEMSphinx`
-with a combiner built directly from `adapter.FromNIKEWithPRF(x25519, BLAKE2bXOF)` and
-`mlkem768.Scheme()` (`core/sphinx/testvectors/cmd/generate_kem_hybrid_blake2bxof`) — matching
-hpqc's registered `"MLKEM768-X25519"` scheme exactly, now that CryptWalker has BLAKE2Xb, rather
-than the portable `sha256-v1` stand-in `kem_hybrid_vectors_test` still checks. -/
+As `kem_hybrid_vectors_test`, but for `kemMLKEM768X25519Blake2b`: checks
+`testdata/sphinx_kem_hybrid_blake2bxof_vectors.json`, vendored from katzenpost
+(`.sha256` records which copy). -/
 
 open Lean
 open CryptWalker.Util.newhex
@@ -81,9 +76,8 @@ def parseVec (j : Json) : Except String TestVec := do
   let surbKeys ← field j "SurbKeys"
   pure { nodes, path, packets, payload, surb, surbKeys }
 
-/-- Replay `unwrapKEM` at every node, checking against the recorded `Packets`/`Payload`. Also,
-for the `withSurb` half: `Packets[0]` there is Go's `NewPacketFromSURB(Surb, Payload)` output
-(as `kem_vectors_test`), so `newPacketFromSURB` gets checked byte-for-byte against Go here too. -/
+/-- Replay `unwrapKEM` at every node against the recorded `Packets`/`Payload`; for `withSurb`,
+also checks `newPacketFromSURB` against the recorded first packet. -/
 def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   let withSurb := decide (v.surb.size > 0)
   let geom := if withSurb then geomSurb else geomNoSurb

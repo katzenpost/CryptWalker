@@ -9,11 +9,9 @@ import CryptWalker.Util.newhex
 
 /-! # BLAKE2b XOF (BLAKE2Xb) known-answer tests, against `hpqc`
 
-Checks `Blake2b.xof` against `testdata/blake2b_xof.json`, vendored from
-`hpqc/testvectors/cmd/generate`'s `genBLAKE2bXOF` (`hpqc/testvectors/primitives/blake2b_xof.json`)
--- the primitive behind the deployed NIKE-to-KEM adapter PRF (`hpqc/kem/adapter.BLAKE2bXOF`), which
-`KEM.Schemes.blake2bXOFPRF` needs. Each vector's `xof_size` is the configured size and `length` how
-many bytes are actually read back -- `xof`'s two separate parameters, by design. -/
+Checks `Blake2b.xof` against `testdata/blake2b_xof.json`, vendored from hpqc -- the primitive
+behind `KEM.Schemes.blake2bXOFPRF`. Each vector's `xof_size` is the configured size and `length`
+how many bytes are actually read back -- `xof`'s two separate parameters, by design. -/
 
 open Lean
 open CryptWalker.Util.newhex

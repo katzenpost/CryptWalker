@@ -127,26 +127,18 @@ private def hmac (key msg : ByteArray) : Vector UInt8 64 :=
 
 private def toBytes {n : Nat} (v : Vector UInt8 n) : ByteArray := ⟨v.toArray⟩
 
-/-- BLAKE2b's XOF, BLAKE2Xb (https://www.blake2.net/blake2x.pdf), matching
-`golang.org/x/crypto/blake2b.NewXOF(size, key)` followed by reading exactly `readLen` bytes.
-`size` (the constructor argument) and `readLen` (how much of the stream is actually produced) are
-independent quantities that happen to coincide in most callers, but not in the deployed adapter
-PRF's own `Derive` (`kem/adapter/kem.go`: `NewXOF(sharedKeySize, ss)` then `Read`s `len(ss)`
-bytes) — hence keeping them as separate parameters here rather than collapsing them into one, as
-an earlier version of this function did. `size = 0` models Go's `OutputLengthUnknown` (an
-undeclared upper bound, internally the same as any other `size` for as many bytes as are actually
-read); `size`s of `2^32` or more are not modelled, since none arises here.
+/-- BLAKE2b's XOF, BLAKE2Xb (https://www.blake2.net/blake2x.pdf). `size` (the configured stream
+length, baked into the root hash's parameter block) and `readLen` (how many bytes are actually
+returned) are independent: the deployed adapter PRF configures the stream at one width and reads
+a different number of bytes from it, so they stay separate parameters here. `size = 0` models an
+unbounded/undeclared stream length; `size`s of `2^32` or more are not modelled, since none arises
+here.
 
-The construction: hash the input once into a 64-byte root `H0`, an ordinary (keyed, if `key` is
-non-empty) BLAKE2b-512 hash except that its parameter block's word 1 also carries `size`, binding
-the configured length into the root; then derive each 64-byte (or, on the final block, shorter)
-output block as its own unkeyed BLAKE2b leaf hash of that fixed root, parameterized by the block's
-index and `size` again. Folding `size` into both hashes this way means it changes the whole output
-stream even when the same number of bytes is read back at two different `size`s — hpqc's
-`kem/adapter/blake2b_xof_vectors_test.go` pins exactly this: `same_inputs_size_64_read_32` and
-`adapter_shape_32byte_key_64byte_msg_32` share key, message and read length but differ in `size`,
-and must not collide. This is the primitive the deployed NIKE-to-KEM adapter PRF
-(`hpqc/kem/adapter.BLAKE2bXOF`) keys with the raw shared secret. -/
+The construction: hash the input once into a 64-byte root `H0` (an ordinary, optionally keyed
+BLAKE2b-512 hash, except its parameter block also binds in `size`); then derive each 64-byte (or,
+on the final block of the *configured* stream, shorter) output block as its own unkeyed BLAKE2b
+leaf hash of that fixed root, parameterized by the block's index and `size` again. Folding `size`
+into both hashes means the same bytes read back at two different `size`s must not collide. -/
 def xof (key : ByteArray) (size : Nat) (readLen : Nat) (msg : ByteArray) : ByteArray :=
   let boundLen := if size = 0 then 0xFFFFFFFF else size
   let h0 := digestArrayParam #[
@@ -157,10 +149,9 @@ def xof (key : ByteArray) (size : Nat) (readLen : Nat) (msg : ByteArray) : ByteA
   let root : ByteArray := toBytes (extractDigest h0 64)
   -- A block's digest-length parameter is governed by its position in the *configured* (`size`)
   -- stream, not by how much of it `readLen` actually asks for: reading fewer bytes than a full
-  -- leaf block still hashes that leaf at digest-length 64 and just returns a prefix of it (Go's
-  -- `Read`, mirrored below, only shrinks `cfg[0]` when the *stream's own* remaining length drops
-  -- below one block -- shrinking it whenever the *caller's* request is short would silently change
-  -- the output whenever the same stream is read in different-sized chunks).
+  -- leaf block still hashes that leaf at digest-length 64 and just returns a prefix of it --
+  -- shrinking it whenever the caller's request is short would silently change the output whenever
+  -- the same stream is read in different-sized chunks.
   let numBlocks := (readLen + 63) / 64
   let lastSizeBlock := (boundLen + 63) / 64 - 1
   let leaf (i outLen : Nat) : ByteArray :=
