@@ -81,18 +81,26 @@ private def zeroPadTo128 (b : ByteArray) : ByteArray :=
 
 /-- RFC 7693's keyed mode: the key, zero-padded to one full block, is prepended to the message and
 the parameter block's `key_length` field is set accordingly — everything else (padding, block
-counting, finalization) is unchanged, applied to `key ++ message` as a whole. -/
-private def digestArray (key : ByteArray) (digestLen : Nat) (msg : ByteArray) : Array UInt64 :=
+counting, finalization) is unchanged, applied to `key ++ message` as a whole.
+
+Generalized over the full 8-word (64-byte) parameter block -- folded into the initial state the
+way BLAKE2b always does, `iv[i] ^^^ param[i]` -- rather than just the digest-length/key-length/
+fanout/depth word plain BLAKE2b needs, so `xof` below can reuse the same compress/pad/block loop
+for BLAKE2Xb's root and leaf hashes, which additionally customize words 1 and 2. -/
+private def digestArrayParam (param : Array UInt64) (key : ByteArray) (msg : ByteArray) :
+    Array UInt64 :=
   let d := if key.size > 0 then zeroPadTo128 key ++ msg else msg
   let padded := pad d
   let blocks := padded.size / 128
-  let param : UInt64 :=
-    UInt64.ofNat digestLen ||| (UInt64.ofNat key.size <<< 8) |||
-      ((1 : UInt64) <<< 16) ||| ((1 : UInt64) <<< 24)
-  let initial := (List.range 8).toArray.map fun i =>
-    if i = 0 then iv[0]! ^^^ param else iv[i]!
+  let initial := (List.range 8).toArray.map fun i => iv[i]! ^^^ param[i]!
   (List.range blocks).foldl (fun h i =>
     compress h (padded.data.extract (128*i) (128*i + 128)) (min d.size (128*(i+1))) (i + 1 = blocks)) initial
+
+private def digestArray (key : ByteArray) (digestLen : Nat) (msg : ByteArray) : Array UInt64 :=
+  digestArrayParam #[
+    UInt64.ofNat digestLen ||| (UInt64.ofNat key.size <<< 8) |||
+      ((1 : UInt64) <<< 16) ||| ((1 : UInt64) <<< 24),
+    0, 0, 0, 0, 0, 0, 0] key msg
 
 private def extractDigest (h : Array UInt64) (n : Nat) : Vector UInt8 n :=
   Vector.ofFn fun i : Fin n => (h[i.val / 8]! >>> UInt64.ofNat (8 * (i.val % 8))).toUInt8
@@ -118,6 +126,53 @@ private def hmac (key msg : ByteArray) : Vector UInt8 64 :=
   hash (xorPad key 0x5c ++ ⟨(hash (xorPad key 0x36 ++ msg)).toArray⟩)
 
 private def toBytes {n : Nat} (v : Vector UInt8 n) : ByteArray := ⟨v.toArray⟩
+
+/-- BLAKE2b's XOF, BLAKE2Xb (https://www.blake2.net/blake2x.pdf), matching
+`golang.org/x/crypto/blake2b.NewXOF(size, key)` followed by reading exactly `readLen` bytes.
+`size` (the constructor argument) and `readLen` (how much of the stream is actually produced) are
+independent quantities that happen to coincide in most callers, but not in the deployed adapter
+PRF's own `Derive` (`kem/adapter/kem.go`: `NewXOF(sharedKeySize, ss)` then `Read`s `len(ss)`
+bytes) — hence keeping them as separate parameters here rather than collapsing them into one, as
+an earlier version of this function did. `size = 0` models Go's `OutputLengthUnknown` (an
+undeclared upper bound, internally the same as any other `size` for as many bytes as are actually
+read); `size`s of `2^32` or more are not modelled, since none arises here.
+
+The construction: hash the input once into a 64-byte root `H0`, an ordinary (keyed, if `key` is
+non-empty) BLAKE2b-512 hash except that its parameter block's word 1 also carries `size`, binding
+the configured length into the root; then derive each 64-byte (or, on the final block, shorter)
+output block as its own unkeyed BLAKE2b leaf hash of that fixed root, parameterized by the block's
+index and `size` again. Folding `size` into both hashes this way means it changes the whole output
+stream even when the same number of bytes is read back at two different `size`s — hpqc's
+`kem/adapter/blake2b_xof_vectors_test.go` pins exactly this: `same_inputs_size_64_read_32` and
+`adapter_shape_32byte_key_64byte_msg_32` share key, message and read length but differ in `size`,
+and must not collide. This is the primitive the deployed NIKE-to-KEM adapter PRF
+(`hpqc/kem/adapter.BLAKE2bXOF`) keys with the raw shared secret. -/
+def xof (key : ByteArray) (size : Nat) (readLen : Nat) (msg : ByteArray) : ByteArray :=
+  let boundLen := if size = 0 then 0xFFFFFFFF else size
+  let h0 := digestArrayParam #[
+      UInt64.ofNat 64 ||| (UInt64.ofNat key.size <<< 8) |||
+        ((1 : UInt64) <<< 16) ||| ((1 : UInt64) <<< 24),
+      UInt64.ofNat boundLen <<< 32,
+      0, 0, 0, 0, 0, 0] key msg
+  let root : ByteArray := toBytes (extractDigest h0 64)
+  -- A block's digest-length parameter is governed by its position in the *configured* (`size`)
+  -- stream, not by how much of it `readLen` actually asks for: reading fewer bytes than a full
+  -- leaf block still hashes that leaf at digest-length 64 and just returns a prefix of it (Go's
+  -- `Read`, mirrored below, only shrinks `cfg[0]` when the *stream's own* remaining length drops
+  -- below one block -- shrinking it whenever the *caller's* request is short would silently change
+  -- the output whenever the same stream is read in different-sized chunks).
+  let numBlocks := (readLen + 63) / 64
+  let lastSizeBlock := (boundLen + 63) / 64 - 1
+  let leaf (i outLen : Nat) : ByteArray :=
+    toBytes (extractDigest (digestArrayParam #[
+        UInt64.ofNat outLen ||| (UInt64.ofNat 64 <<< 32),
+        UInt64.ofNat i ||| (UInt64.ofNat boundLen <<< 32),
+        UInt64.ofNat 64 <<< 8,
+        0, 0, 0, 0, 0] ByteArray.empty root) outLen)
+  let full := (List.range numBlocks).foldl (fun acc i =>
+    let outLen := if i = lastSizeBlock ∧ boundLen % 64 ≠ 0 then boundLen % 64 else 64
+    acc ++ leaf i outLen) ByteArray.empty
+  full.extract 0 readLen
 
 /-- RFC 5869 HKDF using BLAKE2b-512 as the HMAC hash. -/
 def hkdf (secret salt info : ByteArray) (length : Nat) : ByteArray :=

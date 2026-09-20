@@ -26,6 +26,7 @@ hpqc_pairs=(
   "testdata/adapter_test_vectors.json                        testvectors/kem/adapter_test_vectors.json"
   "testdata/aes_gcm_siv.json                                 testvectors/primitives/aes_gcm_siv.json"
   "testdata/blake2b_256.json                                 testvectors/primitives/blake2b_256.json"
+  "testdata/blake2b_xof.json                                 testvectors/primitives/blake2b_xof.json"
   "testdata/blinded_ed25519.json                             testvectors/primitives/blinded_ed25519.json"
   "testdata/hkdf_blake2b.json                                testvectors/primitives/hkdf_blake2b.json"
   "testdata/sha512.json                                      testvectors/primitives/sha512.json"
