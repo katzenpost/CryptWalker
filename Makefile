@@ -33,7 +33,8 @@ TESTS := \
 	CryptWalker.Hash.blake2b_256_test \
 	CryptWalker.Hash.blake2b_xof_test \
 	CryptWalker.KEM.mlkem768_x25519_combiner_test \
-	CryptWalker.Sphinx.kem_hybrid_vectors_test
+	CryptWalker.Sphinx.kem_hybrid_vectors_test \
+	CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 

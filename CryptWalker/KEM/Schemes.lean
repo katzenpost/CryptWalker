@@ -178,6 +178,12 @@ def kemMLKEM768X25519 : KEM :=
 def mlkem768X25519Entry : RegistryEntry :=
   { hpqcName := "mlkem768-x25519-kem", scheme := kemMLKEM768X25519 }
 
+/-- `kemMLKEM768X25519` over `kemX25519Blake2b` instead of `kemX25519`. Not in `registry`, same
+reason as `kemX25519Blake2b`. -/
+def kemMLKEM768X25519Blake2b : KEM :=
+  Combiner.combineKEM blake2b256CombinerPRF kemX25519Blake2b
+    [CryptWalker.KEM.MLKEM768.kemMLKEM768Seed]
+
 def registry : List RegistryEntry :=
   [x25519LadderEntry, x25519GroupEntry, mlkem768Entry, mlkem768X25519Entry]
 

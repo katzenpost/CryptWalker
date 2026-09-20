@@ -23,8 +23,8 @@ Generic over `kem : KEM` (`Node.priv`/`pub` are `ByteArray`, not a fixed `Vector
 that's only true for X25519 -- the hybrid's private key is 1280 bytes), unlike this file's earlier
 X25519-only version: node keys now come from `kem.generate`, matching `kem_selftest.lean`'s
 generalization (not raw scalar bytes, which only happens to double as a valid key for a
-Diffie-Hellman KEM). Runs once for `x25519-ladder-kem` (output unchanged, so katzenpost's existing
-checker needs no changes) and once for `mlkem768-x25519-kem` (new output file). -/
+Diffie-Hellman KEM). Runs once each for `x25519-ladder-kem`, `mlkem768-x25519-kem` (sha256-v1),
+and `mlkem768-x25519-blake2bxof-kem` (`kemMLKEM768X25519Blake2b`). -/
 
 open Lean
 open CryptWalker.Util.newhex
@@ -163,8 +163,24 @@ def runGen (schemeName : String) (kem : KEM) (outPath : String) : IO Unit := do
   IO.FS.writeFile outPath out
   IO.println s!"wrote {outPath}"
 
+/-- As `runGen`, but for a `kem` not in `KEM.registry`: geometry comes from `ofKEMWith` directly,
+no `Except` to thread. -/
+def runGenWith (label : String) (kem : KEM) (outPath : String) : IO Unit := do
+  let mut vecs : Array Json := #[]
+  for withSURB in [false, true] do
+    let geom := ofKEMWith label kem 103 withSURB 5
+    for nrHops in [1, 2, 3, 4, 5] do
+      let v ← buildVec kem geom withSURB nrHops
+      vecs := vecs.push v
+      IO.println s!"{label}: built withSURB={withSURB} nrHops={nrHops}"
+  let out := (Json.arr vecs).pretty
+  IO.FS.writeFile outPath out
+  IO.println s!"wrote {outPath}"
+
 def main : IO UInt32 := do
   runGen "x25519-ladder-kem" CryptWalker.KEM.kemX25519Ladder "testdata/lean_kem_vectors.json"
   runGen "mlkem768-x25519-kem" CryptWalker.KEM.kemMLKEM768X25519
     "testdata/lean_kem_hybrid_vectors.json"
+  runGenWith "mlkem768-x25519-blake2bxof-kem" CryptWalker.KEM.kemMLKEM768X25519Blake2b
+    "testdata/lean_kem_hybrid_blake2bxof_vectors.json"
   pure 0
