@@ -97,7 +97,7 @@ def encapM (pk : nike.PublicKey) :
   let eph := nike.privateKeyFromSeed seed
   if h : nike.Safe pk then
     pure (nike.derivePublicKey eph,
-          derive F nike (nike.encodeSharedSecret (nike.groupAction eph pk h))
+          derive F nike (nike.encodeSharedSecret (nike.groupAction eph ⟨pk, h⟩))
             (nike.encodePublicKey pk)
             (nike.encodePublicKey (nike.derivePublicKey eph)))
   else
@@ -106,7 +106,7 @@ def encapM (pk : nike.PublicKey) :
 def decapM (sk : nike.PrivateKey) (ct : nike.PublicKey) :
     EStateM KEMError St (Vector UInt8 nike.sharedSecretSize) :=
   if h : nike.Safe ct then
-    pure (derive F nike (nike.encodeSharedSecret (nike.groupAction sk ct h))
+    pure (derive F nike (nike.encodeSharedSecret (nike.groupAction sk ⟨ct, h⟩))
             (nike.encodePublicKey (nike.derivePublicKey sk))
             (nike.encodePublicKey ct))
   else

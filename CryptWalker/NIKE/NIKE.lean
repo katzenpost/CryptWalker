@@ -27,8 +27,11 @@ structure NIKE where
   privateKeyFromSeed : Vector UInt8 32 → PrivateKey
   derivePublicKey    : PrivateKey → PublicKey
 
-  -- Cannot be called without a safety proof.
-  groupAction : PrivateKey → (pk : PublicKey) → Safe pk → SharedSecret
+  -- Cannot be called without a safety proof: `pk` and its `Safe` proof travel together as one
+  -- argument, matching `hpqc/nike.Scheme.DeriveSecret`'s two-argument shape (`PrivateKey,
+  -- PublicKey`) as closely as a compile-time-checked safety obligation allows, rather than a
+  -- separate trailing proof argument.
+  groupAction : PrivateKey → {pk : PublicKey // Safe pk} → SharedSecret
 
   encodePrivateKey   : PrivateKey   → Vector UInt8 privateKeySize
   decodePrivateKey   : Vector UInt8 privateKeySize → Option PrivateKey
@@ -53,8 +56,8 @@ structure NIKE where
   encode_decode_pub : ∀ v pk, decodePublicKey v = some pk → encodePublicKey pk = v
 
   commutes : ∀ sk₁ sk₂,
-    groupAction sk₁ (derivePublicKey sk₂) (derive_safe sk₂)
-      = groupAction sk₂ (derivePublicKey sk₁) (derive_safe sk₁)
+    groupAction sk₁ ⟨derivePublicKey sk₂, derive_safe sk₂⟩
+      = groupAction sk₂ ⟨derivePublicKey sk₁, derive_safe sk₁⟩
 
   -- Re-blinding chain: what makes Sphinx's iterated group-element blinding telescope, generic
   -- over any Diffie-Hellman-style NIKE.
@@ -68,16 +71,16 @@ structure NIKE where
 
   /-- Acting on a safe public key with `groupAction`, then reinterpreting the result, stays safe —
   what lets the chain apply a *further* group action to it. -/
-  reinterpret_safe : ∀ sk pk (h : Safe pk), Safe (reinterpret (groupAction sk pk h))
+  reinterpret_safe : ∀ sk (spk : {pk : PublicKey // Safe pk}), Safe (reinterpret (groupAction sk spk))
 
   /-- **The Diffie-Hellman identity, generalized to a re-blinded chain**: acting with a further
   private key on a *reinterpreted* shared secret gives the same result regardless of which of two
   private keys was applied first. `commutes` above only covers a single hop (two honestly-derived
   public keys); this is what `createHeader`'s *iterated* blinding chain needs beyond that, once
   later hops act on a previously-blinded (not freshly-derived) element. -/
-  groupAction_comm : ∀ sk₁ sk₂ pk (h : Safe pk),
-    groupAction sk₁ (reinterpret (groupAction sk₂ pk h)) (reinterpret_safe sk₂ pk h)
-      = groupAction sk₂ (reinterpret (groupAction sk₁ pk h)) (reinterpret_safe sk₁ pk h)
+  groupAction_comm : ∀ sk₁ sk₂ (spk : {pk : PublicKey // Safe pk}),
+    groupAction sk₁ ⟨reinterpret (groupAction sk₂ spk), reinterpret_safe sk₂ spk⟩
+      = groupAction sk₂ ⟨reinterpret (groupAction sk₁ spk), reinterpret_safe sk₁ spk⟩
 
   /-- A Diffie-Hellman-style NIKE's public keys and shared secrets are the same kind of group
   element, just tagged by type — what actually lets `reinterpret` make sense as "the bytes are
@@ -119,8 +122,7 @@ def telescopeElem (nike : NIKE) (baseSk : nike.PrivateKey) (f : Nat → nike.Pri
   | 0 => ⟨nike.derivePublicKey baseSk, nike.derive_safe baseSk⟩
   | n + 1 =>
     let prev := telescopeElem nike baseSk f n
-    ⟨nike.reinterpret (nike.groupAction (f n) prev.1 prev.2),
-      nike.reinterpret_safe (f n) prev.1 prev.2⟩
+    ⟨nike.reinterpret (nike.groupAction (f n) prev), nike.reinterpret_safe (f n) prev⟩
 
 /-- The shared secret a `target` key and the client's ephemeral key agree on, from the *sender's*
 side: DH with the target's own public key, then re-blinded by the same `n` factors in the same
@@ -129,12 +131,12 @@ reinterpretation is `Safe`, needed to apply the next round the same way `telesco
 def telescopeSecret (nike : NIKE) (baseSk targetSk : nike.PrivateKey) (f : Nat → nike.PrivateKey) :
     Nat → {ss : nike.SharedSecret // nike.Safe (nike.reinterpret ss)}
   | 0 =>
-    ⟨nike.groupAction baseSk (nike.derivePublicKey targetSk) (nike.derive_safe targetSk),
-      nike.reinterpret_safe baseSk (nike.derivePublicKey targetSk) (nike.derive_safe targetSk)⟩
+    ⟨nike.groupAction baseSk ⟨nike.derivePublicKey targetSk, nike.derive_safe targetSk⟩,
+      nike.reinterpret_safe baseSk ⟨nike.derivePublicKey targetSk, nike.derive_safe targetSk⟩⟩
   | n + 1 =>
     let prev := telescopeSecret nike baseSk targetSk f n
-    ⟨nike.groupAction (f n) (nike.reinterpret prev.1) prev.2,
-      nike.reinterpret_safe (f n) (nike.reinterpret prev.1) prev.2⟩
+    ⟨nike.groupAction (f n) ⟨nike.reinterpret prev.1, prev.2⟩,
+      nike.reinterpret_safe (f n) ⟨nike.reinterpret prev.1, prev.2⟩⟩
 
 /-- **The re-blinding chain telescopes.** After `n` rounds, `targetSk` acting on the re-blinded
 element agrees exactly with the sender's own re-blinded DH secret — regardless of `n`. `n = 0` is
@@ -142,15 +144,14 @@ exactly `commutes`; each further round is exactly `groupAction_comm`, folding th
 hypothesis one layer deeper. -/
 theorem telescope_agree (nike : NIKE) (baseSk targetSk : nike.PrivateKey) (f : Nat → nike.PrivateKey)
     (n : Nat) :
-    nike.groupAction targetSk (telescopeElem nike baseSk f n).1 (telescopeElem nike baseSk f n).2
+    nike.groupAction targetSk (telescopeElem nike baseSk f n)
       = (telescopeSecret nike baseSk targetSk f n).1 := by
   induction n with
   | zero => exact nike.commutes targetSk baseSk
   | succ n ih =>
-    have h := nike.groupAction_comm targetSk (f n) (telescopeElem nike baseSk f n).1
-      (telescopeElem nike baseSk f n).2
+    have h := nike.groupAction_comm targetSk (f n) (telescopeElem nike baseSk f n)
     refine h.trans ?_
     congr 1
-    exact congrArg nike.reinterpret ih
+    exact Subtype.ext (congrArg nike.reinterpret ih)
 
 end CryptWalker.NIKE.NIKE

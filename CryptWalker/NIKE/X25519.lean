@@ -507,7 +507,7 @@ def Scheme : NIKE where
 
   privateKeyFromSeed := fun seed => ⟨clampScalar seed⟩
   derivePublicKey    := derivePublicKeyX
-  groupAction        := groupActionX
+  groupAction        := fun sk spk => groupActionX sk spk.1 spk.2
 
   encodePrivateKey   := fun sk => sk.data
   decodePrivateKey   := fun v => some ⟨v⟩
@@ -536,8 +536,8 @@ def Scheme : NIKE where
     · simp at h
   commutes           := fun sk₁ sk₂ => groupActionX_commutes sk₁ sk₂ _ _
   reinterpret        := id
-  reinterpret_safe   := groupActionX_safe
-  groupAction_comm   := groupActionX_comm
+  reinterpret_safe   := fun sk spk => groupActionX_safe sk spk.1 spk.2
+  groupAction_comm   := fun sk₁ sk₂ spk => groupActionX_comm sk₁ sk₂ spk.1 spk.2
   publicKeySize_eq_sharedSecretSize := rfl
   encodePublicKey_reinterpret := fun _ => rfl
 
