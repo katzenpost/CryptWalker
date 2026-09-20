@@ -108,3 +108,6 @@ name = "CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors"
 
 [[lean_exe]]
 name = "CryptWalker.Sphinx.kem_hybrid_vectors_test"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test"

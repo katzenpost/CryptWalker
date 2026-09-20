@@ -178,6 +178,14 @@ def kemMLKEM768X25519 : KEM :=
 def mlkem768X25519Entry : RegistryEntry :=
   { hpqcName := "mlkem768-x25519-kem", scheme := kemMLKEM768X25519 }
 
+/-- As `kemMLKEM768X25519`, but over `kemX25519Blake2b` instead of `kemX25519` -- matching hpqc's
+registered `"MLKEM768-X25519"` scheme exactly, PRF included, rather than the portable `sha256-v1`
+stand-in. Not added to `registry`: same reasoning as `kemX25519Blake2b`'s own doc comment. Used
+directly by the Sphinx-layer cross-check against katzenpost's own deployed-PRF vectors. -/
+def kemMLKEM768X25519Blake2b : KEM :=
+  Combiner.combineKEM blake2b256CombinerPRF kemX25519Blake2b
+    [CryptWalker.KEM.MLKEM768.kemMLKEM768Seed]
+
 def registry : List RegistryEntry :=
   [x25519LadderEntry, x25519GroupEntry, mlkem768Entry, mlkem768X25519Entry]
 
