@@ -46,7 +46,8 @@ Classical NIKEs, two independent implementations of the same exchange:
 | KEM: Key Encapsulation Method |
 |:---:|
 
-* X25519, adapted to KEM via hashed ElGamal (NIKE-to-KEM adapter, `sha256-v1` PRF)
+* X25519, adapted to KEM via hashed ElGamal (NIKE-to-KEM adapter) — both `blake2b-xof`, hpqc's
+  deployed PRF, and `sha256-v1`, a portable stand-in for implementations without BLAKE2b
 * ML-KEM-768 (FIPS 203), built from [VCVio](https://github.com/dtumad/VCV-io)'s pure-Lean
   primitives (NTT, CBD, encoding) with our own `keygen`/`encaps`/`decaps` composition — checked
   against the official NIST ACVP known-answer vectors (keygen, encapsulation, decapsulation
@@ -72,6 +73,7 @@ Classical NIKEs, two independent implementations of the same exchange:
 * SHA-256
 * BLAKE2b, parameterized over digest length and an optional key (RFC 7693's keyed mode) — used at
   512 bits unkeyed (BACAP, HKDF) and at 256 bits both unkeyed and keyed (the KEM combiner's PRF)
+* BLAKE2b's XOF, BLAKE2Xb (blake2x.pdf) — the deployed NIKE-to-KEM adapter PRF
 
 | MAC: Message Authentication Code |
 |:---:|
@@ -93,6 +95,7 @@ Classical NIKEs, two independent implementations of the same exchange:
 
 | PRF: Pseuodo Random Function |
 |:---:|
+* BLAKE2b XOF (`blake2b-xof`)
 * SHA256 (`sha256-v1`)
 
 | DATAstructures |

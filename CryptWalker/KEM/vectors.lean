@@ -24,10 +24,10 @@ Four checks per vector:
 * the same shared secret is what encapsulation would produce from the recorded
   ephemeral — which is the check that pins the key ordering.
 
-The PRF comes from each vector's `prf` field rather than being assumed. Vectors
-naming a PRF this implementation lacks (`blake2b-xof`, the deployed one) are
-reported as skipped. At least one vector must actually run, so a truncated file
-cannot masquerade as a pass.
+The PRF comes from each vector's `prf` field rather than being assumed, so a
+vector naming a PRF some future version of this implementation lacks is
+reported as skipped rather than failing outright. At least one vector must
+actually run, so a truncated file cannot masquerade as a pass.
 -/
 
 open Lean
@@ -37,11 +37,11 @@ open CryptWalker.KEM.KEM
 open CryptWalker.KEM.Adapter
 open CryptWalker.NIKE
 
-/-- The PRFs this implementation can compute. `blake2b-xof` is absent until
-CryptWalker has BLAKE2b/BLAKE2Xb. -/
+/-- The PRFs this implementation can compute. -/
 def prfByName : String → Option Adapter.PRF
-  | "sha256-v1" => some sha256v1PRF
-  | _           => none
+  | "sha256-v1"   => some sha256v1PRF
+  | "blake2b-xof" => some blake2bXOFPRF
+  | _             => none
 
 structure Vec where
   name       : String
