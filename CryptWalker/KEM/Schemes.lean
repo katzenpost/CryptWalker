@@ -64,17 +64,10 @@ def sha256v1PRF : Adapter.PRF where
   name   := "sha256-v1"
   derive := sha256v1Derive
 
-/-- The `blake2b-xof` PRF: hpqc's deployed adapter configuration (`kem/adapter/kem.go`'s
-`blake2bXOF`), now that `Hash.Blake2b` has BLAKE2Xb. `ss` keys the XOF directly only at exactly 32
-bytes -- the only width any NIKE in this port produces -- matching Go's `len(ss) != 32` branch,
-which otherwise collapses `ss` to 32 bytes via an unkeyed BLAKE2b-256 hash first.
-
-`xof`'s `size` and `readLen` are two different quantities Go's `Derive` also keeps separate:
-`size` (the XOF's configured length, baked into its parameter block) is `sharedKeySize` — here,
-`outLen`, the width `Adapter.derive` calls this at — while `readLen` (how many bytes are actually
-produced) is `ss.size`. Every NIKE here has `sharedSecretSize = publicKeySize`, so `outLen` and
-`ss.size` coincide in practice, exactly the "wart" `Adapter.lean`'s module doc already notes; this
-follows Go in keeping them as distinct arguments regardless. -/
+/-- The `blake2b-xof` PRF, the deployed adapter configuration. `ss` keys the XOF directly only at
+exactly 32 bytes -- the only width any NIKE here produces -- otherwise it's first collapsed to 32
+bytes via an unkeyed BLAKE2b-256 hash. `xof`'s `size`/`readLen` coincide here (`outLen`/`ss.size`),
+per `Adapter.lean`'s "wart" note. -/
 def blake2bXOFDerive (ss pkStatic pkEph : ByteArray) (outLen : Nat) : Vector UInt8 outLen :=
   let xofKey := if ss.size == 32 then ss else ofVector (CryptWalker.Hash.Blake2b.hash256 ss)
   toVecN outLen (CryptWalker.Hash.Blake2b.xof xofKey outLen ss.size (pkStatic ++ pkEph))
@@ -95,14 +88,9 @@ def kemX25519Ladder : KEM := kemOfNike sha256v1PRF X25519_montgomery_ladder.Ladd
 `NIKE.Schemes`'s own `x25519GroupEntry`. -/
 def kemX25519 : KEM := kemOfNike sha256v1PRF CryptWalker.NIKE.X25519.Scheme
 
-/-- The group-formulation X25519 implementation under the deployed `blake2b-xof` adapter PRF,
-matching hpqc's own default (`adapter.FromNIKE`, `kem/schemes.go`'s registered `"MLKEM768-X25519"`
-and the bare `"x25519"` KEM adapter entry) rather than `kemX25519`'s portable `sha256-v1` stand-in.
-Not added to `registry` below: every entry there is named after an `hpqc` scheme name, and hpqc
-has no separately-named scheme for "X25519 adapter, blake2b-xof PRF" (its bare adapter entry over
-X25519 already means this) — `kemX25519` fills that registry slot instead, for the reason its own
-doc comment gives, and callers that specifically want the deployed PRF (the hybrid combiner
-vectors below) use this value directly. -/
+/-- X25519 under the deployed `blake2b-xof` adapter PRF, vs. `kemX25519`'s portable `sha256-v1`
+stand-in. Not in `registry`: `kemX25519` already fills that slot; callers wanting the deployed
+PRF use this value directly. -/
 def kemX25519Blake2b : KEM := kemOfNike blake2bXOFPRF CryptWalker.NIKE.X25519.Scheme
 
 /-! ## The `hpqc/kem/schemes` registry, ported (names deliberately diverge from `hpqc`)
@@ -178,10 +166,8 @@ def kemMLKEM768X25519 : KEM :=
 def mlkem768X25519Entry : RegistryEntry :=
   { hpqcName := "mlkem768-x25519-kem", scheme := kemMLKEM768X25519 }
 
-/-- As `kemMLKEM768X25519`, but over `kemX25519Blake2b` instead of `kemX25519` -- matching hpqc's
-registered `"MLKEM768-X25519"` scheme exactly, PRF included, rather than the portable `sha256-v1`
-stand-in. Not added to `registry`: same reasoning as `kemX25519Blake2b`'s own doc comment. Used
-directly by the Sphinx-layer cross-check against katzenpost's own deployed-PRF vectors. -/
+/-- `kemMLKEM768X25519` over `kemX25519Blake2b` instead of `kemX25519`. Not in `registry`, same
+reason as `kemX25519Blake2b`. -/
 def kemMLKEM768X25519Blake2b : KEM :=
   Combiner.combineKEM blake2b256CombinerPRF kemX25519Blake2b
     [CryptWalker.KEM.MLKEM768.kemMLKEM768Seed]
