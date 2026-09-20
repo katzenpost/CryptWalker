@@ -86,8 +86,8 @@ def testNIKE (scheme : NIKE) (aliceSeed bobSeed : Vector UInt8 32) : IO Unit := 
   let bobSk   := scheme.privateKeyFromSeed bobSeed
   let alicePk := scheme.derivePublicKey aliceSk
   let bobPk   := scheme.derivePublicKey bobSk
-  let bobSS   := scheme.groupAction bobSk   alicePk (scheme.derive_safe aliceSk)
-  let aliceSS := scheme.groupAction aliceSk bobPk   (scheme.derive_safe bobSk)
+  let bobSS   := scheme.groupAction bobSk   ⟨alicePk, scheme.derive_safe aliceSk⟩
+  let aliceSS := scheme.groupAction aliceSk ⟨bobPk,   scheme.derive_safe bobSk⟩
   if scheme.encodeSharedSecret bobSS = scheme.encodeSharedSecret aliceSS then
     IO.println s!"NIKE test for {scheme.name} PASSED."
   else

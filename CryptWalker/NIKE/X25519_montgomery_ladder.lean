@@ -189,7 +189,7 @@ def LadderScheme : NIKE where
 
   privateKeyFromSeed := fun seed => ⟨clampScalar seed⟩
   derivePublicKey    := derivePub
-  groupAction        := fun sk pk _ => ⟨curve25519 sk.data pk.data⟩
+  groupAction        := fun sk spk => ⟨curve25519 sk.data spk.1.data⟩
 
   encodePrivateKey   := fun sk => sk.data
   decodePrivateKey   := fun v => some ⟨v⟩
@@ -204,8 +204,8 @@ def LadderScheme : NIKE where
   encode_decode_pub  := fun _ _ h => congrArg PublicKey.data (Option.some.inj h) ▸ rfl
   commutes           := fun sk₁ sk₂ => congrArg SharedSecret.mk (curve25519_commutes sk₁ sk₂)
   reinterpret        := fun ss => ⟨ss.data⟩
-  reinterpret_safe   := fun sk pk _ => curve25519_safe sk pk
-  groupAction_comm   := fun sk₁ sk₂ pk _ => congrArg SharedSecret.mk (curve25519_comm_gen sk₁ sk₂ pk.data)
+  reinterpret_safe   := fun sk spk => curve25519_safe sk spk.1
+  groupAction_comm   := fun sk₁ sk₂ spk => congrArg SharedSecret.mk (curve25519_comm_gen sk₁ sk₂ spk.1.data)
   publicKeySize_eq_sharedSecretSize := rfl
   encodePublicKey_reinterpret := fun _ => rfl
 

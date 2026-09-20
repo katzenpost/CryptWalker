@@ -113,7 +113,7 @@ private def nikeDH (nike : NIKE) (sk : nike.PrivateKey) (pkBytes : ByteArray) :
   match nike.decodePublicKey (toVecN nike.publicKeySize pkBytes) with
   | none => throw "sphinx: invalid public key encoding"
   | some pk =>
-    if h : nike.Safe pk then pure (ofVector (nike.encodeSharedSecret (nike.groupAction sk pk h)))
+    if h : nike.Safe pk then pure (ofVector (nike.encodeSharedSecret (nike.groupAction sk ⟨pk, h⟩)))
     else throw "sphinx: unsafe public key"
 
 /-- Re-blind an envelope by a factor, at the byte level — `nikeDH` with the factor as private key
@@ -141,7 +141,7 @@ argument needs threaded through `createHeader`/`unwrapNIKE`'s actual `ByteArray`
 theorem nikeDH_bridge (nike : NIKE) (sk : nike.PrivateKey) (pk : nike.PublicKey)
     (h : nike.Safe pk) :
     nikeDH nike sk (ofVector (nike.encodePublicKey pk))
-      = .ok (ofVector (nike.encodeSharedSecret (nike.groupAction sk pk h))) := by
+      = .ok (ofVector (nike.encodeSharedSecret (nike.groupAction sk ⟨pk, h⟩))) := by
   unfold nikeDH
   rw [toVecN_ofVector, nike.decode_encode_pub]
   dsimp only
@@ -157,7 +157,7 @@ theorem nikeBlind_bridge (nike : NIKE) (pk : nike.PublicKey) (sk : nike.PrivateK
     (h : nike.Safe pk) (factor : ByteArray)
     (hfactor : nike.decodePrivateKey (toVecN nike.privateKeySize factor) = some sk) :
     nikeBlind nike (ofVector (nike.encodePublicKey pk)) factor
-      = ofVector (nike.encodePublicKey (nike.reinterpret (nike.groupAction sk pk h))) := by
+      = ofVector (nike.encodePublicKey (nike.reinterpret (nike.groupAction sk ⟨pk, h⟩))) := by
   unfold nikeBlind
   rw [hfactor]
   dsimp only
@@ -173,7 +173,7 @@ private def nikeBlindTyped (nike : NIKE) (factor : nike.PrivateKey) (pk : nike.P
     nike.PublicKey :=
   if h : nike.Safe pk then
     (nike.decodePublicKey
-      (toVecN nike.publicKeySize (ofVector (nike.encodeSharedSecret (nike.groupAction factor pk h))))
+      (toVecN nike.publicKeySize (ofVector (nike.encodeSharedSecret (nike.groupAction factor ⟨pk, h⟩))))
     ).getD pk
   else pk
 
