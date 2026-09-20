@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Sphinx.nike_sphinx
+import CryptWalker.Util.UniformHit
 
 /-! # BACAP unlinkability (§4.3)
 
@@ -21,8 +21,9 @@ share a root secret. That is `δ = 0`: perfect, not just computational, unlinkab
 idealization. `Sphinx.Indistinguishability` proves a different §4.4 property of this same paper
 by an actual hybrid argument; this property doesn't need one.
 
-The proof is one application of `Sphinx.NIKESphinx.uniformHit_eq` (already in the codebase,
-reused by `Sphinx.WrapResistance` the same way) to the product action on `F × F`. Closing the
+The proof is one application of `Util.UniformHit.uniformHit_eq` (already in the codebase,
+reused by `Sphinx.NIKESphinx.wrap_resistant` the same way) to the product action on `F × F`.
+Closing the
 gap from this idealization to the real HKDF-derived `K_i^ctx` (`BACAP.Ratchet.deriveKForContext`)
 via a `PRGScheme` hybrid step, matching `Sphinx.Indistinguishability`'s own `jointKeyPRG`
 pattern, is future work — as is connecting `G` here to Ed25519's actual group (blocked on a
@@ -32,7 +33,7 @@ substantially larger than the on-curve map in `Sign.Ed25519_group`; see that fil
 namespace CryptWalker.BACAP.Unlinkability
 
 open OracleComp OracleSpec ENNReal
-open CryptWalker.Sphinx.NIKESphinx (uniformHit_eq)
+open CryptWalker.Util.UniformHit (uniformHit_eq)
 
 variable {F G : Type} [Field F] [AddCommGroup G] [Module F G]
 variable [Fintype F] [SampleableType F] [SampleableType (F × F)] [DecidableEq G]
