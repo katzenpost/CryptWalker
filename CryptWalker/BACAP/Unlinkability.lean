@@ -21,36 +21,36 @@ share a root secret. That is `δ = 0`: perfect, not just computational, unlinkab
 idealization. `Sphinx.Indistinguishability` proves a different §4.4 property of this same paper
 by an actual hybrid argument; this property doesn't need one.
 
-The proof is one application of `Util.UniformHit.uniformHit_eq` (already in the codebase,
-reused by `Sphinx.NIKESphinx.wrap_resistant` the same way) to the product action on `F × F`.
-Closing the
+The proof is one application of `Util.UniformHit.uniformHit_eq_of_injective` (the fact
+`Sphinx.NIKESphinx.wrap_resistant` uses the same way) to the product action on `F × F`. Closing the
 gap from this idealization to the real HKDF-derived `K_i^ctx` (`BACAP.Ratchet.deriveKForContext`)
 via a `PRGScheme` hybrid step, matching `Sphinx.Indistinguishability`'s own `jointKeyPRG`
-pattern, is future work — as is connecting `G` here to Ed25519's actual group (blocked on a
-homomorphism proof between the Edwards and Montgomery addition laws that turned out to be
-substantially larger than the on-curve map in `Sign.Ed25519_group`; see that file's module doc). -/
+pattern, is future work — and `Ed25519Unlinkability` instantiates the single-box form at Ed25519. -/
 
 namespace CryptWalker.BACAP.Unlinkability
 
 open OracleComp OracleSpec ENNReal
-open CryptWalker.Util.UniformHit (uniformHit_eq)
+open CryptWalker.Util.UniformHit (uniformHit_eq_of_injective)
 
 variable {F G : Type} [Field F] [AddCommGroup G] [Module F G]
 variable [Fintype F] [SampleableType F] [SampleableType (F × F)] [DecidableEq G]
 
 omit [SampleableType F] in
 /-- **Core lemma**: two independent uniform scalars, applied respectively to `P` and `Q`, hit
-any target pair with probability exactly `1 / |F × F|` — provided scalar multiplication by each
-of `P`, `Q` alone is already a bijection onto `G` (the case for any nonzero element of the
-prime-order subgroup BACAP's box IDs actually live in). One instance of `uniformHit_eq`, applied
-to the product map `(a, b) ↦ (a • P, b • Q)`, which is bijective exactly when each factor is. -/
+any target pair in the image with probability exactly `1 / |F × F|` — provided scalar
+multiplication by each of `P`, `Q` alone is injective (any nonzero element of a prime-order
+group). One instance of `uniformHit_eq_of_injective`, applied to the product map
+`(a, b) ↦ (a • P, b • Q)`. Injective rather than bijective: the image is the subgroup the point
+generates, not all of `G`. -/
 theorem unlinkable {P Q : G}
-    (hP : Function.Bijective (· • P : F → G)) (hQ : Function.Bijective (· • Q : F → G))
-    (m n : G) :
+    (hP : Function.Injective (· • P : F → G)) (hQ : Function.Injective (· • Q : F → G))
+    {m n : G} (hm : m ∈ Set.range (· • P : F → G)) (hn : n ∈ Set.range (· • Q : F → G)) :
     Pr[= true | ($ᵗ (F × F)) >>=
         fun kk => pure (decide ((kk.1 • P, kk.2 • Q) = (m, n)))] =
-      (Fintype.card (F × F) : ℝ≥0∞)⁻¹ :=
-  uniformHit_eq (hP.prodMap hQ) (m, n)
+      (Fintype.card (F × F) : ℝ≥0∞)⁻¹ := by
+  obtain ⟨a, rfl⟩ := hm
+  obtain ⟨b, rfl⟩ := hn
+  exact uniformHit_eq_of_injective (Function.Injective.prodMap hP hQ) ⟨(a, b), rfl⟩
 
 omit [SampleableType F] in
 /-- **BACAP unlinkability (§4.3), restated in the paper's own terms**: the pair of box IDs
@@ -61,15 +61,15 @@ root secrets. Nothing about the joint distribution of `(Kx • P, Ky • Q)` dep
 relationship between `P` and `Q` at all: an adversary given the two resulting box IDs learns
 nothing about whether they share a root secret. This is the paper's `X`/`X′` events (§4.3)
 being indistinguishable with `δ = 0`, under idealization (1) above. -/
-theorem unlinkable_delta_zero {P Q : G}
-    (hP : Function.Bijective (· • P : F → G)) (hQ : Function.Bijective (· • Q : F → G))
-    (P' Q' : G)
-    (hP' : Function.Bijective (· • P' : F → G)) (hQ' : Function.Bijective (· • Q' : F → G))
-    (m n : G) :
+theorem unlinkable_delta_zero {P Q P' Q' : G}
+    (hP : Function.Injective (· • P : F → G)) (hQ : Function.Injective (· • Q : F → G))
+    (hP' : Function.Injective (· • P' : F → G)) (hQ' : Function.Injective (· • Q' : F → G))
+    {m n : G} (hm : m ∈ Set.range (· • P : F → G)) (hn : n ∈ Set.range (· • Q : F → G))
+    (hm' : m ∈ Set.range (· • P' : F → G)) (hn' : n ∈ Set.range (· • Q' : F → G)) :
     Pr[= true | ($ᵗ (F × F)) >>=
         fun kk => pure (decide ((kk.1 • P, kk.2 • Q) = (m, n)))] =
       Pr[= true | ($ᵗ (F × F)) >>=
         fun kk => pure (decide ((kk.1 • P', kk.2 • Q') = (m, n)))] := by
-  rw [unlinkable hP hQ m n, unlinkable hP' hQ' m n]
+  rw [unlinkable hP hQ hm hn, unlinkable hP' hQ' hm' hn']
 
 end CryptWalker.BACAP.Unlinkability

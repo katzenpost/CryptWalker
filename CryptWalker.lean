@@ -47,6 +47,7 @@ import CryptWalker.BACAP.Protocol
 import CryptWalker.BACAP.Impl
 import CryptWalker.BACAP.API
 import CryptWalker.BACAP.Unlinkability
+import CryptWalker.BACAP.Ed25519Unlinkability
 import CryptWalker.BACAP.test
 import CryptWalker.Sphinx.sphinx
 import CryptWalker.Sphinx.geometry
