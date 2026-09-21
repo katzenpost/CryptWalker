@@ -37,6 +37,7 @@ import CryptWalker.BACAP.Ratchet
 import CryptWalker.BACAP.Protocol
 import CryptWalker.BACAP.Impl
 import CryptWalker.BACAP.API
+import CryptWalker.Pigeonhole.ThreatModel
 import CryptWalker.BACAP.test
 import CryptWalker.Sphinx.sphinx
 import CryptWalker.Sphinx.geometry
