@@ -118,10 +118,21 @@ theorem implDecrypt_sound (sk : Scalar) (pk boxId : PubBytes) (idx : MessageBoxI
       exact absurd hct (by omega)
     · exact Scheme.decrypt_sound _ _ _ _ _ hdec
 
-def bacapSpec : BACAPSpec where
+/-- Sampling a blinding factor is a proof-level notion (`BACAPSpec.unlinkable`); these are
+`noncomputable` on purpose. Left computable, the compiler would build `List.finRange ℓ`, a list of
+2^252 elements, as a constant initialised at program start. -/
+@[instance_reducible] noncomputable def scalarFintypeInst : Fintype Scalar := inferInstance
+@[instance_reducible] noncomputable def scalarSampleableInst : SampleableType Scalar := SampleableType.ofFintype Scalar
+@[instance_reducible] noncomputable def pubDecEqInst : DecidableEq PubBytes := inferInstance
+
+noncomputable def bacapSpec : BACAPSpec where
   blindable := blindable
   hkdf      := blake2b512_hkdf
   aead      := Scheme
+
+  scalarFintype    := scalarFintypeInst
+  scalarSampleable := scalarSampleableInst
+  pubDecEq         := pubDecEqInst
 
   deriveBoxID := implDeriveBoxID
   signBox     := implSignBox

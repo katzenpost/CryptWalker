@@ -33,6 +33,12 @@ structure BACAPSpec where
   hkdf      : HKDF
   aead      : AEAD
 
+  /-- The blinding factors can be sampled uniformly. Instance fields, as in
+  `NIKESphinxScheme`: they are what `unlinkable` below is stated over. -/
+  [scalarFintype : Fintype blindable.Scalar]
+  [scalarSampleable : SampleableType blindable.Scalar]
+  [pubDecEq : DecidableEq blindable.base.PublicKey]
+
   /-- Derive the per-box public key from a root public key, ratchet state, and context.
       The box ID is `blindPub(rootPub, K_i^ctx)`. -/
   deriveBoxID : blindable.base.PublicKey → MessageBoxIndex → ByteArray → blindable.base.PublicKey
@@ -79,18 +85,16 @@ structure BACAPSpec where
     ct.size > 0 →
     (encryptBox sk pk idx ctx pt).2.1 = ct
 
-/-- **BACAP unlinkability (Echomix §4.3), for every implementation.** The `blindable` a spec is
-built on carries `blind_injective`; from it, a freshly drawn blinding factor produces each box key
-in the orbit of a regular root key with probability exactly `1/|Scalar|`, whichever root secret it
-came from. That is `δ = 0` in the paper's unlinkability game, under the idealization that blinding
-factors are truly random (`BACAP.Unlinkability` for the two-box form). -/
-theorem BACAPSpec.unlinkable (S : BACAPSpec) [Fintype S.blindable.Scalar]
-    [SampleableType S.blindable.Scalar] [DecidableEq S.blindable.base.PublicKey]
-    (pk : S.blindable.base.PublicKey) (hpk : S.blindable.Regular pk)
-    {target : S.blindable.base.PublicKey} (ht : target ∈ Set.range (S.blindable.blindPub pk)) :
-    Pr[= true | ($ᵗ S.blindable.Scalar) >>=
-        fun f => pure (decide (S.blindable.blindPub pk f = target))] =
-      (Fintype.card S.blindable.Scalar : ℝ≥0∞)⁻¹ :=
-  CryptWalker.Sign.Blindable.blind_unlinkable S.blindable pk hpk ht
+  /-- **Unlinkability** (Echomix §4.3), under the idealization that blinding factors are truly
+  random: for a regular root key `pk`, a freshly drawn blinding factor produces each key in the
+  orbit of `pk` with probability exactly `1/|Scalar|`, whichever root secret `pk` came from. That
+  is `δ = 0` in the paper's game (`BACAP.Unlinkability` has the two-box form). Free for every
+  instance, like `NIKESphinxScheme.wrap_resistant`: it is `uniformHit_eq_of_injective` applied to
+  `blindable.blind_injective`, which is the only thing a scheme has to supply. -/
+  unlinkable : ∀ pk, blindable.Regular pk → ∀ target, target ∈ Set.range (blindable.blindPub pk) →
+      Pr[= true | ($ᵗ blindable.Scalar) >>=
+          fun f => pure (decide (blindable.blindPub pk f = target))] =
+        (Fintype.card blindable.Scalar : ℝ≥0∞)⁻¹ :=
+    fun pk hpk _ ht => CryptWalker.Sign.Blindable.blind_unlinkable blindable pk hpk ht
 
 end CryptWalker.BACAP.Protocol
