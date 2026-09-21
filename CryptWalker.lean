@@ -15,6 +15,7 @@ import CryptWalker.Util.UInt32
 import CryptWalker.Util.Serial
 import CryptWalker.Util.Combine
 import CryptWalker.Util.Bytes
+import CryptWalker.Util.UniformHit
 import CryptWalker.Data.MerkleHashTree
 import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
@@ -22,6 +23,10 @@ import CryptWalker.KEM.Schemes
 import CryptWalker.KEM.Combiner
 import CryptWalker.Sign.Sign
 import CryptWalker.Sign.Ed25519_math
+import CryptWalker.Sign.Ed25519_facts
+import CryptWalker.Sign.Ed25519_edwards
+import CryptWalker.Sign.Ed25519_identities
+import CryptWalker.Sign.Ed25519_group
 import CryptWalker.Sign.Ed25519_blinded
 import CryptWalker.Sign.Blindable
 import CryptWalker.Sign.Combiner
@@ -37,6 +42,7 @@ import CryptWalker.BACAP.Ratchet
 import CryptWalker.BACAP.Protocol
 import CryptWalker.BACAP.Impl
 import CryptWalker.BACAP.API
+import CryptWalker.BACAP.Unlinkability
 import CryptWalker.BACAP.test
 import CryptWalker.Sphinx.sphinx
 import CryptWalker.Sphinx.geometry
