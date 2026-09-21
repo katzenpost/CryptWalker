@@ -52,6 +52,9 @@ structure Blindable where
   Valid : base.PublicKey → Prop
   /-- Blinding factors that can be undone. -/
   Invertible : Scalar → Prop
+  /-- Keys whose blindings are pairwise distinct: any nonzero root key, but not the identity, which
+  every factor blinds to itself. -/
+  Regular : base.PublicKey → Prop
 
   /-- Composition of blinding factors. -/
   mul : Scalar → Scalar → Scalar
@@ -88,6 +91,12 @@ structure Blindable where
   /-- Unblinding inverts blinding. Tested at `blinded25519_test.go:224-227`. -/
   blind_inv : ∀ pk, Valid pk → ∀ f, Invertible f → blindPub (blindPub pk f) (inv f) = pk
 
+  /-- **Distinct blinding factors give distinct keys**, for a regular key. This is the algebraic
+  half of BACAP's unlinkability (Echomix §4.3): it makes a uniform blinding factor a uniform box
+  ID over the key's orbit (`blind_unlinkable`). For Ed25519 it holds because the basepoint has
+  prime order `ℓ`. -/
+  blind_injective : ∀ pk, Regular pk → Function.Injective (blindPub pk)
+
 variable (B : Blindable)
 
 /-- **A signature made with a blinded private key verifies under the blinded public key.**
@@ -123,21 +132,19 @@ theorem blindPub_swap (pk : B.base.PublicKey) (hpk : B.Valid pk) (f g : B.Scalar
     B.blindPub (B.blindPub pk f) g = B.blindPub (B.blindPub pk g) f := by
   rw [B.blind_assoc pk hpk, B.blind_assoc pk hpk, B.blind_comm]
 
-/-- **Unlinkability** (Echomix §4.3): whenever blinding a public key `pk` is injective (any
-nonzero point of a prime-order group), a freshly drawn blinding factor hits each box ID in its
-image with probability exactly `1/|Scalar|`. One application of `uniformHit_eq_of_injective`,
-the fact `NIKESphinx.wrap_resistant` uses for Sphinx's own re-blinding step. Stated standalone
-rather than as a `Blindable` field: a field would force `Fintype`/`SampleableType`/`DecidableEq`
+/-- **Unlinkability** (Echomix §4.3): for a regular key `pk`, a freshly drawn blinding factor
+produces each key in the orbit of `pk` with probability exactly `1/|Scalar|`. One application of
+`uniformHit_eq_of_injective`, the fact `NIKESphinx.wrap_resistant` uses for Sphinx's own
+re-blinding step, with injectivity supplied by the `blind_injective` field. Stated as a theorem
+rather than a field: a probability statement would force `Fintype`/`SampleableType`/`DecidableEq`
 onto every instance and pull VCVio's classical foundations into the axiom surface of
-`verify_blinded`/`blindPriv_assoc`, which `Sign.Check` audits. Injectivity is a hypothesis for
-the caller to discharge, not an axiom. -/
+`verify_blinded`/`blindPriv_assoc`, which `Sign.Check` audits. -/
 theorem blind_unlinkable [Fintype B.Scalar] [SampleableType B.Scalar]
-    [DecidableEq B.base.PublicKey] (pk : B.base.PublicKey)
-    (hinj : Function.Injective (B.blindPub pk)) {target : B.base.PublicKey}
-    (htarget : target ∈ Set.range (B.blindPub pk)) :
+    [DecidableEq B.base.PublicKey] (pk : B.base.PublicKey) (hpk : B.Regular pk)
+    {target : B.base.PublicKey} (htarget : target ∈ Set.range (B.blindPub pk)) :
     Pr[= true | ($ᵗ B.Scalar) >>= fun f => pure (decide (B.blindPub pk f = target))] =
       (Fintype.card B.Scalar : ℝ≥0∞)⁻¹ :=
-  uniformHit_eq_of_injective hinj htarget
+  uniformHit_eq_of_injective (B.blind_injective pk hpk) htarget
 
 /-- The trivial blindable scheme, over the trivial signature scheme: every blinding is the
 identity. Present only to witness inhabitation. -/
@@ -146,6 +153,7 @@ instance : Inhabited Blindable := ⟨{
   Scalar := Unit
   Valid  := fun _ => True
   Invertible := fun _ => True
+  Regular := fun _ => False
 
   mul := fun _ _ => ()
   inv := fun _ => ()
@@ -160,6 +168,7 @@ instance : Inhabited Blindable := ⟨{
   blind_assoc := fun _ _ _ _ => rfl
   blind_comm  := fun _ _ => rfl
   blind_inv   := fun _ _ _ _ => rfl
+  blind_injective := fun _ h => h.elim
 }⟩
 
 end CryptWalker.Sign.Blindable

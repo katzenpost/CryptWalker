@@ -25,6 +25,7 @@ open CryptWalker.BACAP.Ratchet
 open CryptWalker.Hash.HKDF
 open CryptWalker.Sign.Blindable
 open CryptWalker.Cipher.AEAD
+open OracleComp OracleSpec ENNReal
 
 /-- Abstract BACAP protocol structure. -/
 structure BACAPSpec where
@@ -77,5 +78,19 @@ structure BACAPSpec where
     decryptBox boxId idx ctx ct sig = some pt →
     ct.size > 0 →
     (encryptBox sk pk idx ctx pt).2.1 = ct
+
+/-- **BACAP unlinkability (Echomix §4.3), for every implementation.** The `blindable` a spec is
+built on carries `blind_injective`; from it, a freshly drawn blinding factor produces each box key
+in the orbit of a regular root key with probability exactly `1/|Scalar|`, whichever root secret it
+came from. That is `δ = 0` in the paper's unlinkability game, under the idealization that blinding
+factors are truly random (`BACAP.Unlinkability` for the two-box form). -/
+theorem BACAPSpec.unlinkable (S : BACAPSpec) [Fintype S.blindable.Scalar]
+    [SampleableType S.blindable.Scalar] [DecidableEq S.blindable.base.PublicKey]
+    (pk : S.blindable.base.PublicKey) (hpk : S.blindable.Regular pk)
+    {target : S.blindable.base.PublicKey} (ht : target ∈ Set.range (S.blindable.blindPub pk)) :
+    Pr[= true | ($ᵗ S.blindable.Scalar) >>=
+        fun f => pure (decide (S.blindable.blindPub pk f = target))] =
+      (Fintype.card S.blindable.Scalar : ℝ≥0∞)⁻¹ :=
+  CryptWalker.Sign.Blindable.blind_unlinkable S.blindable pk hpk ht
 
 end CryptWalker.BACAP.Protocol
