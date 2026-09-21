@@ -3,307 +3,147 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.NIKE.NIKE
-import CryptWalker.Cipher.AEAD
-import CryptWalker.Hash.Hash
-import CryptWalker.Util.Bytes
+/-! # Multi-recipient KEM
 
-/-! # MKEM: one message, several recipients, built from a NIKE
+The same shape as `NIKE`, `KEM`, `AEAD` and `Signature`: a plain structure whose operations are
+fields and whose laws are proposition fields, so no instance can exist without discharging them.
+Models `hpqc/kem/mkem` (`mkem.go`, `ciphertext.go`); the generic construction from a NIKE, an AEAD
+and a hash is `MKEMAdapter.mkemOfNike`.
 
-Mirrors `hpqc/kem/mkem`. To send one payload to several recipients, the sender:
+## What it is
 
-1. makes an ephemeral NIKE key pair,
-2. derives one shared key per recipient (`hash` of the Diffie-Hellman output),
-3. encrypts the payload once under a fresh random *message key*,
-4. encrypts that message key to each recipient under their shared key (a "DEK").
+One payload, several recipients. The sender makes an ephemeral key pair, derives one shared key per
+recipient, encrypts the payload once under a fresh message key, and encrypts that message key to
+each recipient (a *DEK*). The ciphertext is `(ephemeral public key, DEKs, envelope)`. A recipient
+opens its DEK and then the envelope. A recipient can also *reply* under the same shared key, so the
+sender, who kept the ephemeral private key, reads the reply with no further key exchange.
 
-The ciphertext is `(ephemeral public key, DEKs, envelope)`. A recipient derives its shared key from
-its own private key and the ephemeral public key, tries the DEKs one after another until one opens,
-and uses the message key to open the envelope. The recipient can also *reply* under the same shared
-key, so the sender, holding the ephemeral private key, reads the reply without any extra key
-exchange (`envelopeReply` / `decryptEnvelope`).
+## Why correctness is stated per recipient
 
-This is a construction over any `NIKE`, `AEAD` and `Hash`, so it needs no particular curve:
-`hpqc` runs it over the CTIDH1024-X25519 hybrid, and here any NIKE with the `NIKE` laws works. The
-only law used is `NIKE.commutes` (both sides derive the same Diffie-Hellman output).
+`hpqc` never gives a recipient the whole ciphertext. `TestMKEMProtocol` hands each replica a
+ciphertext carrying **only its own DEK**, and in Pigeonhole the courier makes that split
+(`courier_envelope` carries `dek1` and `dek2`). `Ciphertext.forRecipient` is that split.
 
-**What is not stated.** Two recipients' DEKs must not open under each other's key: the trial
-decryption takes the first DEK that opens. That is AEAD authenticity, a computational property no
-field of `AEAD` can express, so `decapsulate_encapsulate` takes it as an explicit hypothesis
-(`hcross`). Randomness (ephemeral seed, message key, nonces) is an explicit argument, as in `AEAD`.
--/
+Decapsulating the *whole* ciphertext tries the DEKs in order and takes the first that opens, so it
+is correct only if no earlier DEK opens under this recipient's key. That is authenticity of the
+underlying AEAD, which is computational, so it cannot be a field (see `AEAD`). For the per-recipient
+ciphertext the question does not arise, so `decapsulate_encapsulate` is unconditional.
+
+## What cannot be a law here
+
+IND-CCA2 of the ciphertext, and recipient anonymity (a recipient learns nothing about who else was
+addressed), quantify over adversaries and negligible functions, so, as for `AEAD` and `Hash`,
+attempting to state them would produce a proposition no instance could discharge.
+
+Randomness lives in `State` and `EStateM`, as `KEM.encap` does; the deterministic operations return
+`Except`.
+
+**Not modelled:** the ciphertext's byte encoding (`hpqc` marshals it as CBOR; Pigeonhole's
+`courier_envelope` carries the pieces as separate fixed-size fields), so there is no ciphertext
+codec here. -/
 
 namespace CryptWalker.KEM.MKEM
 
-open CryptWalker.NIKE.NIKE (NIKE)
-open CryptWalker.Cipher.AEAD (AEAD)
-open CryptWalker.Hash.Hash (Hash)
-open CryptWalker.Util.Bytes (ofVector toVecN)
+/-- What can go wrong, following `hpqc`'s sentinel errors plus the `Safe` gate `NIKE` carries. -/
+inductive MKEMError where
+  | unsafePublicKey
+  | degenerateSharedSecret
+  | invalidKeySize
+  | ciphertextTooShort
+  | trialDecryptFailed
+deriving DecidableEq
 
-structure Scheme where
-  nike : NIKE
-  aead : AEAD
-  hash : Hash
-  /-- The hash of a shared secret is used directly as an AEAD key. -/
-  digest_eq_key : hash.digestSize = aead.keySize
-
-/-- An MKEM ciphertext: the sender's ephemeral public key, one DEK per recipient, and the payload
-sealed under the message key. A reply has no DEKs. -/
-structure Ciphertext (S : Scheme) where
-  ephPub : S.nike.PublicKey
+/-- An MKEM ciphertext, exactly `hpqc`'s: the sender's ephemeral public key, one DEK per recipient,
+and the payload sealed under the message key. -/
+structure Ciphertext (PublicKey : Type) where
+  ephPub : PublicKey
   deks : List ByteArray
   envelope : ByteArray
 
-/-- The sender's randomness, explicit so the whole construction is a function. -/
-structure Rand (S : Scheme) where
-  seed : Vector UInt8 32
-  msgKey : Vector UInt8 S.aead.keySize
-  envNonce : Vector UInt8 S.aead.nonceSize
-  dekNonces : List (Vector UInt8 S.aead.nonceSize)
+/-- The ciphertext a single recipient is handed: everything, but only DEK `i`. -/
+def Ciphertext.forRecipient {PublicKey : Type} (ct : Ciphertext PublicKey) (i : Nat) :
+    Ciphertext PublicKey :=
+  { ct with deks := (ct.deks[i]?).toList }
 
-/-! ### Two list lemmas the correctness proof needs -/
+structure MKEM where
+  PrivateKey : Type
+  PublicKey : Type
 
-theorem mapM_getElem {α β : Type} (f : α → Option β) :
-    ∀ (l : List α) (r : List β), l.mapM f = some r →
-      ∃ h : r.length = l.length, ∀ i (hi : i < l.length), f l[i] = some (r[i]'(h ▸ hi))
-  | [], r, h => by
-    simp at h; subst h; exact ⟨rfl, fun i hi => absurd hi (by simp)⟩
-  | a :: l, r, h => by
-    simp only [List.mapM_cons] at h
-    cases hfa : f a with
-    | none => rw [hfa] at h; simp at h
-    | some b =>
-      rw [hfa] at h
-      cases hl : l.mapM f with
-      | none => rw [hl] at h; simp at h
-      | some rs =>
-        rw [hl] at h
-        simp at h
-        subst h
-        obtain ⟨hlen, hget⟩ := mapM_getElem f l rs hl
-        refine ⟨by simp [hlen], fun i hi => ?_⟩
-        cases i with
-        | zero => simpa using hfa
-        | succ i => simpa using hget i (by simpa using hi)
+  /-- Public keys the scheme will compute with, as for `NIKE`: right subgroup, non-degenerate. -/
+  Safe : PublicKey → Prop
+  [decSafe : DecidablePred Safe]
 
-theorem findSome?_of_index {α β : Type} (f : α → Option β) :
-    ∀ (l : List α) (i : Nat) (hi : i < l.length) (x : β),
-      (∀ j (hj : j < i), f (l[j]'(by omega)) = none) → f l[i] = some x → l.findSome? f = some x
-  | [], i, hi, _, _, _ => absurd hi (by simp)
-  | a :: l, 0, hi, x, _, h => by
-    have h' : f a = some x := by simpa using h
-    simp [List.findSome?_cons, h']
-  | a :: l, i + 1, hi, x, hnone, h => by
-    have ha : f a = none := by simpa using hnone 0 (by omega)
-    simp only [List.findSome?_cons, ha]
-    exact findSome?_of_index f l i (by simpa using hi) x
-      (fun j hj => by simpa using hnone (j + 1) (by omega)) (by simpa using h)
+  /-- The randomness the scheme draws from. As for `KEM`, a state a scheme is actually run against
+  carries its randomness and must be supplied by the caller. -/
+  State : Type
+  [stateI : Inhabited State]
 
-namespace Scheme
+  name : String
 
-variable (S : Scheme)
+  publicKeySize : Nat
+  /-- The width of one DEK. `hpqc`'s `DEKSize`, 60 for ChaCha20-Poly1305: a 12-byte nonce, a
+  32-byte message key, a 16-byte tag. Pigeonhole's wire format fixes it. -/
+  dekSize : Nat
+  /-- How much longer the envelope is than the payload. -/
+  envelopeOverhead : Nat
 
-/-- A raw byte string as an AEAD key, if it is the right length. -/
-def keyOfBytes (b : ByteArray) : Option S.aead.Key :=
-  if b.size = S.aead.keySize then some (S.aead.keyFromBytes (toVecN _ b)) else none
+  derivePublicKey : PrivateKey → PublicKey
+  encodePublicKey : PublicKey → Vector UInt8 publicKeySize
+  decodePublicKey : Vector UInt8 publicKeySize → Option PublicKey
 
-/-- The key two parties share: the hash of their Diffie-Hellman output. `none` for the degenerate
-all-zero output, which `hpqc` rejects. -/
-def deriveKey (sk : S.nike.PrivateKey) (pk : {pk : S.nike.PublicKey // S.nike.Safe pk}) :
-    Option S.aead.Key :=
-  let raw := S.nike.encodeSharedSecret (S.nike.groupAction sk pk)
-  if raw.toList.all (· == 0) then none
-  else some (S.aead.keyFromBytes (Vector.cast S.digest_eq_key (S.hash.hash (ofVector raw))))
+  /-- Seed the scheme's randomness deterministically, as `KEM.stateFromSeed`. -/
+  stateFromSeed : Vector UInt8 32 → State
 
-/-- Both parties derive the same key: `NIKE.commutes`. -/
-theorem deriveKey_comm (sk₁ sk₂ : S.nike.PrivateKey) :
-    S.deriveKey sk₁ ⟨S.nike.derivePublicKey sk₂, S.nike.derive_safe sk₂⟩
-      = S.deriveKey sk₂ ⟨S.nike.derivePublicKey sk₁, S.nike.derive_safe sk₁⟩ := by
-  unfold deriveKey
-  rw [S.nike.commutes sk₁ sk₂]
+  generate : EStateM MKEMError State (PublicKey × PrivateKey)
 
-/-! ### Sealing under a key: nonce, then AEAD ciphertext -/
+  /-- Encrypt one payload to every recipient. Returns the ephemeral private key, which the sender
+  keeps to read replies. -/
+  encapsulate : List {pk : PublicKey // Safe pk} → ByteArray →
+    EStateM MKEMError State (PrivateKey × Ciphertext PublicKey)
 
-def sealUnder (key : S.aead.Key) (nonce : Vector UInt8 S.aead.nonceSize) (pt : ByteArray) :
-    ByteArray :=
-  ofVector nonce ++ S.aead.encrypt key nonce ByteArray.empty pt
+  decapsulate : PrivateKey → Ciphertext PublicKey → Except MKEMError ByteArray
 
-def unsealUnder (key : S.aead.Key) (ct : ByteArray) : Option ByteArray :=
-  if S.aead.nonceSize ≤ ct.size then
-    S.aead.decrypt key (toVecN S.aead.nonceSize ct) ByteArray.empty
-      (ct.extract S.aead.nonceSize ct.size)
-  else none
+  /-- A recipient's reply, sealed under the key it shares with the sender's ephemeral key. -/
+  envelopeReply : PrivateKey → {pk : PublicKey // Safe pk} → ByteArray →
+    EStateM MKEMError State ByteArray
 
-theorem get!_eq_getElem (x : ByteArray) (i : Nat) (h : i < x.size) : x.get! i = x[i]'h := by
-  obtain ⟨bs⟩ := x
-  show bs[i]! = (⟨bs⟩ : ByteArray)[i]'h
-  rw [getElem!_pos bs i h]
-  rfl
+  decryptEnvelope : PrivateKey → {pk : PublicKey // Safe pk} → ByteArray →
+    Except MKEMError ByteArray
 
-theorem toVecN_append {n : Nat} (v : Vector UInt8 n) (c : ByteArray) :
-    toVecN n (ofVector v ++ c) = v := by
-  apply Vector.ext
-  intro i hi
-  simp only [toVecN, Vector.getElem_ofFn]
-  have hsz : i < (ofVector v).size := by simpa using hi
-  have hlt : i < (ofVector v ++ c).size := by simp [ByteArray.size_append]; omega
-  rw [get!_eq_getElem _ _ hlt, ByteArray.getElem_append_left hsz]
-  rfl
+  derive_safe : ∀ sk, Safe (derivePublicKey sk)
 
-/-- What was sealed opens. -/
-theorem unsealUnder_sealUnder (key : S.aead.Key) (nonce : Vector UInt8 S.aead.nonceSize)
-    (pt : ByteArray) : S.unsealUnder key (S.sealUnder key nonce pt) = some pt := by
-  unfold unsealUnder sealUnder
-  generalize hc : S.aead.encrypt key nonce ByteArray.empty pt = c
-  have hsize : (ofVector nonce ++ c).size = S.aead.nonceSize + c.size := by
-    simp [ByteArray.size_append]
-  have hle : S.aead.nonceSize ≤ (ofVector nonce ++ c).size := by omega
-  rw [if_pos hle, toVecN_append]
-  have hext := CryptWalker.Util.Bytes.extract_append_right (ofVector nonce) c
-  simp only [CryptWalker.Util.Bytes.size_ofVector] at hext
-  rw [hsize, hext]
-  rw [← hc]
-  exact S.aead.decrypt_encrypt _ _ _ _
+  decode_encode_pub : ∀ pk, decodePublicKey (encodePublicKey pk) = some pk
 
-/-! ### Encapsulation and decapsulation -/
+  generate_derive : ∀ s pk sk s', generate s = .ok (pk, sk) s' → pk = derivePublicKey sk
 
-/-- Encrypt `payload` to every recipient. `none` if any Diffie-Hellman output is degenerate. -/
-def encapsulate (rand : Rand S) (keys : List {pk : S.nike.PublicKey // S.nike.Safe pk})
-    (payload : ByteArray) : Option (S.nike.PrivateKey × Ciphertext S) := do
-  let ephPriv := S.nike.privateKeyFromSeed rand.seed
-  let secrets ← keys.mapM (S.deriveKey ephPriv)
-  let msgKey := S.aead.keyFromBytes rand.msgKey
-  pure (ephPriv,
-    { ephPub := S.nike.derivePublicKey ephPriv
-      deks := (secrets.zip rand.dekNonces).map
-        (fun p => S.sealUnder p.1 p.2 (ofVector rand.msgKey))
-      envelope := S.sealUnder msgKey rand.envNonce payload })
+  /-- The ciphertext carries the public half of the private key `encapsulate` returns. -/
+  encapsulate_ephPub : ∀ keys payload s eph ct s',
+    encapsulate keys payload s = .ok (eph, ct) s' → ct.ephPub = derivePublicKey eph
 
-/-- Open a ciphertext with a recipient's private key: derive the shared key with the ephemeral
-public key, take the first DEK that opens, and open the envelope with the message key it holds. -/
-def decapsulate (sk : S.nike.PrivateKey) (ct : Ciphertext S) : Option ByteArray :=
-  if h : S.nike.Safe ct.ephPub then
-    match S.deriveKey sk ⟨ct.ephPub, h⟩ with
-    | none => none
-    | some k =>
-      match ct.deks.findSome? (fun d => S.unsealUnder k d) with
-      | none => none
-      | some msgKeyBytes =>
-        match S.keyOfBytes msgKeyBytes with
-        | none => none
-        | some msgKey => S.unsealUnder msgKey ct.envelope
-  else none
+  /-- The shape of a ciphertext: one DEK per recipient, each exactly `dekSize`, and an envelope
+  `envelopeOverhead` longer than the payload. Ciphertext length therefore leaks the payload length
+  and the number of recipients, and nothing else, which is what lets Pigeonhole fix its packet
+  size. -/
+  encapsulate_shape : ∀ keys payload s eph ct s',
+    encapsulate keys payload s = .ok (eph, ct) s' →
+      ct.deks.length = keys.length ∧ (∀ d ∈ ct.deks, d.size = dekSize) ∧
+        ct.envelope.size = payload.size + envelopeOverhead
 
-/-! ### Replies -/
+  /-- **A recipient recovers the payload.** If `encapsulate` succeeded, recipient `i`, holding the
+  private key of the `i`-th public key, decapsulates the ciphertext it is handed, the one carrying
+  only its own DEK. -/
+  decapsulate_encapsulate : ∀ keys payload s eph ct s',
+    encapsulate keys payload s = .ok (eph, ct) s' →
+      ∀ i (hi : i < keys.length) sk,
+        keys[i] = ⟨derivePublicKey sk, derive_safe sk⟩ →
+          decapsulate sk (ct.forRecipient i) = .ok payload
 
-/-- A recipient's reply, readable only by the holder of the sender's ephemeral private key. -/
-def envelopeReply (sk : S.nike.PrivateKey) (pub : {pk : S.nike.PublicKey // S.nike.Safe pk})
-    (nonce : Vector UInt8 S.aead.nonceSize) (pt : ByteArray) : Option ByteArray := do
-  let k ← S.deriveKey sk pub
-  pure (S.sealUnder k nonce pt)
+  /-- **Replies round-trip.** The sender, who kept the ephemeral private key `eph`, reads what
+  recipient `sk` sealed for it. -/
+  decryptEnvelope_envelopeReply : ∀ sk eph pt s env s',
+    envelopeReply sk ⟨derivePublicKey eph, derive_safe eph⟩ pt s = .ok env s' →
+      decryptEnvelope eph ⟨derivePublicKey sk, derive_safe sk⟩ env = .ok pt
 
-def decryptEnvelope (sk : S.nike.PrivateKey) (pub : {pk : S.nike.PublicKey // S.nike.Safe pk})
-    (envelope : ByteArray) : Option ByteArray := do
-  let k ← S.deriveKey sk pub
-  S.unsealUnder k envelope
-
-/-- **Replies round-trip.** The sender, who kept the ephemeral private key `eph`, reads what
-recipient `sk` sealed under `eph`'s public key. -/
-theorem decryptEnvelope_envelopeReply (eph sk : S.nike.PrivateKey)
-    (nonce : Vector UInt8 S.aead.nonceSize) (pt env : ByteArray)
-    (h : S.envelopeReply sk ⟨S.nike.derivePublicKey eph, S.nike.derive_safe eph⟩ nonce pt = some env) :
-    S.decryptEnvelope eph ⟨S.nike.derivePublicKey sk, S.nike.derive_safe sk⟩ env = some pt := by
-  unfold envelopeReply at h
-  unfold decryptEnvelope
-  rw [deriveKey_comm S eph sk]
-  cases hk : S.deriveKey sk ⟨S.nike.derivePublicKey eph, S.nike.derive_safe eph⟩ with
-  | none => rw [hk] at h; simp at h
-  | some k =>
-    rw [hk] at h
-    simp at h
-    subst h
-    simp [S.unsealUnder_sealUnder]
-
-/-- **A recipient recovers the payload.** If `encapsulate` succeeded with ephemeral key `eph`, then
-recipient `i`, holding the private key `sk` of the `i`-th public key, decapsulates to `payload`.
-
-`hcross` is the one thing assumed: no earlier recipient's DEK opens under recipient `i`'s shared key
-(trial decryption takes the first DEK that opens). That is AEAD authenticity, a computational
-property no field of `AEAD` can state. -/
-theorem decapsulate_encapsulate (rand : Rand S)
-    (keys : List {pk : S.nike.PublicKey // S.nike.Safe pk}) (payload : ByteArray)
-    (eph : S.nike.PrivateKey) (ct : Ciphertext S)
-    (henc : S.encapsulate rand keys payload = some (eph, ct))
-    (hlen : rand.dekNonces.length = keys.length)
-    (i : Nat) (hi : i < keys.length) (sk : S.nike.PrivateKey)
-    (hsk : keys[i] = ⟨S.nike.derivePublicKey sk, S.nike.derive_safe sk⟩)
-    (hcross : ∀ k, S.deriveKey eph keys[i] = some k →
-      ∀ j (hj : j < i) (hj' : j < ct.deks.length), S.unsealUnder k ct.deks[j] = none) :
-    S.decapsulate sk ct = some payload := by
-  unfold encapsulate at henc
-  cases hm : keys.mapM (S.deriveKey (S.nike.privateKeyFromSeed rand.seed)) with
-  | none => simp [hm] at henc
-  | some secrets =>
-    simp [hm] at henc
-    obtain ⟨heph, hct⟩ := henc
-    subst heph
-    subst hct
-    obtain ⟨hlenS, hget⟩ := mapM_getElem _ keys secrets hm
-    have hsecret := hget i hi
-    have hsi : i < secrets.length := hlenS ▸ hi
-    have hzip : (secrets.zip rand.dekNonces).length = secrets.length := by
-      simp [List.length_zip, hlenS, hlen]
-    have hdek : ∀ (hj : i < ((secrets.zip rand.dekNonces).map
-          (fun p => S.sealUnder p.1 p.2 (ofVector rand.msgKey))).length),
-        ((secrets.zip rand.dekNonces).map
-          (fun p => S.sealUnder p.1 p.2 (ofVector rand.msgKey)))[i]'hj
-          = S.sealUnder secrets[i] rand.dekNonces[i] (ofVector rand.msgKey) := by
-      intro hj
-      simp
-    have hkey : S.deriveKey sk ⟨S.nike.derivePublicKey (S.nike.privateKeyFromSeed rand.seed),
-        S.nike.derive_safe _⟩ = some secrets[i] := by
-      rw [S.deriveKey_comm sk, ← hsk]; exact hsecret
-    unfold decapsulate
-    rw [dif_pos (S.nike.derive_safe _)]
-    simp only []
-    rw [hkey]
-    simp only []
-    have hlt : i < ((secrets.zip rand.dekNonces).map
-        (fun p => S.sealUnder p.1 p.2 (ofVector rand.msgKey))).length := by
-      simp [hzip, hsi]
-    rw [findSome?_of_index (fun d => S.unsealUnder secrets[i] d) _ i hlt (ofVector rand.msgKey)
-      (fun j hj => hcross _ hsecret j hj (Nat.lt_trans hj hlt))
-      (by rw [hdek hlt]; exact S.unsealUnder_sealUnder _ _ _)]
-    have hk : S.keyOfBytes (ofVector rand.msgKey) = some (S.aead.keyFromBytes rand.msgKey) := by
-      unfold keyOfBytes
-      rw [if_pos (by simp), CryptWalker.Util.Bytes.toVecN_ofVector]
-    simp only [hk, S.unsealUnder_sealUnder]
-
-/-- The ciphertext carries the ephemeral public key of the private key `encapsulate` returns. -/
-theorem encapsulate_ephPub (rand : Rand S) (keys : List {pk : S.nike.PublicKey // S.nike.Safe pk})
-    (payload : ByteArray) (eph : S.nike.PrivateKey) (ct : Ciphertext S)
-    (h : S.encapsulate rand keys payload = some (eph, ct)) :
-    ct.ephPub = S.nike.derivePublicKey eph := by
-  unfold encapsulate at h
-  cases hm : keys.mapM (S.deriveKey (S.nike.privateKeyFromSeed rand.seed)) with
-  | none => simp [hm] at h
-  | some secrets =>
-    simp [hm] at h
-    obtain ⟨rfl, rfl⟩ := h
-    rfl
-
-/-- If decapsulation succeeds, the recipient did derive a shared key with the ephemeral key. -/
-theorem decapsulate_key (sk : S.nike.PrivateKey) (ct : Ciphertext S) (pt : ByteArray)
-    (h : S.decapsulate sk ct = some pt) :
-    ∃ hs : S.nike.Safe ct.ephPub, ∃ k, S.deriveKey sk ⟨ct.ephPub, hs⟩ = some k := by
-  unfold decapsulate at h
-  by_cases hs : S.nike.Safe ct.ephPub
-  · rw [dif_pos hs] at h
-    cases hk : S.deriveKey sk ⟨ct.ephPub, hs⟩ with
-    | none => rw [hk] at h; simp at h
-    | some k => exact ⟨hs, k, hk⟩
-  · rw [dif_neg hs] at h; simp at h
-
-end Scheme
+attribute [instance] MKEM.decSafe MKEM.stateI
 
 end CryptWalker.KEM.MKEM
