@@ -35,11 +35,23 @@ instance's key generation rather than part of this abstraction. Blinding becomes
 type and a single `sign` suffices.
 -/
 
+/-- **Which keys the laws speak about.** A blinded key is `f · pk`, computed on whatever point the
+bytes decode to. For an honestly derived key `pk = s · B` (`B` of prime order `ℓ`) scalars really
+do live in `ℤ_ℓ`, so `g · (f · pk) = (f g) · pk`. A hostile 32-byte string can decode to a point with
+a small-order component, and then it is false: on the order-2 point, `2 · (½ · pk)` is the identity
+while `1 · pk` is not. Likewise `f = 0` has no inverse. So `blind_assoc` and `blind_inv` are stated
+for `Valid` keys (`valid_pub`: every derived key is valid; `valid_blind`: blinding keeps validity) and
+`Invertible` factors. -/
 structure Blindable where
   base : Signature
 
   /-- Blinding factors. For Ed25519 this is `Z_ℓ`. -/
   Scalar : Type
+
+  /-- Public keys on which blinding obeys the laws below. -/
+  Valid : base.PublicKey → Prop
+  /-- Blinding factors that can be undone. -/
+  Invertible : Scalar → Prop
 
   /-- Composition of blinding factors. -/
   mul : Scalar → Scalar → Scalar
@@ -59,16 +71,22 @@ structure Blindable where
   multiplication. Everything interesting below follows from this one field. -/
   blind_hom : ∀ sk f, base.pub (blindPriv sk f) = blindPub (base.pub sk) f
 
+  /-- Every derived public key is valid. -/
+  valid_pub : ∀ sk, Valid (base.pub sk)
+
+  /-- Blinding a valid key gives a valid key. -/
+  valid_blind : ∀ pk f, Valid pk → Valid (blindPub pk f)
+
   /-- Blinding twice is blinding by the product. Tested in Go at
   `blinded25519_test.go:119-129`. -/
-  blind_assoc : ∀ pk f g, blindPub (blindPub pk f) g = blindPub pk (mul f g)
+  blind_assoc : ∀ pk, Valid pk → ∀ f g, blindPub (blindPub pk f) g = blindPub pk (mul f g)
 
   /-- Factors commute, so the order in which blindings are applied does not matter. Also
   tested at `blinded25519_test.go:119-129` (`f12 == f21`, `f123 == f213 == f321`). -/
   blind_comm : ∀ f g, mul f g = mul g f
 
   /-- Unblinding inverts blinding. Tested at `blinded25519_test.go:224-227`. -/
-  blind_inv : ∀ pk f, blindPub (blindPub pk f) (inv f) = pk
+  blind_inv : ∀ pk, Valid pk → ∀ f, Invertible f → blindPub (blindPub pk f) (inv f) = pk
 
 variable (B : Blindable)
 
@@ -93,17 +111,17 @@ two private keys need not be equal as terms — only the public keys they derive
 all any verifier can see. -/
 theorem blindPriv_assoc (sk : B.base.PrivateKey) (f g : B.Scalar) :
     B.base.pub (B.blindPriv (B.blindPriv sk f) g) = B.base.pub (B.blindPriv sk (B.mul f g)) := by
-  rw [B.blind_hom, B.blind_hom, B.blind_hom, B.blind_assoc]
+  rw [B.blind_hom, B.blind_hom, B.blind_hom, B.blind_assoc _ (B.valid_pub sk)]
 
 /-- Blinding and then unblinding a private key returns to the original public key. -/
-theorem blindPriv_inv (sk : B.base.PrivateKey) (f : B.Scalar) :
+theorem blindPriv_inv (sk : B.base.PrivateKey) (f : B.Scalar) (hf : B.Invertible f) :
     B.base.pub (B.blindPriv (B.blindPriv sk f) (B.inv f)) = B.base.pub sk := by
-  rw [B.blind_hom, B.blind_hom, B.blind_inv]
+  rw [B.blind_hom, B.blind_hom, B.blind_inv _ (B.valid_pub sk) f hf]
 
 /-- The order in which two blindings are applied is unobservable. -/
-theorem blindPub_swap (pk : B.base.PublicKey) (f g : B.Scalar) :
+theorem blindPub_swap (pk : B.base.PublicKey) (hpk : B.Valid pk) (f g : B.Scalar) :
     B.blindPub (B.blindPub pk f) g = B.blindPub (B.blindPub pk g) f := by
-  rw [B.blind_assoc, B.blind_assoc, B.blind_comm]
+  rw [B.blind_assoc pk hpk, B.blind_assoc pk hpk, B.blind_comm]
 
 /-- **Unlinkability** (Echomix §4.3): whenever blinding a public key `pk` is injective (any
 nonzero point of a prime-order group), a freshly drawn blinding factor hits each box ID in its
@@ -126,6 +144,8 @@ identity. Present only to witness inhabitation. -/
 instance : Inhabited Blindable := ⟨{
   base   := default
   Scalar := Unit
+  Valid  := fun _ => True
+  Invertible := fun _ => True
 
   mul := fun _ _ => ()
   inv := fun _ => ()
@@ -135,9 +155,11 @@ instance : Inhabited Blindable := ⟨{
   blindPub  := fun pk _ => pk
 
   blind_hom   := fun _ _ => rfl
-  blind_assoc := fun _ _ _ => rfl
+  valid_pub   := fun _ => trivial
+  valid_blind := fun _ _ _ => trivial
+  blind_assoc := fun _ _ _ _ => rfl
   blind_comm  := fun _ _ => rfl
-  blind_inv   := fun _ _ => rfl
+  blind_inv   := fun _ _ _ _ => rfl
 }⟩
 
 end CryptWalker.Sign.Blindable

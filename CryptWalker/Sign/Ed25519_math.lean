@@ -21,9 +21,11 @@ Mathlib does not currently provide an Edwards-curve group, so the affine twisted
 addition formula is written here. The field, inverses, powers, finite-width vectors, and
 decidable checks are all supplied by Mathlib.
 
-The final `Signature.verify_sign` field is an axiom: proving the complete RFC 8032 correctness
-theorem would require a substantial formalization of the Edwards formulas and the order-`l`
-subgroup. The operations themselves are executable and contain no assumed cryptographic primitive.
+The operations are executable and contain no assumed cryptographic primitive. Their correctness is
+proved elsewhere: `Ed25519_group` shows `add` is Curve25519's group law transported across the
+birational map, `Ed25519_order` that the basepoint has order `l`, and `Ed25519_verify` that
+`verifyNative (publicKey sk) m (signNative sk m) = true`, which is what `nativeSignature` (defined
+there) needs.
 -/
 
 abbrev p : Nat := CryptWalker.NIKE.X25519Common.p
@@ -141,32 +143,5 @@ def verifyNative (pk : Vector UInt8 32) (message : ByteArray) (sig : Vector UInt
         add (scalarMul 8 r) (scalarMul (8 * k) a))
     else false
   | _, _ => false
-
-axiom verify_signNative : ∀ sk m,
-  verifyNative (publicKey sk) m (signNative sk m) = true
-
-def nativeSignature : Signature where
-  State := Unit
-  PublicKey := Vector UInt8 32
-  PrivateKey := Vector UInt8 32
-  Sig := Vector UInt8 64
-  seedSize := 32
-  publicKeySize := 32
-  privateKeySize := 32
-  sigSize := 64
-  encodePublicKey := id
-  decodePublicKey := some
-  encodePrivateKey := id
-  decodePrivateKey := some
-  encodeSig := id
-  decodeSig := some
-  privateKeyFromSeed := id
-  pub := publicKey
-  sign := fun sk m => pure (signNative sk m)
-  verify := verifyNative
-  decode_encode_pub := fun _ => rfl
-  decode_encode_priv := fun _ => rfl
-  decode_encode_sig := fun _ => rfl
-  verify_sign := fun sk m _ => verify_signNative sk m
 
 end CryptWalker.Sign.Ed25519Math

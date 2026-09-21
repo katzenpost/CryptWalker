@@ -27,6 +27,10 @@ import CryptWalker.Sign.Ed25519_facts
 import CryptWalker.Sign.Ed25519_edwards
 import CryptWalker.Sign.Ed25519_identities
 import CryptWalker.Sign.Ed25519_group
+import CryptWalker.Sign.Ed25519_order
+import CryptWalker.Sign.Ed25519_scalar
+import CryptWalker.Sign.Ed25519_codec
+import CryptWalker.Sign.Ed25519_verify
 import CryptWalker.Sign.Ed25519_blinded
 import CryptWalker.Sign.Blindable
 import CryptWalker.Sign.Combiner
