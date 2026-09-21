@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import Mathlib.Data.ZMod.Basic
 import CryptWalker.Sign.Ed25519_math
+import CryptWalker.Sign.Ed25519_verify
 import CryptWalker.Sign.Blindable
 
 namespace CryptWalker.Sign.Ed25519Blinded
@@ -20,8 +21,14 @@ Concrete scalar-based Ed25519 operations matching hpqc's `blinded25519.go`: priv
 canonical scalars in `ZMod ell`, public keys are compressed Edwards points, and signing derives
 its nonce from `SHA-512(sk)[32:] || message || SHA-512(sk)[33:]`.
 
-The remaining laws are named assumptions because the affine Edwards group law has not yet been
-formalized. The operations below are executable.
+The operations are executable, and every law is a theorem: the Edwards group law is Curve25519's,
+transported (`Ed25519_group`), so `blindPub (publicKey s) f = publicKey (f * s)` is `mul_smul` plus
+`ℓ • G = 0` (`Ed25519_order`). The only assumption is `ell_prime`, that `ℓ = 2^252 +
+27742317777372353535851937790883648493` is prime (RFC 7748 §4.1 / RFC 8032 §5.1).
+
+The laws that need more than `blind_hom` hold for *valid* keys, those of the form `publicKey s`, and
+invertible (nonzero) factors; they are false on an arbitrary decodable point, which can carry a
+small-order component (see `Blindable`).
 -/
 
 abbrev Scalar : Type := ZMod ell
@@ -30,6 +37,7 @@ abbrev SigBytes : Type := Vector UInt8 64
 
 axiom ell_prime : Nat.Prime ell
 instance : Fact (Nat.Prime ell) := ⟨ell_prime⟩
+instance : NeZero ell := ⟨ell_prime.ne_zero⟩
 
 private def scalarBytes (s : Scalar) : Vector UInt8 32 :=
   Vector.ofFn fun i : Fin 32 => (s.val >>> (8 * i.val)).toUInt8
@@ -69,16 +77,93 @@ def blindPub (pk : PubBytes) (factor : Scalar) : PubBytes :=
 
 def inv (factor : Scalar) : Scalar := factor⁻¹
 
-axiom scalarOfBytes_scalarBytes (sk : Scalar) :
-  scalarOfBytes ⟨(scalarBytes sk).toArray⟩ = sk
-axiom verify_signNative : ∀ sk m, verifyNative (publicKey sk) m (signNative sk m) = true
+lemma ell_lt : ell < 256 ^ 32 := by unfold ell; norm_num
 
-axiom blind_hom : ∀ sk factor,
-  publicKey (blindPriv sk factor) = blindPub (publicKey sk) factor
-axiom blind_assoc : ∀ pk f g,
-  blindPub (blindPub pk f) g = blindPub pk (f * g)
-axiom blind_inv : ∀ pk f,
-  blindPub (blindPub pk f) (inv f) = pk
+private lemma decode_publicKey (s : Scalar) :
+    decodePoint (publicKey s) = some (scalarMul s.val basepoint) :=
+  CryptWalker.Sign.Ed25519Codec.decode_encode _ (CryptWalker.Sign.Ed25519Scalar.sm_base_onCurve _)
+
+/-- Blinding the public key of `s` is the public key of `f * s`. -/
+theorem blindPub_publicKey (s f : Scalar) : blindPub (publicKey s) f = publicKey (f * s) := by
+  unfold blindPub
+  rw [decode_publicKey]
+  simp only []
+  unfold publicKey
+  congr 1
+  rw [CryptWalker.Sign.Ed25519Scalar.sm_sm]
+  apply CryptWalker.Sign.Ed25519Scalar.sm_mod_eq
+  rw [ZMod.val_mul, Nat.mod_mod]
+
+theorem blind_hom : ∀ sk factor,
+    publicKey (blindPriv sk factor) = blindPub (publicKey sk) factor := by
+  intro sk factor
+  rw [blindPub_publicKey]; rfl
+
+/-- **RFC 8032 correctness of the scalar-based signer.** -/
+theorem verify_signNative : ∀ sk m, verifyNative (publicKey sk) m (signNative sk m) = true := by
+  intro sk m
+  have hell : 0 < ell := by unfold ell; norm_num
+  unfold signNative
+  simp only []
+  rw [CryptWalker.Sign.Ed25519Verify.sig_eq]
+  exact CryptWalker.Sign.Ed25519Verify.verify_of_parts (publicKey sk) _ m sk.val _ _ _ rfl rfl rfl
+    (Nat.mod_lt _ hell) (Nat.mod_mod _ _)
+
+/-- `ψ` is injective: `ψ P = ψ Q` makes `ψ (P + -Q)` the Edwards identity. -/
+lemma psi_injective {P Q : CryptWalker.Sign.Ed25519Group.W}
+    (h : CryptWalker.Sign.Ed25519Group.psi P = CryptWalker.Sign.Ed25519Group.psi Q) : P = Q := by
+  have h0 : CryptWalker.Sign.Ed25519Group.psi (P + -Q) = CryptWalker.Sign.Ed25519Math.zero := by
+    rw [CryptWalker.Sign.Ed25519Group.psi_add, CryptWalker.Sign.Ed25519Group.psi_neg, ← h]
+    exact CryptWalker.Sign.Ed25519Edwards.add_neg (CryptWalker.Sign.Ed25519Group.psi P) (CryptWalker.Sign.Ed25519Group.psi_onCurve P)
+  exact add_neg_eq_zero.mp (CryptWalker.Sign.Ed25519Scalar.eq_zero_of_psi_eq_zero h0)
+
+lemma G_ne_zero : CryptWalker.NIKE.X25519.G ≠ 0 := by
+  unfold CryptWalker.NIKE.X25519.G CryptWalker.NIKE.X25519.mkPoint
+  exact WeierstrassCurve.Affine.Point.some_ne_zero _
+
+/-- The basepoint has order exactly `ℓ`. -/
+lemma addOrderOf_G : addOrderOf CryptWalker.NIKE.X25519.G = ell := by
+  have hd := addOrderOf_dvd_of_nsmul_eq_zero CryptWalker.Sign.Ed25519Scalar.ell_smul_G
+  rcases (Nat.dvd_prime ell_prime).mp hd with h1 | h1
+  · exfalso
+    apply G_ne_zero
+    have := addOrderOf_nsmul_eq_zero CryptWalker.NIKE.X25519.G
+    rw [h1, one_nsmul] at this
+    exact this
+  · exact h1
+
+lemma smul_G_inj {a b : ℕ} (ha : a < ell) (hb : b < ell)
+    (h : a • CryptWalker.NIKE.X25519.G = b • CryptWalker.NIKE.X25519.G) : a = b := by
+  have := nsmul_eq_nsmul_iff_modEq.mp h
+  rw [addOrderOf_G] at this
+  exact this.eq_of_lt_of_lt ha hb
+
+theorem publicKey_injective : Function.Injective publicKey := by
+  intro a b h
+  unfold publicKey at h
+  have hab := congrArg CryptWalker.Sign.Ed25519Math.decodePoint h
+  rw [CryptWalker.Sign.Ed25519Codec.decode_encode _ (CryptWalker.Sign.Ed25519Scalar.sm_base_onCurve _),
+    CryptWalker.Sign.Ed25519Codec.decode_encode _ (CryptWalker.Sign.Ed25519Scalar.sm_base_onCurve _)] at hab
+  have hpt := Option.some.inj hab
+  rw [CryptWalker.Sign.Ed25519Scalar.sm_base, CryptWalker.Sign.Ed25519Scalar.sm_base] at hpt
+  exact ZMod.val_injective ell (smul_G_inj (ZMod.val_lt a) (ZMod.val_lt b) (psi_injective hpt))
+
+/-- Blinding a nonzero root key by different factors gives different box IDs. -/
+theorem blindPub_injective (s : Scalar) (hs : s ≠ 0) :
+    Function.Injective (blindPub (publicKey s)) := by
+  intro f g h
+  rw [blindPub_publicKey, blindPub_publicKey] at h
+  exact mul_right_cancel₀ hs (publicKey_injective h)
+
+
+/-- A private key is its 32 little-endian bytes, and back. -/
+private def scalarOfLE (bytes : Vector UInt8 32) : Scalar := ((bytesToNat bytes.toList : ℕ) : Scalar)
+
+private lemma scalarOfLE_scalarBytes (sk : Scalar) : scalarOfLE (scalarBytes sk) = sk := by
+  unfold scalarOfLE scalarBytes
+  rw [CryptWalker.Sign.Ed25519Codec.bytesToNat_ofFn, Nat.mod_eq_of_lt
+    (lt_trans (ZMod.val_lt sk) ell_lt)]
+  exact ZMod.natCast_zmod_val sk
 
 def signature : Signature where
   State := Unit
@@ -92,7 +177,7 @@ def signature : Signature where
   encodePublicKey := id
   decodePublicKey := some
   encodePrivateKey := scalarBytes
-  decodePrivateKey := fun bytes => some (scalarOfBytes ⟨bytes.toArray⟩)
+  decodePrivateKey := fun bytes => some (scalarOfLE bytes)
   encodeSig := id
   decodeSig := some
   privateKeyFromSeed := scalarFromSeed
@@ -100,21 +185,35 @@ def signature : Signature where
   sign := fun sk m => pure (signNative sk m)
   verify := verifyNative
   decode_encode_pub := fun _ => rfl
-  decode_encode_priv := fun sk => congrArg some (scalarOfBytes_scalarBytes sk)
+  decode_encode_priv := fun sk => congrArg some (scalarOfLE_scalarBytes sk)
   decode_encode_sig := fun _ => rfl
   verify_sign := fun sk m _ => verify_signNative sk m
 
 def blindable : Blindable where
   base := signature
   Scalar := Scalar
+  Valid := fun pk => ∃ s : Scalar, pk = publicKey s
+  Invertible := fun f => f ≠ 0
+  Regular := fun pk => ∃ s : Scalar, s ≠ 0 ∧ pk = publicKey s
   mul := (· * ·)
   inv := inv
   scalarOfBytes := scalarOfBytes
   blindPriv := blindPriv
   blindPub := blindPub
   blind_hom := blind_hom
-  blind_assoc := blind_assoc
+  valid_pub := fun sk => ⟨sk, rfl⟩
+  valid_blind := fun _ f ⟨s, hs⟩ => ⟨f * s, by rw [hs, blindPub_publicKey]⟩
+  blind_assoc := fun _ ⟨s, hs⟩ f g => by
+    subst hs
+    rw [blindPub_publicKey, blindPub_publicKey, blindPub_publicKey]
+    exact congrArg publicKey (by ring)
   blind_comm := mul_comm
-  blind_inv := blind_inv
+  blind_inv := fun _ ⟨s, hs⟩ f hf => by
+    subst hs
+    rw [blindPub_publicKey, blindPub_publicKey]
+    exact congrArg publicKey (inv_mul_cancel_left₀ hf s)
+  blind_injective := fun _ ⟨s, hs, e⟩ => by
+    subst e
+    exact blindPub_injective s hs
 
 end CryptWalker.Sign.Ed25519Blinded

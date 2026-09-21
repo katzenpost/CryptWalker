@@ -25,12 +25,19 @@ open CryptWalker.BACAP.Ratchet
 open CryptWalker.Hash.HKDF
 open CryptWalker.Sign.Blindable
 open CryptWalker.Cipher.AEAD
+open OracleComp OracleSpec ENNReal
 
 /-- Abstract BACAP protocol structure. -/
 structure BACAPSpec where
   blindable : Blindable
   hkdf      : HKDF
   aead      : AEAD
+
+  /-- The blinding factors can be sampled uniformly. Instance fields, as in
+  `NIKESphinxScheme`: they are what `unlinkable` below is stated over. -/
+  [scalarFintype : Fintype blindable.Scalar]
+  [scalarSampleable : SampleableType blindable.Scalar]
+  [pubDecEq : DecidableEq blindable.base.PublicKey]
 
   /-- Derive the per-box public key from a root public key, ratchet state, and context.
       The box ID is `blindPub(rootPub, K_i^ctx)`. -/
@@ -77,5 +84,17 @@ structure BACAPSpec where
     decryptBox boxId idx ctx ct sig = some pt →
     ct.size > 0 →
     (encryptBox sk pk idx ctx pt).2.1 = ct
+
+  /-- **Unlinkability** (Echomix §4.3), under the idealization that blinding factors are truly
+  random: for a regular root key `pk`, a freshly drawn blinding factor produces each key in the
+  orbit of `pk` with probability exactly `1/|Scalar|`, whichever root secret `pk` came from. That
+  is `δ = 0` in the paper's game (`BACAP.Unlinkability` has the two-box form). Free for every
+  instance, like `NIKESphinxScheme.wrap_resistant`: it is `uniformHit_eq_of_injective` applied to
+  `blindable.blind_injective`, which is the only thing a scheme has to supply. -/
+  unlinkable : ∀ pk, blindable.Regular pk → ∀ target, target ∈ Set.range (blindable.blindPub pk) →
+      Pr[= true | ($ᵗ blindable.Scalar) >>=
+          fun f => pure (decide (blindable.blindPub pk f = target))] =
+        (Fintype.card blindable.Scalar : ℝ≥0∞)⁻¹ :=
+    fun pk hpk _ ht => CryptWalker.Sign.Blindable.blind_unlinkable blindable pk hpk ht
 
 end CryptWalker.BACAP.Protocol

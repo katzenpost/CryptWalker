@@ -14,16 +14,15 @@ open CryptWalker.Sign.Schemes
 
 /-! # Elaboration and axiom audit
 
-Deliberately *not* an executable. Every definition reachable from `Schemes` is `noncomputable`,
-so there is nothing to run; what this module does instead is force the compositions to
-elaborate and make the trusted surface visible.
+Deliberately *not* an executable. What this module does is force the compositions to elaborate and
+make the trusted surface visible.
 
 The `#print axioms` lines below are the important part, and each is pinned with `#guard_msgs`
 so that a change to the trusted surface fails the build rather than scrolling past in it. The
-first three must show only standard kernel axioms: they are derived from `Blindable`'s fields
-and must not depend on anything Ed25519-specific. The last two enumerate exactly what the
-axiomatized instances assume, so the assumptions can be audited and struck off one by one as
-real primitives arrive. When an axiom does go, delete it from the expected list here too.
+first three must show only standard kernel axioms: they are derived from `Blindable`'s fields and
+must not depend on anything Ed25519-specific. The last two are the concrete instances, and they
+may assume exactly two things: `X25519.p_prime` and `Ed25519Blinded.ell_prime`, that the field
+prime `2^255 - 19` and the group order `ℓ` are prime. Every other law of Ed25519 is a theorem.
 -/
 
 /-- info: 'CryptWalker.Sign.Blindable.verify_blinded' does not depend on any axioms -/
@@ -39,19 +38,11 @@ real primitives arrive. When an axiom does go, delete it from the expected list 
 #print axioms CryptWalker.Sign.Convert.converted_pub_safe
 
 /--
-info: 'CryptWalker.Sign.Schemes.ed25519Blindable' depends on axioms: [blindPubBytes,
- blindPub_assoc,
- blindPub_hom,
- blindPub_inv,
- invScalar,
- mulScalar,
- mulScalar_comm,
- pubOf,
- scalarFromSeed,
- scalarOfByteArray,
- signWith,
- verifyWith,
- verify_signWith]
+info: 'CryptWalker.Sign.Schemes.ed25519Blindable' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ NIKE.X25519.p_prime,
+ Ed25519Blinded.ell_prime]
 -/
 #guard_msgs in
 #print axioms CryptWalker.Sign.Schemes.ed25519Blindable
@@ -60,11 +51,8 @@ info: 'CryptWalker.Sign.Schemes.ed25519Blindable' depends on axioms: [blindPubBy
 info: 'CryptWalker.Sign.Schemes.ed25519Hybrid' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
- pubOf,
- scalarFromSeed,
- signWith,
- verifyWith,
- verify_signWith]
+ NIKE.X25519.p_prime,
+ Ed25519Blinded.ell_prime]
 -/
 #guard_msgs in
 #print axioms CryptWalker.Sign.Schemes.ed25519Hybrid

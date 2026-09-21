@@ -6,6 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import VCVio.CryptoFoundations.HardnessAssumptions.DiffieHellman
 import CryptWalker.NIKE.X25519
 import CryptWalker.Sphinx.nike_sphinx
+import CryptWalker.Util.UniformHit
 
 /-! # Wrap-resistance (§4.3)
 
@@ -15,7 +16,7 @@ still cannot force processing `(α, x)` to yield exactly that `α′`: each quer
 single query hits `α′` with probability exactly `1/(q−1)` (`c` queries: at most `c/(q−1)`, by a
 union bound — the general `c`-query case isn't built here, only the `c = 1` base case).
 
-`NIKESphinx.uniformHit_eq` is that argument with the group erased: any bijection composed with a
+`Util.UniformHit.uniformHit_eq` is that argument with the group erased: any bijection composed with a
 uniform sample hits a fixed target with probability `1/|domain|`. `blind_wrapResistance` instantiates
 it for `X25519.lean`'s group.
 
@@ -27,7 +28,7 @@ formalized here. -/
 namespace CryptWalker.Sphinx.WrapResistance
 
 open OracleComp OracleSpec ENNReal
-open CryptWalker.Sphinx.NIKESphinx (uniformHit_eq)
+open CryptWalker.Util.UniformHit (uniformHit_eq)
 
 /-! ## Sphinx's blinding step, for X25519 -/
 

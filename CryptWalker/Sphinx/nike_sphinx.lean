@@ -23,6 +23,7 @@ import CryptWalker.NIKE.NIKE
 import CryptWalker.NIKE.Schemes
 import CryptWalker.Hash.Sha512
 import CryptWalker.Util.Bytes
+import CryptWalker.Util.UniformHit
 
 namespace CryptWalker.Sphinx.NIKESphinx
 
@@ -42,6 +43,7 @@ open CryptWalker.NIKE.NIKE (NIKE telescopeElem telescopeSecret telescope_agree)
 open CryptWalker.Hash.Sha512 (sha512_256)
 open CryptWalker.Util.Bytes (ofVector extract_append_le extract_append_of_le extract_append_of_ge
   extract_append_left extract_append_right append_extract)
+open CryptWalker.Util.UniformHit (uniformHit_eq)
 
 /-! # NIKE-Sphinx scheme type
 
@@ -51,21 +53,6 @@ re-blindable-envelope structure (`Envelope`/`Factor`/`blind`/`wrap_resistant`/`e
 `newNIKEPacket`/`wrapNIKE`/`unwrapNIKE`, every supporting lemma, the completeness proof
 (`wrapNIKE_unwrapNIKE_complete_valid`), and the builders (`nikeSphinxCore`/`nikeSphinxSchemeOf`/
 `nikeSphinxScheme`) that actually construct one of these. -/
-
-/-- A uniformly sampled `b : F`, pushed through a bijection `act`, hits any fixed `target` with
-probability `1/|F|`. The mathematical core of wrap-resistance's single-query case: `act` is
-"blind by this freshly drawn factor," `target` the header an adversary is trying to forge. -/
-theorem uniformHit_eq {F G : Type} [Fintype F] [SampleableType F] [DecidableEq G]
-    {act : F → G} (hact : Function.Bijective act) (target : G) :
-    Pr[= true | ($ᵗ F) >>= fun b => pure (decide (act b = target))] =
-      (Fintype.card F : ℝ≥0∞)⁻¹ := by
-  obtain ⟨b₀, rfl⟩ := hact.surjective target
-  simp only [probOutput_bind_eq_tsum, probOutput_uniformSample, probOutput_pure]
-  rw [tsum_fintype, Finset.sum_eq_single b₀]
-  · simp
-  · intro b _ hne
-    simp [show act b ≠ act b₀ from fun heq => hne (hact.injective heq)]
-  · exact absurd (Finset.mem_univ b₀)
 
 /-- A `Sphinx` scheme whose header carries a re-blindable public-key element: `Envelope` is that
 element's type (`parseEnvelope` extracts it from a packet), `Factor` the space a fresh blinding
