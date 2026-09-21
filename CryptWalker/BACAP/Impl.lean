@@ -147,6 +147,17 @@ noncomputable def bacapSpec : BACAPSpec where
     rw [← blind_hom]
     exact verify_signNative (blindPriv sk (getBlindScalar idx ctx)) ct
 
+  encrypt_boxid := fun _ _ _ _ _ => rfl
+
+  encrypt_verify := fun (sk : Scalar) (pk : PubBytes) (idx : MessageBoxIndex)
+      (ctx pt : ByteArray) (hpk : pk = publicKey sk) => by
+    show verifyNative (implEncryptBox sk pk idx ctx pt).1 (implEncryptBox sk pk idx ctx pt).2.1
+      (implEncryptBox sk pk idx ctx pt).2.2 = true
+    unfold implEncryptBox implDeriveBoxID implSignBox
+    dsimp only []
+    rw [hpk, ← blind_hom]
+    exact verify_signNative _ _
+
   decrypt_encrypt := fun (sk : Scalar) (pk : PubBytes) (idx : MessageBoxIndex)
       (ctx pt : ByteArray) (hpk : pk = publicKey sk) => by
     show implDecryptBox (implEncryptBox sk pk idx ctx pt).1 idx ctx
