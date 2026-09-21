@@ -83,7 +83,7 @@ def encodePoint (q : Point) : Vector UInt8 32 :=
   let signed := ys ||| ((q.x.val % 2) <<< 255)
   Vector.ofFn fun i : Fin 32 => (signed >>> (8 * i.val)).toUInt8
 
-private def powAux (base : F) (e : Nat) : F :=
+def powAux (base : F) (e : Nat) : F :=
   if _h : e = 0 then 1
   else
     let half := powAux (base * base) (e / 2)
