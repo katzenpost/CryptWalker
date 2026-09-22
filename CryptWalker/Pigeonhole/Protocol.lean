@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import CryptWalker.Pigeonhole.Replica
-import CryptWalker.KEM.MKEM
+import CryptWalker.MKEM.MKEM
 import CryptWalker.BACAP.Protocol
 
 /-! # Pigeonhole: a client talking to a replica, end to end
@@ -37,7 +37,7 @@ can do; that is the threat-model side. -/
 namespace CryptWalker.Pigeonhole.Protocol
 
 open CryptWalker.Sign.Sign (Signature)
-open CryptWalker.KEM.MKEM (MKEM MKEMError Ciphertext)
+open CryptWalker.MKEM.MKEM (MKEM MKEMError Ciphertext)
 open CryptWalker.Pigeonhole.Replica
 open CryptWalker.BACAP.Protocol (BACAPSpec)
 

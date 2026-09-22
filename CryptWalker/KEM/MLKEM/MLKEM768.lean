@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.KEM.MLKEM768Encoding
+import CryptWalker.KEM.MLKEM.MLKEM768Encoding
 import CryptWalker.KEM.KEM
 import LatticeCrypto.MLKEM.KPKE
 

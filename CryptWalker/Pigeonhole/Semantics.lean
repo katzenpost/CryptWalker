@@ -32,7 +32,7 @@ namespace CryptWalker.Pigeonhole.Semantics
 
 open Cslib Cslib.LTS
 open CryptWalker.Sign.Sign (Signature)
-open CryptWalker.KEM.MKEM (MKEM)
+open CryptWalker.MKEM.MKEM (MKEM)
 open CryptWalker.Pigeonhole.Replica
 open CryptWalker.Pigeonhole.Protocol
 

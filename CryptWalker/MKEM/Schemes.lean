@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.KEM.MKEMAdapter
+import CryptWalker.MKEM.Adapter
 import CryptWalker.NIKE.X25519
 import CryptWalker.Cipher.AESGCMSIV
 import CryptWalker.Hash.Hash
@@ -19,7 +19,7 @@ CTIDH1024-X25519 hybrid NIKE (`kem/mkem/testdata/mkem.json` covers only that). C
 neither CTIDH nor Poly1305, so there are no vectors to check this against; when both exist,
 instantiate `mkemOfNike` with them and run the vector file. -/
 
-namespace CryptWalker.KEM.MKEMSchemes
+namespace CryptWalker.MKEM.Schemes
 
 open CryptWalker.Hash.Hash (Hash)
 
@@ -38,8 +38,8 @@ open CryptWalker.Hash.Hash (Hash)
   update_append := fun _ _ _ => ByteArray.append_assoc
 
 /-- MKEM over X25519, AES-256-GCM-SIV and BLAKE2b-256. -/
-def mkemX25519 : CryptWalker.KEM.MKEM.MKEM :=
-  CryptWalker.KEM.MKEMAdapter.mkemOfNike CryptWalker.NIKE.X25519.Scheme
+def mkemX25519 : CryptWalker.MKEM.MKEM.MKEM :=
+  CryptWalker.MKEM.Adapter.mkemOfNike CryptWalker.NIKE.X25519.Scheme
     CryptWalker.Cipher.AESGCMSIV.Scheme blake2b256Scheme rfl
 
-end CryptWalker.KEM.MKEMSchemes
+end CryptWalker.MKEM.Schemes

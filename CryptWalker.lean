@@ -21,9 +21,12 @@ import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Schemes
 import CryptWalker.KEM.Combiner
-import CryptWalker.KEM.MKEM
-import CryptWalker.KEM.MKEMAdapter
-import CryptWalker.KEM.MKEMSchemes
+import CryptWalker.MKEM.MKEM
+import CryptWalker.MKEM.Adapter
+import CryptWalker.MKEM.Schemes
+import CryptWalker.MultiRecipientHybrid.MultiRecipientHybrid
+import CryptWalker.MultiRecipientHybrid.Adapter
+import CryptWalker.MultiRecipientHybrid.Schemes
 import CryptWalker.Sign.Sign
 import CryptWalker.Sign.Ed25519_math
 import CryptWalker.Sign.Ed25519_facts

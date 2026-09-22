@@ -5,7 +5,7 @@ import CryptWalker.NIKE.NIKE
 import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Combiner
-import CryptWalker.KEM.MLKEM768
+import CryptWalker.KEM.MLKEM.MLKEM768
 import CryptWalker.Hash.Sha2
 import CryptWalker.Hash.Blake2b
 import CryptWalker.MAC.HMAC

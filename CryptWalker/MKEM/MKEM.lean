@@ -42,7 +42,7 @@ Randomness lives in `State` and `EStateM`, as `KEM.encap` does; the deterministi
 `courier_envelope` carries the pieces as separate fixed-size fields), so there is no ciphertext
 codec here. -/
 
-namespace CryptWalker.KEM.MKEM
+namespace CryptWalker.MKEM.MKEM
 
 /-- What can go wrong, following `hpqc`'s sentinel errors plus the `Safe` gate `NIKE` carries. -/
 inductive MKEMError where
@@ -146,4 +146,4 @@ structure MKEM where
 
 attribute [instance] MKEM.decSafe MKEM.stateI
 
-end CryptWalker.KEM.MKEM
+end CryptWalker.MKEM.MKEM

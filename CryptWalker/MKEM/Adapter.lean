@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.KEM.MKEM
+import CryptWalker.MKEM.MKEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.NIKE.NIKE
 import CryptWalker.Cipher.AEAD
@@ -41,9 +41,9 @@ ciphertext. It needs `hcross`, that no earlier DEK opens under this recipient's 
 authenticity and so cannot be a law of `MKEM` (see there); the law that is a field is stated for the
 per-recipient ciphertext. -/
 
-namespace CryptWalker.KEM.MKEMAdapter
+namespace CryptWalker.MKEM.Adapter
 
-open CryptWalker.KEM.MKEM
+open CryptWalker.MKEM.MKEM
 open CryptWalker.NIKE.NIKE (NIKE)
 open CryptWalker.Cipher.AEAD (AEAD)
 open CryptWalker.Hash.Hash (Hash)
@@ -501,4 +501,4 @@ def mkemOfNike (nike : NIKE) (aead : AEAD) (hash : Hash) (h : hash.digestSize = 
     MKEM :=
   ofBase ⟨nike, aead, hash, h⟩
 
-end CryptWalker.KEM.MKEMAdapter
+end CryptWalker.MKEM.Adapter
