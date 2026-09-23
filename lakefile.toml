@@ -36,7 +36,7 @@ name = "CryptWalker.NIKE.test"
 name = "CryptWalker.KEM.test"
 
 [[lean_exe]]
-name = "CryptWalker.NIKE.benchmark"
+name = "CryptWalker.Bench.benchmark"
 [[lean_exe]]
 name = "CryptWalker.KEM.vectors"
 
@@ -87,9 +87,6 @@ name = "CryptWalker.Sphinx.gen_nike_vectors"
 
 [[lean_exe]]
 name = "CryptWalker.Sphinx.gen_kem_vectors"
-
-[[lean_exe]]
-name = "CryptWalker.Sphinx.benchmark"
 
 [[lean_exe]]
 name = "CryptWalker.KEM.MLKEM.mlkem768_test"

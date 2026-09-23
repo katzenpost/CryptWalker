@@ -41,11 +41,11 @@ TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 # Bare `lake build` builds only defaultTargets, which is the library. The
 # executables have to be named or the test targets run whatever binary was left
 # in .lake/build/bin by an earlier build.
-EXES := $(TESTS) CryptWalker.NIKE.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.Sphinx.benchmark CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors
+EXES := $(TESTS) CryptWalker.Bench.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors
 
 .DEFAULT_GOAL := help
 
-.PHONY: all build test bench bench-sphinx sorries clean help
+.PHONY: all build test bench bench-nike bench-kem bench-sphinx sorries clean help
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors test-mlkem test-mlkem-kat test-hybrid-sphinx
@@ -137,11 +137,24 @@ test-mlkem-kat: build ## ML-KEM-768: NIST ACVP known-answer vectors only
 test-hybrid-sphinx: build ## KEM-Sphinx round-trip self-test for the X25519+ML-KEM-768 hybrid only
 	@$(BIN)/CryptWalker-Sphinx-kem_selftest mlkem768-x25519-kem
 
-bench: build ## run the NIKE benchmarks
-	@$(BIN)/CryptWalker-NIKE-benchmark
+# Extra LeanBench flags, e.g. `make bench BENCH_ARGS='--match "unwrap mlkem768-kem" --samples 5'`.
+BENCH_ARGS ?=
 
-bench-sphinx: build ## run the Sphinx packet-creation/unwrap benchmarks (all 4 schemes x 3 payload sizes)
-	@$(BIN)/CryptWalker-Sphinx-benchmark
+# Quiet: otherwise Lake replays LeanBench's missing-docstring warnings and VCVio's native-backend
+# notices on every run.
+BENCH := $(LAKE) -q --log-level=error exe CryptWalker.Bench.benchmark
+
+bench: ## run every benchmark (NIKE, KEM, Sphinx); pass LeanBench flags via BENCH_ARGS
+	@$(BENCH) $(BENCH_ARGS)
+
+bench-nike: ## benchmark every registered NIKE
+	@$(BENCH) --suite nike $(BENCH_ARGS)
+
+bench-kem: ## benchmark every registered KEM (generate/encap/decap)
+	@$(BENCH) --suite kem $(BENCH_ARGS)
+
+bench-sphinx: ## benchmark Sphinx packet creation and unwrap for every scheme
+	@$(BENCH) --suite sphinx $(BENCH_ARGS)
 
 sorries: ## list every declaration still standing on sorry
 	@$(LAKE) build 2>&1 | grep 'declaration uses' | sort -u || echo "no sorries"

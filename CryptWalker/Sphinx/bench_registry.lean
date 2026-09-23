@@ -14,7 +14,7 @@ open CryptWalker.KEM.KEM (KEM)
 /-! # The Sphinx benchmark-case registry
 
 Distinct from `Sphinx.Schemes` (which registry name resolves to which crypto scheme) — this is
-which scheme × payload size × hop count `benchmark.lean` actually times, mirroring the *shape* of
+which scheme × payload size × hop count `Bench/Sphinx.lean` actually times, mirroring the *shape* of
 katzenpost's own `benchmarks []struct{...}` table in `sphinx_benchmark_test.go`, not its content
 (that table spans ~19 schemes across NIKE/KEM/hybrid/PQ; this project only ever ported X25519, so
 every entry here is one of `NIKE.registry`/`KEM.registry`'s two entries each). Built directly from

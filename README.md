@@ -216,19 +216,20 @@ reports a clean pass/fail.
 
 ## benchmarks: how to run the benchmark tests
 
+One [LeanBench](https://github.com/alok/LeanBench) executable benchmarks every registered NIKE,
+every KEM (generate/encap/decap), and Sphinx packet creation/unwrap for every scheme:
+
 ```bash
-lake exe CryptWalker.NIKE.benchmark
-lake exe CryptWalker.Sphinx.benchmark
+make bench                                                  # everything
+make bench-nike                                             # one suite: bench-nike, bench-kem, bench-sphinx
+make bench BENCH_ARGS=--list                                # every bench's name
+make bench BENCH_ARGS='--match "kem mlkem768-kem decap"'    # one specific bench
 ```
 
-The first times both X25519 implementations (Montgomery ladder and group) on fresh random keys,
-so they're directly comparable to each other. The second times Sphinx packet creation and
-first-hop unwrap for every registered scheme. No numbers here — they depend entirely on the
-machine it's run on.
-
-Both are built on [LeanBench](https://github.com/alok/LeanBench), so its CLI flags go straight
-after the executable, e.g. `lake exe CryptWalker.Sphinx.benchmark --tags unwrap --samples 10` or
-`--format json --save baseline.json` then `--compare baseline.json`.
+Any LeanBench flag works in `BENCH_ARGS`: e.g. `--samples 5`, `--tags unwrap`, or
+`--save baseline.json` then `--compare baseline.json`. To call Lake directly, use
+`lake -q --log-level=error exe CryptWalker.Bench.benchmark ...`; without those flags Lake replays
+build warnings from our dependencies first. No numbers here — they depend entirely on the machine.
 
 ## licensing
 
