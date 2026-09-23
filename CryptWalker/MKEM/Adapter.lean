@@ -306,7 +306,7 @@ theorem decapsulateP_encapsulateP_full (rand : Rand S)
     (i : Nat) (hi : i < keys.length) (sk : S.nike.PrivateKey)
     (hsk : keys[i] = ⟨S.nike.derivePublicKey sk, S.nike.derive_safe sk⟩)
     (hcross : ∀ k, S.deriveKey eph keys[i] = some k →
-      ∀ j (hj : j < i) (hj' : j < ct.deks.length), S.unsealUnder k ct.deks[j] = none) :
+      ∀ j (_hj : j < i) (hj' : j < ct.deks.length), S.unsealUnder k ct.deks[j] = none) :
     S.decapsulateP sk ct = some payload := by
   obtain ⟨rfl, secrets, hm, rfl⟩ := S.encapsulateP_spec rand keys payload eph ct henc
   obtain ⟨hlenS, hget⟩ := mapM_getElem _ keys secrets hm

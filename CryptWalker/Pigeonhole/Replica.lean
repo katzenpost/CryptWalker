@@ -96,6 +96,7 @@ def step (boxSize : Nat) (s : Store Sg) : Request Sg → Store Sg × Reply Sg
 def Valid (s : Store Sg) : Prop :=
   ∀ id e, s id = some e → Sg.verify id e.payload e.sig = true
 
+omit [DecidableEq Sg.PublicKey] in
 theorem valid_empty : Valid (Store.empty : Store Sg) := by
   intro id e h; simp [Store.empty] at h
 

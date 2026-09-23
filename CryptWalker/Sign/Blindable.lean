@@ -8,6 +8,8 @@ import CryptWalker.Util.UniformHit
 
 namespace CryptWalker.Sign.Blindable
 
+set_option linter.dupNamespace false
+
 open CryptWalker.Sign.Sign
 open CryptWalker.Util.UniformHit (uniformHit_eq_of_injective)
 open OracleComp OracleSpec ENNReal
