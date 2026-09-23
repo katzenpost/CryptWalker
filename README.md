@@ -215,11 +215,17 @@ reports a clean pass/fail.
 
 ```bash
 lake exe CryptWalker.NIKE.benchmark
+lake exe CryptWalker.Sphinx.benchmark
 ```
 
-Times both X25519 implementations (Montgomery ladder and group) over the same random keys, so
-they're directly comparable to each other. No numbers here — they depend entirely on the
+The first times both X25519 implementations (Montgomery ladder and group) on fresh random keys,
+so they're directly comparable to each other. The second times Sphinx packet creation and
+first-hop unwrap for every registered scheme. No numbers here — they depend entirely on the
 machine it's run on.
+
+Both are built on [LeanBench](https://github.com/alok/LeanBench), so its CLI flags go straight
+after the executable, e.g. `lake exe CryptWalker.Sphinx.benchmark --tags unwrap --samples 10` or
+`--format json --save baseline.json` then `--compare baseline.json`.
 
 ## licensing
 

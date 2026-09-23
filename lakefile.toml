@@ -7,8 +7,8 @@ autoImplicit = false
 relaxedAutoImplicit = false
 
 [[require]]
-name = "Bench"
-git = "https://github.com/david415/bench"
+name = "LeanBench"
+git = "https://github.com/alok/LeanBench"
 rev = "main"
 
 [[require]]

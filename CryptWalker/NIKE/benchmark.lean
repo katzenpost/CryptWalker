@@ -6,8 +6,7 @@ import CryptWalker.NIKE.Schemes
 import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 
-import Bench
-open Bench
+import LeanBench
 
 open CryptWalker.Util.newhex
 open CryptWalker.NIKE.NIKE
@@ -24,53 +23,25 @@ def genkey : IO (Vector UInt8 keySize) := do
   else
     throw (IO.userError "genkey produced wrong length")
 
-/-- The ladder implementation (`X25519_montgomery_ladder.curve25519`). -/
-def benchmarkCurve25519ECDH_Ladder : IO Unit := do
-  let mut b := Bench.new
+def benchConfig : LeanBench.BenchConfig := { suite := some "nike", samples := 1000, warmup := 10 }
 
-  let privkey ← genkey
-  let pubkey := fromField (scalarmult privkey basepoint)
-  let mut privkeys : List (Vector UInt8 keySize) := []
+/-- A fresh private key is drawn before each sample, outside the timed region; only `f` is timed. -/
+def ecdhBench {α : Type} (name : String) (f : Vector UInt8 keySize → Vector UInt8 keySize → α) :
+    IO LeanBench.Bench := do
+  let pubkey := fromField (scalarmult (← genkey) basepoint)
+  let sk ← IO.mkRef (← genkey)
+  let out ← IO.mkRef (none : Option α)
+  pure {
+    name
+    config := benchConfig
+    beforeEach? := some (do sk.set (← genkey))
+    action := do out.set (some (f (← sk.get) pubkey))
+  }
 
-  for _ in (List.range b.N) do
-    let key ← genkey
-    privkeys := privkeys ++ [key]
-
-  let mut results := Array.replicate 1000 (Vector.replicate keySize (0 : UInt8))
-  let mut i := 0
-  for sk in privkeys do
-    b ← b.start
-    let result := curve25519 sk pubkey
-    b ← b.stop
-    results := results.set! i result
-    i := i + 1
-
-  b.report "benchmarkCurve25519ECDH_Ladder"
-
-/-- The group implementation (`X25519.x25519`), same RFC 7748 signature as the ladder's
-`curve25519`, so the two are directly comparable. -/
-def benchmarkCurve25519ECDH_Group : IO Unit := do
-  let mut b := Bench.new
-
-  let privkey ← genkey
-  let pubkey := fromField (scalarmult privkey basepoint)
-  let mut privkeys : List (Vector UInt8 keySize) := []
-
-  for _ in (List.range b.N) do
-    let key ← genkey
-    privkeys := privkeys ++ [key]
-
-  let mut results := Array.replicate 1000 (none : Option (Vector UInt8 keySize))
-  let mut i := 0
-  for sk in privkeys do
-    b ← b.start
-    let result := CryptWalker.NIKE.X25519.x25519 sk pubkey
-    b ← b.stop
-    results := results.set! i result
-    i := i + 1
-
-  b.report "benchmarkCurve25519ECDH_Group"
-
-def main : IO Unit := do
-  benchmarkCurve25519ECDH_Ladder
-  benchmarkCurve25519ECDH_Group
+def main (args : List String) : IO UInt32 := do
+  -- The ladder implementation (`X25519_montgomery_ladder.curve25519`).
+  LeanBench.register (← ecdhBench "benchmarkCurve25519ECDH_Ladder" curve25519)
+  -- The group implementation (`X25519.x25519`), same RFC 7748 signature as the ladder's
+  -- `curve25519`, so the two are directly comparable.
+  LeanBench.register (← ecdhBench "benchmarkCurve25519ECDH_Group" CryptWalker.NIKE.X25519.x25519)
+  LeanBench.runMain args
