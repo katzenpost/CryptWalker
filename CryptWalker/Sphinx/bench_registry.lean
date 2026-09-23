@@ -14,7 +14,7 @@ open CryptWalker.KEM.KEM (KEM)
 /-! # The Sphinx benchmark-case registry
 
 Distinct from `Sphinx.Schemes` (which registry name resolves to which crypto scheme) — this is
-which scheme × payload size × hop count `benchmark.lean` actually times, mirroring the *shape* of
+which scheme × payload size × hop count `Bench/Sphinx.lean` actually times, mirroring the *shape* of
 katzenpost's own `benchmarks []struct{...}` table in `sphinx_benchmark_test.go`, not its content
 (that table spans ~19 schemes across NIKE/KEM/hybrid/PQ; this project only ever ported X25519, so
 every entry here is one of `NIKE.registry`/`KEM.registry`'s two entries each). Built directly from
@@ -44,8 +44,8 @@ def BenchCase.name (c : BenchCase) : String :=
     | .kem n _ => n
   s!"{schemeName} ({c.payloadSize}B, {c.nrHops} hops)"
 
-/-- Every Sphinx bench case this project runs: the 4 registered schemes (`NIKE.registry`'s and
-`KEM.registry`'s X25519 ladder + group entries) each at 3 payload sizes, all at 5 hops. The
+/-- Every Sphinx bench case this project runs: every `NIKE.registry` and `KEM.registry` scheme,
+each at 3 payload sizes, all at 5 hops. The
 2000-byte cases match katzenpost's own `sphinx_benchmark_test.go` table exactly (same payload
 size, same hop count), so they're directly comparable to its published numbers. -/
 def sphinxBenchCases : List BenchCase :=

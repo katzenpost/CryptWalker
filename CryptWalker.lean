@@ -21,6 +21,13 @@ import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Schemes
 import CryptWalker.KEM.Combiner
+import CryptWalker.KEM.MLKEMHedged.MLKEMHedged768
+import CryptWalker.MKEM.MKEM
+import CryptWalker.MKEM.Adapter
+import CryptWalker.MKEM.Schemes
+import CryptWalker.MultiRecipientHybrid.MultiRecipientHybrid
+import CryptWalker.MultiRecipientHybrid.Adapter
+import CryptWalker.MultiRecipientHybrid.Schemes
 import CryptWalker.Sign.Sign
 import CryptWalker.Sign.Ed25519_math
 import CryptWalker.Sign.Ed25519_facts
@@ -49,6 +56,9 @@ import CryptWalker.BACAP.API
 import CryptWalker.BACAP.Unlinkability
 import CryptWalker.BACAP.Ed25519Unlinkability
 import CryptWalker.BACAP.test
+import CryptWalker.Pigeonhole.Replica
+import CryptWalker.Pigeonhole.Protocol
+import CryptWalker.Pigeonhole.Semantics
 import CryptWalker.Sphinx.sphinx
 import CryptWalker.Sphinx.geometry
 import CryptWalker.Sphinx.integrity

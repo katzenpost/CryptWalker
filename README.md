@@ -51,12 +51,15 @@ Classical NIKEs, two independent implementations of the same exchange:
 * ML-KEM-768 (FIPS 203), built from [VCVio](https://github.com/dtumad/VCV-io)'s pure-Lean
   primitives (NTT, CBD, encoding) with our own `keygen`/`encaps`/`decaps` composition — checked
   against the official NIST ACVP known-answer vectors (keygen, encapsulation, decapsulation
-  including implicit rejection, and both key-validity checks). A future variant will also hash the
-  encapsulation message `m` before use, restoring a randomness-hedging step NIST dropped when
-  standardizing ML-KEM from Kyber.
+  including implicit rejection, and both key-validity checks)
+* Hedged ML-KEM-768 (`mlkem768-hedged-kem`): hashes the encapsulation message `m` before use,
+  restoring a randomness-hedging step NIST dropped when standardizing ML-KEM from Kyber. Not
+  FIPS 203, so there are no standard vectors for it
 * A security-preserving KEM combiner (Giacon–Heuer–Poettering split-PRF, real BLAKE2b-256 keyed),
   generic over any number of ingredient KEMs — instantiated as an X25519 + ML-KEM-768 hybrid,
   cross-checked byte-for-byte against [hpqc](https://github.com/katzenpost/hpqc)'s own combiner
+  (`mlkem768-x25519-kem`), and the same combiner over hedged ML-KEM-768
+  (`mlkem768-hedged-x25519-kem`)
 
 | SIGN: Cryptographic Signature Scheme |
 |:---:|
@@ -148,7 +151,7 @@ lake exe CryptWalker.Sphinx.nike_selftest    # NIKE-Sphinx round-trip self-tests
 lake exe CryptWalker.Sphinx.kem_selftest     # KEM-Sphinx round-trip self-tests
 lake exe CryptWalker.Sphinx.nike_vectors_test  # NIKE-Sphinx full-packet vectors from katzenpost
 lake exe CryptWalker.Sphinx.kem_vectors_test   # KEM-Sphinx full-packet vectors from katzenpost
-lake exe CryptWalker.KEM.mlkem768_test         # ML-KEM-768 NIST ACVP known-answer vectors
+lake exe CryptWalker.KEM.MLKEM.mlkem768_test   # ML-KEM-768 NIST ACVP known-answer vectors
 lake exe CryptWalker.Hash.blake2b_256_test     # BLAKE2b-256 (unkeyed and keyed) vectors from hpqc
 lake exe CryptWalker.KEM.mlkem768_x25519_combiner_test  # X25519+ML-KEM-768 hybrid vectors from hpqc
 lake exe CryptWalker.Sphinx.kem_hybrid_vectors_test     # KEM-Sphinx hybrid full-packet vectors from katzenpost
@@ -213,13 +216,20 @@ reports a clean pass/fail.
 
 ## benchmarks: how to run the benchmark tests
 
+One [LeanBench](https://github.com/alok/LeanBench) executable benchmarks every registered NIKE,
+every KEM (generate/encap/decap), and Sphinx packet creation/unwrap for every scheme:
+
 ```bash
-lake exe CryptWalker.NIKE.benchmark
+make bench                                                  # everything
+make bench-nike                                             # one suite: bench-nike, bench-kem, bench-sphinx
+make bench BENCH_ARGS=--list                                # every bench's name
+make bench BENCH_ARGS='--match "kem mlkem768-kem decap"'    # one specific bench
 ```
 
-Times both X25519 implementations (Montgomery ladder and group) over the same random keys, so
-they're directly comparable to each other. No numbers here — they depend entirely on the
-machine it's run on.
+Any LeanBench flag works in `BENCH_ARGS`: e.g. `--samples 5`, `--tags unwrap`, or
+`--save baseline.json` then `--compare baseline.json`. To call Lake directly, use
+`lake -q --log-level=error exe CryptWalker.Bench.benchmark ...`; without those flags Lake replays
+build warnings from our dependencies first. No numbers here — they depend entirely on the machine.
 
 ## licensing
 

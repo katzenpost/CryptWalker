@@ -67,6 +67,17 @@ structure BACAPSpec where
     let r := signBox sk idx ctx ct
     verifyBox r.1 ct r.2 = true
 
+  /-- The box `encryptBox` addresses is the one a reader derives from the root public key, index and
+      context. This is what lets a reader find a box it never saw written. -/
+  encrypt_boxid : ∀ sk pk idx ctx pt, (encryptBox sk pk idx ctx pt).1 = deriveBoxID pk idx ctx
+
+  /-- What `encryptBox` produces is a genuine box: its signature verifies under its box ID with the
+      signature scheme itself, which is what a replica checks. As for `decrypt_encrypt`,
+      `pk = base.pub sk`. -/
+  encrypt_verify : ∀ sk pk idx ctx pt, pk = blindable.base.pub sk →
+    let r := encryptBox sk pk idx ctx pt
+    blindable.base.verify r.1 r.2.1 r.2.2 = true
+
   /-- Decrypting an encrypted box returns the original plaintext. The public key must be the
       one derived from the private key (i.e. `pk = base.pub sk`), as in a valid WriteCap. -/
   decrypt_encrypt : ∀ sk pk idx ctx pt,

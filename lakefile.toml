@@ -7,8 +7,8 @@ autoImplicit = false
 relaxedAutoImplicit = false
 
 [[require]]
-name = "Bench"
-git = "https://github.com/david415/bench"
+name = "LeanBench"
+git = "https://github.com/alok/LeanBench"
 rev = "main"
 
 [[require]]
@@ -36,7 +36,7 @@ name = "CryptWalker.NIKE.test"
 name = "CryptWalker.KEM.test"
 
 [[lean_exe]]
-name = "CryptWalker.NIKE.benchmark"
+name = "CryptWalker.Bench.benchmark"
 [[lean_exe]]
 name = "CryptWalker.KEM.vectors"
 
@@ -89,10 +89,7 @@ name = "CryptWalker.Sphinx.gen_nike_vectors"
 name = "CryptWalker.Sphinx.gen_kem_vectors"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.benchmark"
-
-[[lean_exe]]
-name = "CryptWalker.KEM.mlkem768_test"
+name = "CryptWalker.KEM.MLKEM.mlkem768_test"
 
 [[lean_exe]]
 name = "CryptWalker.Hash.blake2b_256_test"

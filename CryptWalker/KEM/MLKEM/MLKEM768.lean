@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.KEM.MLKEM768Encoding
+import CryptWalker.KEM.MLKEM.MLKEM768Encoding
 import CryptWalker.KEM.KEM
 import LatticeCrypto.MLKEM.KPKE
 
@@ -103,7 +103,7 @@ def checkDecapsulationKey (dk : DecapsulationKey params encoding) : Bool :=
 
 /-! ## Size facts: `keygen768`/`encaps768`'s outputs are always well-formed -/
 
-private theorem keygen768_ek_wf (d z : Seed32) :
+theorem keygen768_ek_wf (d z : Seed32) :
     (tBytes (keygen768 d z).1.tHatEncoded).size = 384 * params.k := by
   unfold keygen768 KPKE.keygenFromSeed
   dsimp only
@@ -112,7 +112,7 @@ private theorem keygen768_ek_wf (d z : Seed32) :
   show (encoding.byteEncode12Vec _ : ByteArray).size = 384 * params.k
   exact concreteEncoding_byteEncode12Vec_size params _
 
-private theorem keygen768_dk_wf (d z : Seed32) :
+theorem keygen768_dk_wf (d z : Seed32) :
     (tBytes (keygen768 d z).2.dkPKE.sHatEncoded).size = 384 * params.k ∧
       (tBytes (keygen768 d z).2.ekPKE.tHatEncoded).size = 384 * params.k := by
   constructor
@@ -191,18 +191,18 @@ theorem honestRoundTripM (sk : PrivateKey) (s : State) (hrel : Reliable s)
   rw [← hc1, hrel sk.1 (derivePublicKeyM sk).1 rfl, hc2]
   rfl
 
-private theorem decodePrivateKey_totalM (v : Vector UInt8 params.secretKeyBytes) :
+theorem decodePrivateKey_totalM (v : Vector UInt8 params.secretKeyBytes) :
     ∃ sk : PrivateKey, decodePrivateKey v = some sk := by
   unfold decodePrivateKey
   exact ⟨_, rfl⟩
 
-private def dummySeed : Seed32 := Vector.replicate 32 0
+def dummySeed : Seed32 := Vector.replicate 32 0
 
-private def dummyPk : PublicKey := ⟨(keygen768 dummySeed dummySeed).1, keygen768_ek_wf _ _⟩
+def dummyPk : PublicKey := ⟨(keygen768 dummySeed dummySeed).1, keygen768_ek_wf _ _⟩
 
-private def dummySk : PrivateKey := ⟨(keygen768 dummySeed dummySeed).2, keygen768_dk_wf _ _⟩
+def dummySk : PrivateKey := ⟨(keygen768 dummySeed dummySeed).2, keygen768_dk_wf _ _⟩
 
-private def dummyCt : CT := ⟨(encaps768 dummyPk.1 dummySeed).2, encaps768_ct_wf _ _⟩
+def dummyCt : CT := ⟨(encaps768 dummyPk.1 dummySeed).2, encaps768_ct_wf _ _⟩
 
 /-- The assembled `KEM.KEM` instance for ML-KEM-768. -/
 def kemMLKEM768 : KEM where
@@ -275,7 +275,7 @@ def derivePublicKeyFromSeed (sk : SeedPrivateKey) : PublicKey :=
 
 /-- The full expanded decapsulation key `dk` this seed determines — recomputed on every call,
 exactly as Go's `Decapsulate` recomputes it from the stored seed rather than caching it. -/
-private def expandSeed (sk : SeedPrivateKey) : PrivateKey :=
+def expandSeed (sk : SeedPrivateKey) : PrivateKey :=
   ⟨(keygen768 sk.1 sk.2).2, keygen768_dk_wf sk.1 sk.2⟩
 
 def decapMFromSeed (sk : SeedPrivateKey) (c : CT) : EStateM KEMError State (Vector UInt8 32) :=

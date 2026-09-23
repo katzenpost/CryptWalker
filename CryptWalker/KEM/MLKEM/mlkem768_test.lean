@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Lean.Data.Json
-import CryptWalker.KEM.MLKEM768
+import CryptWalker.KEM.MLKEM.MLKEM768
 import CryptWalker.Util.newhex
 
 /-!
