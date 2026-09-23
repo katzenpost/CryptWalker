@@ -30,7 +30,8 @@ how a real Sphinx mix node actually gets its keys.
 Runs the full round set once per registered KEM-Sphinx scheme — `"x25519-ladder-kem"`
 (`KEM.kemX25519Ladder`), `"x25519-kem"` (`KEM.kemX25519`), `"mlkem768-kem"`
 (`MLKEM768.kemMLKEM768`), and `"mlkem768-x25519-kem"` (`KEM.kemMLKEM768X25519`, the classical/
-post-quantum hybrid built by `Combiner.combineKEM` — see `KEM/Schemes.lean`'s module doc) — since
+post-quantum hybrid built by `Combiner.combineKEM` — see `KEM/Schemes.lean`'s module doc), and the
+hedged `"mlkem768-hedged-kem"`/`"mlkem768-hedged-x25519-kem"` pair — since
 `createKEMHeader`/`unwrapKEM` are generic over any `KEM`, not just the ladder implementation
 `kem_vectors_test`'s Go-cross-checked vectors happen to use. -/
 
@@ -46,6 +47,8 @@ private def x25519Ladder := CryptWalker.KEM.kemX25519Ladder
 private def x25519Group := CryptWalker.KEM.kemX25519
 private def mlkem768 := CryptWalker.KEM.MLKEM768.kemMLKEM768
 private def mlkem768X25519 := CryptWalker.KEM.kemMLKEM768X25519
+private def mlkem768Hedged := CryptWalker.KEM.MLKEMHedged.kemMLKEMHedged768
+private def mlkem768HedgedX25519 := CryptWalker.KEM.kemMLKEMHedged768X25519
 
 -- `kemSphinxSchemeOf` (used below) takes these four explicitly rather than wiring one concrete
 -- choice up internally; the direct `createKEMHeader`/`newKEMPacket`/`unwrapKEM`/`newKEMSURB` calls
@@ -406,8 +409,12 @@ def main (args : List String) : IO UInt32 := do
     IO.println ""
     let okHybrid ← runSuite "mlkem768-x25519-kem" mlkem768X25519
     IO.println ""
-    if okLadder && okGroup && okMLKEM && okHybrid then
-      IO.println "all KEM-Sphinx round-trip self-tests passed (all four schemes)"
+    let okHedged ← runSuite "mlkem768-hedged-kem" mlkem768Hedged
+    IO.println ""
+    let okHedgedHybrid ← runSuite "mlkem768-hedged-x25519-kem" mlkem768HedgedX25519
+    IO.println ""
+    if okLadder && okGroup && okMLKEM && okHybrid && okHedged && okHedgedHybrid then
+      IO.println "all KEM-Sphinx round-trip self-tests passed (all six schemes)"
       pure 0
     else
       IO.eprintln "KEM-Sphinx round-trip self-tests FAILED"

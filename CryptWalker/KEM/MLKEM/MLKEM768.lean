@@ -275,7 +275,7 @@ def derivePublicKeyFromSeed (sk : SeedPrivateKey) : PublicKey :=
 
 /-- The full expanded decapsulation key `dk` this seed determines — recomputed on every call,
 exactly as Go's `Decapsulate` recomputes it from the stored seed rather than caching it. -/
-private def expandSeed (sk : SeedPrivateKey) : PrivateKey :=
+def expandSeed (sk : SeedPrivateKey) : PrivateKey :=
   ⟨(keygen768 sk.1 sk.2).2, keygen768_dk_wf sk.1 sk.2⟩
 
 def decapMFromSeed (sk : SeedPrivateKey) (c : CT) : EStateM KEMError State (Vector UInt8 32) :=

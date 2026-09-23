@@ -44,8 +44,8 @@ def BenchCase.name (c : BenchCase) : String :=
     | .kem n _ => n
   s!"{schemeName} ({c.payloadSize}B, {c.nrHops} hops)"
 
-/-- Every Sphinx bench case this project runs: the 4 registered schemes (`NIKE.registry`'s and
-`KEM.registry`'s X25519 ladder + group entries) each at 3 payload sizes, all at 5 hops. The
+/-- Every Sphinx bench case this project runs: every `NIKE.registry` and `KEM.registry` scheme,
+each at 3 payload sizes, all at 5 hops. The
 2000-byte cases match katzenpost's own `sphinx_benchmark_test.go` table exactly (same payload
 size, same hop count), so they're directly comparable to its published numbers. -/
 def sphinxBenchCases : List BenchCase :=

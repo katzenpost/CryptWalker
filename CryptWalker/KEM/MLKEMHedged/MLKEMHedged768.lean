@@ -42,7 +42,9 @@ open CryptWalker.KEM.MLKEM768 (params encoding primitives ring PublicKey Private
   seedBlock nextDraw stateFromSeed keygen768 keygen768_ek_wf keygen768_dk_wf decaps768 decapM
   derivePublicKeyM encodePublicKey decodePublicKey encodePrivateKey decodePrivateKey
   encodeCiphertext decodeCiphertext decode_encode_pub decode_encode_priv decode_encode_ct
-  decodePrivateKey_totalM dummySeed dummyPk dummySk dummyCt uBytes vBytes)
+  decodePrivateKey_totalM dummySeed dummyPk dummySk dummyCt uBytes vBytes SeedPrivateKey
+  expandSeed derivePublicKeyFromSeed decapMFromSeed encodePrivateKeyFromSeed decodePrivateKeyFromSeed
+  decodePrivateKeyFromSeed_total decode_encode_privFromSeed)
 open CryptWalker.Util.Bytes (ofVector)
 
 /-! ## `encaps768Hedged`: the one place the two schemes differ -/
@@ -106,10 +108,8 @@ theorem honestRoundTripM (sk : PrivateKey) (s : State) (hrel : Reliable s)
 
 /-- The assembled `KEM.KEM` instance for hedged ML-KEM-768. `decap`, key generation and every
 encode/decode function are `MLKEM768`'s, unchanged; only `encap`, `Reliable` and the round-trip
-witness are this file's own.
-
-Not registered in `KEM/Schemes.lean`: it has no NIST vectors (it isn't FIPS 203) and no `hpqc`
-counterpart to cross-check against, unlike every scheme that registry lists. -/
+witness are this file's own. Registered in `KEM/Schemes.lean` as `"mlkem768-hedged-kem"`; unlike
+the other entries there, it has no NIST or `hpqc` vectors to check against. -/
 def kemMLKEMHedged768 : KEM where
   State := State
   PublicKey := PublicKey
@@ -154,6 +154,60 @@ def kemMLKEMHedged768 : KEM where
 
   decode_encode_pub := decode_encode_pub
   decode_encode_priv := decode_encode_priv
+  decode_encode_ct := decode_encode_ct
+
+  plaintextEq := inferInstance
+
+/-! ## Seed-format private keys
+
+As `MLKEM768.kemMLKEM768Seed`: the private key is `(d, z)`, encoded `ek ‖ d ‖ z`, so both schemes'
+seed instances share one key format. -/
+
+theorem honestRoundTripFromSeed (sk : SeedPrivateKey) : ∀ s, Reliable s → ∀ c k s',
+    encapM (derivePublicKeyFromSeed sk) s = .ok (c, k) s' → ∀ t, ∃ t', decapMFromSeed sk c t = .ok k t' :=
+  honestRoundTripM (expandSeed sk)
+
+/-- Hedged ML-KEM-768 with `MLKEM768.kemMLKEM768Seed`'s private-key format. -/
+def kemMLKEMHedged768Seed : KEM where
+  State := State
+  PublicKey := PublicKey
+  PrivateKey := SeedPrivateKey
+  Ciphertext := CT
+  Plaintext := Vector UInt8 32
+
+  pubI := ⟨dummyPk⟩
+  privI := ⟨(dummySeed, dummySeed)⟩
+  ctI := ⟨dummyCt⟩
+  ptI := ⟨Vector.replicate 32 0⟩
+  stateI := ⟨(0, dummySeed)⟩
+
+  publicKeySize := params.publicKeyBytes
+  privateKeySize := params.publicKeyBytes + 64
+  ciphertextSize := params.ciphertextBytes
+  plaintextSize := 32
+
+  encodePublicKey := encodePublicKey
+  decodePublicKey := decodePublicKey
+  encodePrivateKey := encodePrivateKeyFromSeed
+  decodePrivateKey := decodePrivateKeyFromSeed
+  encodeCiphertext := encodeCiphertext
+  decodeCiphertext := decodeCiphertext
+  encodePlaintext := id
+
+  decap := decapMFromSeed
+  encap := encapM
+  Reliable := Reliable
+  generate := do
+    let d ← nextDraw
+    let z ← nextDraw
+    pure ⟨derivePublicKeyFromSeed (d, z), (d, z), honestRoundTripFromSeed (d, z)⟩
+  stateFromSeed := stateFromSeed
+  derivePublicKey := derivePublicKeyFromSeed
+  honestRoundTrip := honestRoundTripFromSeed
+  decodePrivateKey_total := decodePrivateKeyFromSeed_total
+
+  decode_encode_pub := decode_encode_pub
+  decode_encode_priv := decode_encode_privFromSeed
   decode_encode_ct := decode_encode_ct
 
   plaintextEq := inferInstance

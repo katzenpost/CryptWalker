@@ -6,6 +6,7 @@ import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Combiner
 import CryptWalker.KEM.MLKEM.MLKEM768
+import CryptWalker.KEM.MLKEMHedged.MLKEMHedged768
 import CryptWalker.Hash.Sha2
 import CryptWalker.Hash.Blake2b
 import CryptWalker.MAC.HMAC
@@ -132,6 +133,11 @@ building a `KEMSphinxScheme` from this entry must discharge it, not just `trivia
 def mlkem768Entry : RegistryEntry :=
   { hpqcName := "mlkem768-kem", scheme := CryptWalker.KEM.MLKEM768.kemMLKEM768 }
 
+/-- ML-KEM-768 with round-3 Kyber's `m ← H(m)` pre-hash restored. Not FIPS 203, so no NIST or hpqc
+vectors to check it against. -/
+def mlkem768HedgedEntry : RegistryEntry :=
+  { hpqcName := "mlkem768-hedged-kem", scheme := CryptWalker.KEM.MLKEMHedged.kemMLKEMHedged768 }
+
 /-! ## Hybrid: X25519 + ML-KEM-768, via the generic split-PRF combiner
 
 hpqc's `kem/schemes` registers exactly this pairing twice, via two different mechanisms
@@ -172,8 +178,18 @@ def kemMLKEM768X25519Blake2b : KEM :=
   Combiner.combineKEM blake2b256CombinerPRF kemX25519Blake2b
     [CryptWalker.KEM.MLKEM768.kemMLKEM768Seed]
 
+/-- `kemMLKEM768X25519` with hedged ML-KEM-768 as the post-quantum half, in the same seed-format
+private keys. -/
+def kemMLKEMHedged768X25519 : KEM :=
+  Combiner.combineKEM blake2b256CombinerPRF kemX25519
+    [CryptWalker.KEM.MLKEMHedged.kemMLKEMHedged768Seed]
+
+def mlkem768HedgedX25519Entry : RegistryEntry :=
+  { hpqcName := "mlkem768-hedged-x25519-kem", scheme := kemMLKEMHedged768X25519 }
+
 def registry : List RegistryEntry :=
-  [x25519LadderEntry, x25519GroupEntry, mlkem768Entry, mlkem768X25519Entry]
+  [x25519LadderEntry, x25519GroupEntry, mlkem768Entry, mlkem768X25519Entry,
+    mlkem768HedgedEntry, mlkem768HedgedX25519Entry]
 
 /-- `hpqc/kem/schemes.ByName`, ported: case-insensitive lookup, `none` for any name not in
 `registry` — which, unlike `hpqc`'s own registry, is most of `hpqc/kem/schemes.All()`: this

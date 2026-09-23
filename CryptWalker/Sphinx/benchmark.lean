@@ -26,7 +26,7 @@ reused directly across iterations.
 
 Uses a reduced sample count (50, not `NIKE.benchmark`'s 1000): a 5-hop packet's AEZ + HMAC +
 HKDF + AES-CTR cost is far higher per call than the single curve-multiply `NIKE.benchmark` times,
-and this file runs 12 cases × 2 (create + unwrap) = 24 benches. Input generation runs in LeanBench's
+and this file runs every case twice (create + unwrap). Input generation runs in LeanBench's
 `beforeEach?`/setup, outside the timed region. Pass `--tags create` or `--tags unwrap` to run one
 half. -/
 
