@@ -29,7 +29,7 @@ TESTS := \
 	CryptWalker.Sphinx.kem_selftest \
 	CryptWalker.Sphinx.nike_vectors_test \
 	CryptWalker.Sphinx.kem_vectors_test \
-	CryptWalker.KEM.mlkem768_test \
+	CryptWalker.KEM.MLKEM.mlkem768_test \
 	CryptWalker.Hash.blake2b_256_test \
 	CryptWalker.Hash.blake2b_xof_test \
 	CryptWalker.KEM.mlkem768_x25519_combiner_test \
@@ -129,10 +129,10 @@ verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc
 
 test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer vectors
 	@$(BIN)/CryptWalker-Sphinx-kem_selftest
-	@$(BIN)/CryptWalker-KEM-mlkem768_test
+	@$(BIN)/CryptWalker-KEM-MLKEM-mlkem768_test
 
 test-mlkem-kat: build ## ML-KEM-768: NIST ACVP known-answer vectors only
-	@$(BIN)/CryptWalker-KEM-mlkem768_test
+	@$(BIN)/CryptWalker-KEM-MLKEM-mlkem768_test
 
 test-hybrid-sphinx: build ## KEM-Sphinx round-trip self-test for the X25519+ML-KEM-768 hybrid only
 	@$(BIN)/CryptWalker-Sphinx-kem_selftest mlkem768-x25519-kem
