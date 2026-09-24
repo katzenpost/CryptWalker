@@ -171,15 +171,17 @@ def runFillerRound (schemeName : String) (nike : NIKE) : IO Bool := do
 
 /-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`nikeSphinxScheme`
 instead of calling `newNIKEPacket` directly — confirms the abstract-interface unification
-actually produces a packet `unwrapNIKE` accepts, not just that it typechecks. -/
+actually produces a packet `unwrapNIKE` accepts, not just that it typechecks. A `pathLen` below
+`geom.nrHops` exercises `wrap`'s own filler draw. -/
 def runAbstractWrapRound (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
-    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (pathLen : Nat := geom.nrHops) : IO Bool := do
   let scheme := nikeSphinxCore nike wbCipher macS kdfS streamS geom hvalid rfl h16
-  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode nike)
+  let nodes ← (List.range pathLen).toArray.mapM (fun _ => newNode nike)
   let path ← buildPath nodes
   let seed ← randomVector 32
   let payload ← randomVector geom.forwardPayloadLength
-  match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Interface.initWith (fun _ => seed)) with
+  match scheme.wrap path.toList payload (CryptWalker.Sphinx.Interface.initWith (fun _ => seed)) with
   | .error e _ =>
     IO.eprintln s!"abstract wrap failed: {e}"
     pure false
@@ -196,7 +198,7 @@ def runCompletenessRound (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidFor
   let path ← buildPath nodes
   let seed ← randomVector 32
   let payload ← randomVector geom.forwardPayloadLength
-  match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Interface.initWith (fun _ => seed)) with
+  match scheme.wrap path.toList payload (CryptWalker.Sphinx.Interface.initWith (fun _ => seed)) with
   | .error e _ =>
     IO.eprintln s!"completeness: wrap failed: {e}"
     pure false
@@ -225,7 +227,7 @@ def runAbstractSURBRound (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidFor
   let path ← buildPath nodes true
   let seeds ← (List.range 3).toArray.mapM (fun _ => randomVector 32)
   let stream := fun i => seeds[i]!
-  match scheme.newSURB path.toList ByteArray.empty (CryptWalker.Sphinx.Interface.initWith stream) with
+  match scheme.newSURB path.toList (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
     IO.eprintln s!"abstract newSURB failed: {e}"
     pure false
@@ -370,6 +372,15 @@ def runSuite (schemeName : String) (nike : NIKE) : IO Bool := do
   let abstractOk ← runAbstractWrapRound nike geom3 hvalid3 h163
   IO.println s!"abstract Sphinx.Interface.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
   ok := ok && abstractOk
+
+  let geom5 := ofNIKEWith schemeName nike 103 false 5
+  let hvalid5 := ofNIKEWith_validForNIKE schemeName nike 103 false 5
+  let h165 : 16 ≤ geom5.payloadTagLength + geom5.forwardPayloadLength := by
+    rw [ofNIKEWith_payloadTagLength schemeName nike 103 false 5]
+    unfold CryptWalker.Sphinx.Constants.payloadTagLength; omega
+  let abstractFillerOk ← runAbstractWrapRound nike geom5 hvalid5 h165 3
+  IO.println s!"abstract Sphinx.Interface.wrap (3 hops of 5, drawn filler): {if abstractFillerOk then "ok" else "FAIL"}"
+  ok := ok && abstractFillerOk
 
   let completeOk ← runCompletenessRound nike geom3 hvalid3 h163
   IO.println s!"Sphinx.Interface.unwrap_complete via unwrapChainAux (3 hops): {if completeOk then "ok" else "FAIL"}"
