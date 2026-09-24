@@ -79,15 +79,14 @@ structure NIKESphinxScheme extends CryptWalker.Sphinx.Interface.Sphinx where
         (Fintype.card Factor : ℝ≥0∞)⁻¹ :=
     fun _ target hbij => uniformHit_eq hbij target
   /-- **Envelope independence** (§4.4, exact rather than up to some advantage): the envelope
-  depends only on `wrap`'s seed-stream draw, never on path/filler/payload, so two calls sharing a
+  depends only on `wrap`'s seed-stream draw, never on path/payload, so two calls sharing a
   starting `State` produce byte-for-byte identical envelopes — no adversary can learn anything
   about the session's content from it alone. See `wrapNIKE_envelope_indep` (in
   `nike_sphinx_theorems.lean`) for why: the envelope is the client's own public key. -/
   envelope_indep : ∀ (hop0 hop1 : Types.PathHop) (rest0 rest1 : List Types.PathHop)
-      (filler0 filler1 : ByteArray)
       (payload0 payload1 : Vector UInt8 geometry.forwardPayloadLength) (st : State)
       (pkt0 pkt1 : Vector UInt8 geometry.packetLength) (st0' st1' : State),
-    wrap (hop0 :: rest0) filler0 payload0 st = .ok pkt0 st0' →
-    wrap (hop1 :: rest1) filler1 payload1 st = .ok pkt1 st1' →
+    wrap (hop0 :: rest0) payload0 st = .ok pkt0 st0' →
+    wrap (hop1 :: rest1) payload1 st = .ok pkt1 st1' →
     parseEnvelope pkt0 = parseEnvelope pkt1
 end CryptWalker.Sphinx.NIKESphinx

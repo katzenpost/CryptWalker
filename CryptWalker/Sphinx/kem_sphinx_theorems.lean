@@ -1378,15 +1378,17 @@ private theorem hopPacket_slices (kem : KEM) (macS : MAC) (geom : Geometry) (pat
 -- `cascading_xor_step` (fully generic in the byte-level XOR/padding argument, no `KEM`
 -- dependence) now lives in `CryptWalker.Sphinx.Common`, shared with `NIKESphinx.lean`.
 
-open CryptWalker.Sphinx.Interface (SeedStream nextSeed unwrapChainAux)
+open CryptWalker.Sphinx.Interface (SeedStream nextSeed drawBytes seedBytes fillerLength
+  unwrapChainAux)
 
 /-- **`wrapKEM`**: `Sphinx.Interface.wrap` for `KEMSphinxScheme` — `newKEMPacket`, drawing one
-ephemeral seed per hop from the seed stream instead of taking them as a bare array. -/
+ephemeral seed per hop and then the unused-hop filler from the seed stream. -/
 def wrapKEM (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
-    (geom : Geometry) (path : List PathHop) (filler : ByteArray)
+    (geom : Geometry) (path : List PathHop)
     (payload : Vector UInt8 geom.forwardPayloadLength) :
     EStateM String SeedStream (Vector UInt8 geom.packetLength) := do
   let seeds ← path.toArray.mapM (fun _ => nextSeed)
+  let filler ← drawBytes (fillerLength geom path.length)
   match newKEMPacket kem cipher macS kdfS streamS geom seeds filler path.toArray (ofVector payload) with
   | .error e => throw e
   | .ok pkt =>
@@ -1434,13 +1436,14 @@ theorem newKEMSURB_size (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamC
     CryptWalker.Sphinx.Constants.streamIVLength]
 
 /-- **`wrapKEMSURB`**: `Sphinx.Interface.newSURB` for `KEMSphinxScheme` — draws one ephemeral seed
-per hop plus `keyPayload` (two seeds' worth) from the seed stream. -/
+per hop, `keyPayload` (two seeds' worth) and then the unused-hop filler from the seed stream. -/
 def wrapKEMSURB (kem : KEM) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
-    (path : List PathHop) (filler : ByteArray) :
+    (path : List PathHop) :
     EStateM String SeedStream (Vector UInt8 geom.surbLength × ByteArray) := do
   let seeds ← path.toArray.mapM (fun _ => nextSeed)
   let kp1 ← nextSeed
   let kp2 ← nextSeed
+  let filler ← drawBytes (fillerLength geom path.length)
   match newKEMSURB kem macS kdfS streamS geom seeds (kp1 ++ kp2) filler path.toArray with
   | .error e => throw e
   | .ok (surb, k) =>
@@ -2358,41 +2361,46 @@ private theorem arrayMapM_nextSeed_succeeds {α : Type} (l : Array α) (i : Nat)
     exact hcontent j hj'
 
 /-- **`wrapKEM`, fully unfolded to content.** A successful `wrapKEM` run drew some array of
-per-hop seeds (via `nextSeed`, which never fails — `arrayMapM_nextSeed_succeeds`) and then
-`newKEMPacket` succeeded on it, producing exactly `pkt`'s own bytes. The `j`-th seed is exactly
+per-hop seeds (via `nextSeed`, which never fails — `arrayMapM_nextSeed_succeeds`) and then the
+filler, and `newKEMPacket` succeeded on them, producing exactly `pkt`'s own bytes. The filler is
+`seedBytes` of the seed stream, never caller-supplied. The `j`-th seed is exactly
 `str (i + j)` — exposed so a caller can state a hypothesis about which specific states the run
 touches (e.g. `KEM.Reliable`). -/
-private theorem wrapKEM_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
-    (streamS : StreamCipher) (geom : Geometry) (path : List PathHop) (filler : ByteArray)
+theorem wrapKEM_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
+    (streamS : StreamCipher) (geom : Geometry) (path : List PathHop)
     (payload : Vector UInt8 geom.forwardPayloadLength) (i : Nat) (str : Nat → Vector UInt8 32)
     (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream)
-    (h : wrapKEM kem cipher macS kdfS streamS geom path filler payload (i, str) = .ok pkt st') :
+    (h : wrapKEM kem cipher macS kdfS streamS geom path payload (i, str) = .ok pkt st') :
     ∃ seeds : Array (Vector UInt8 32), seeds.size = path.length ∧
       (∀ j (_hj : j < path.length), seeds[j]! = str (i + j)) ∧
-      newKEMPacket kem cipher macS kdfS streamS geom seeds filler path.toArray (ofVector payload)
+      newKEMPacket kem cipher macS kdfS streamS geom seeds
+          (seedBytes str (i + path.toArray.size) (fillerLength geom path.length)) path.toArray
+          (ofVector payload)
         = Except.ok (ofVector pkt) := by
   obtain ⟨seeds, hlen, heq, hcontent⟩ := arrayMapM_nextSeed_succeeds path.toArray i str
   refine ⟨seeds, by rw [hlen]; simp, by simpa using hcontent, ?_⟩
-  rcases hnk : newKEMPacket kem cipher macS kdfS streamS geom seeds filler path.toArray
+  rcases hnk : newKEMPacket kem cipher macS kdfS streamS geom seeds
+      (seedBytes str (i + path.toArray.size) (fillerLength geom path.length)) path.toArray
       (ofVector payload) with e | pktRaw
   · exfalso
-    have hw : wrapKEM kem cipher macS kdfS streamS geom path filler payload (i, str)
-        = .error e (i + path.toArray.size, str) := by
+    have hw : wrapKEM kem cipher macS kdfS streamS geom path payload (i, str)
+        = .error e (i + path.toArray.size + (fillerLength geom path.length + 31) / 32, str) := by
       unfold wrapKEM
       dsimp only [Bind.bind, EStateM.bind]
       rw [heq]
-      dsimp only
+      dsimp only [drawBytes]
       rw [hnk]
       rfl
     rw [hw] at h
     injection h
   · by_cases hsz : pktRaw.size = geom.packetLength
-    · have hw : wrapKEM kem cipher macS kdfS streamS geom path filler payload (i, str)
-          = .ok ⟨pktRaw.data, hsz⟩ (i + path.toArray.size, str) := by
+    · have hw : wrapKEM kem cipher macS kdfS streamS geom path payload (i, str)
+          = .ok ⟨pktRaw.data, hsz⟩
+            (i + path.toArray.size + (fillerLength geom path.length + 31) / 32, str) := by
         unfold wrapKEM
         dsimp only [Bind.bind, EStateM.bind]
         rw [heq]
-        dsimp only
+        dsimp only [drawBytes]
         rw [hnk]
         dsimp only
         rw [dif_pos hsz]
@@ -2403,13 +2411,13 @@ private theorem wrapKEM_unfold (kem : KEM) (cipher : WideBlockCipher) (macS : MA
       rw [← h1]
       rfl
     · exfalso
-      have hw : wrapKEM kem cipher macS kdfS streamS geom path filler payload (i, str)
+      have hw : wrapKEM kem cipher macS kdfS streamS geom path payload (i, str)
           = .error "sphinx: internal error: newKEMPacket produced a wrong-sized packet"
-            (i + path.toArray.size, str) := by
+            (i + path.toArray.size + (fillerLength geom path.length + 31) / 32, str) := by
         unfold wrapKEM
         dsimp only [Bind.bind, EStateM.bind]
         rw [heq]
-        dsimp only
+        dsimp only [drawBytes]
         rw [hnk]
         dsimp only
         rw [dif_neg hsz]
@@ -2427,7 +2435,7 @@ and `unwrapChain_hopPacket` into one call. -/
 theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
     (hmactag : macS.tagSize = macLength) (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
-    (path : List PathHop) (privKeys : List ByteArray) (filler : ByteArray)
+    (path : List PathHop) (privKeys : List ByteArray)
     (payload : Vector UInt8 geom.forwardPayloadLength) (st : SeedStream)
     (pkt : Vector UInt8 geom.packetLength) (st' : SeedStream)
     (hpath : path ≠ [])
@@ -2439,12 +2447,13 @@ theorem wrapKEM_unwrapKEM_complete_valid (kem : KEM) (cipher : WideBlockCipher) 
     -- for any perfect-correctness KEM (every `KEM` this project has built directly so far);
     -- real content for one whose `Reliable` isn't the default `True`.
     (hrel : ∀ j, j < path.length → kem.Reliable (kem.stateFromSeed (st.2 (st.1 + j))))
-    (hwrap : wrapKEM kem cipher macS kdfS streamS geom path filler payload st = .ok pkt st') :
+    (hwrap : wrapKEM kem cipher macS kdfS streamS geom path payload st = .ok pkt st') :
     unwrapChainAux (unwrapKEM kem cipher macS kdfS streamS geom) privKeys (ofVector pkt)
       = .ok (some (ofVector payload)) := by
   obtain ⟨i, str⟩ := st
   obtain ⟨seeds, hseedsize, hseedcontent, hnk⟩ := wrapKEM_unfold kem cipher macS kdfS streamS geom
-    path filler payload i str pkt st' hwrap
+    path payload i str pkt st' hwrap
+  set filler := seedBytes str (i + path.toArray.size) (fillerLength geom path.length) with hfiller
   obtain ⟨hpaysize, hdr, sprpKeys, t, hcreate, ht0content, htstep, hpkteq⟩ :=
     newKEMPacket_unfold kem cipher macS kdfS streamS geom seeds filler path.toArray (ofVector payload)
       (ofVector pkt) hnk
@@ -2618,9 +2627,9 @@ def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS 
     -- rare correctness failure out of reach — trivially `True` for any perfect-correctness `kem`
     -- (unchanged from `Sphinx`'s default, since `kem.Reliable` itself defaults to `True`).
     unwrapReliable := fun st => ∀ j, kem.Reliable (kem.stateFromSeed (st.2 (st.1 + j)))
-    unwrap_complete := fun path privKeys filler payload st pkt st' hpath hrel hpriv hcmds hsurb hwrap =>
+    unwrap_complete := fun path privKeys payload st pkt st' hpath hrel hpriv hcmds hsurb hwrap =>
       wrapKEM_unwrapKEM_complete_valid kem cipher macS kdfS streamS geom hvalid hmactag h16
-        path privKeys filler payload st pkt st' hpath hpriv hcmds hsurb (fun j _ => hrel j) hwrap
+        path privKeys payload st pkt st' hpath hpriv hcmds hsurb (fun j _ => hrel j) hwrap
     kem := kem
     not_wrap_resistant := fun key iv target =>
       xorBytes_achieves_any_target (streamS.keystream key iv target.size) target }

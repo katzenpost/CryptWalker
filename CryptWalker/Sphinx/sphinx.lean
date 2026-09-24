@@ -63,6 +63,25 @@ def nextSeed : EStateM String SeedStream (Vector UInt8 32) :=
 must be unpredictable (unchecked here). -/
 def initWith (str : Nat → Vector UInt8 32) : SeedStream := (0, str)
 
+/-- `n` bytes read straight off the seed stream from seed `i`: byte `k` is byte `k % 32` of seed
+`i + k / 32`. -/
+def seedBytes (str : Nat → Vector UInt8 32) (i n : Nat) : ByteArray :=
+  ⟨Array.ofFn fun k : Fin n => (str (i + k.val / 32))[k.val % 32]'(Nat.mod_lt _ (by decide))⟩
+
+theorem seedBytes_size (str : Nat → Vector UInt8 32) (i n : Nat) :
+    (seedBytes str i n).size = n := by
+  simp [seedBytes, ByteArray.size]
+
+/-- Draw `n` bytes from the seed stream, consuming `⌈n/32⌉` seeds. -/
+def drawBytes (n : Nat) : EStateM String SeedStream ByteArray :=
+  fun (i, str) => .ok (seedBytes str i n) (i + (n + 31) / 32, str)
+
+/-- Routing-info bytes a `nrHops`-hop path leaves unused. `wrap`/`newSURB` fill them with
+`drawBytes`, never zeros: a fixed pattern there tells the exit node the path length (Kuhn et al.,
+"Breaking and (Partially) Fixing Provably Secure Onion Routing", S&P 2020). -/
+def fillerLength (geom : Geometry.Geometry) (nrHops : Nat) : Nat :=
+  (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
+
 /-- Repeatedly `unwrap`, one key per hop, threading the forwarded packet through. Stops at the
 first hop with no forward packet. Free-standing since it only needs `unwrap`'s shape, not a full
 instance — generalizes what `nike_selftest.lean`/`kem_selftest.lean`'s `unwrapAll` checks
@@ -99,14 +118,16 @@ structure Sphinx where
   /-- Raw bytes — width depends on which NIKE/KEM this scheme wraps, not fixed here. -/
   derivePublicKey : PrivateKey → ByteArray
 
-  wrap : List Types.PathHop → (filler : ByteArray) → Vector UInt8 geometry.forwardPayloadLength →
+  /-- Unused routing-info slots are filled with `drawBytes` from `State`, not supplied by the
+  caller (see `fillerLength`). -/
+  wrap : List Types.PathHop → Vector UInt8 geometry.forwardPayloadLength →
     EStateM String State (Vector UInt8 geometry.packetLength)
 
   /-- `(payload, replayTag, cmds, forwardPkt)`. -/
   unwrap : PrivateKey → (pkt : ByteArray) →
     Except String (Option ByteArray × Vector UInt8 32 × List Command × Option (Vector UInt8 pkt.size))
 
-  newSURB : List Types.PathHop → (filler : ByteArray) →
+  newSURB : List Types.PathHop →
     EStateM String State (Vector UInt8 geometry.surbLength × ByteArray)
 
   newPacketFromSURB : Vector UInt8 geometry.surbLength → ByteArray →
@@ -125,14 +146,14 @@ structure Sphinx where
   no `surbReply` (a real command, just one that changes `unwrap`'s terminal-hop behavior — its own
   completeness is tracked separately). -/
   unwrap_complete : ∀ (path : List Types.PathHop) (privKeys : List PrivateKey)
-      (filler : ByteArray) (payload : Vector UInt8 geometry.forwardPayloadLength) (st : State)
+      (payload : Vector UInt8 geometry.forwardPayloadLength) (st : State)
       (pkt : Vector UInt8 geometry.packetLength) (st' : State),
     path ≠ [] →
     unwrapReliable st →
     path.map (·.publicKey) = privKeys.map derivePublicKey →
     (∀ hop ∈ path, ∀ c ∈ hop.commands, c ≠ .null ∧ (∀ id m, c ≠ .nextNodeHop id m)) →
     (∀ c ∈ (path[path.length - 1]!).commands, ∀ id, c ≠ .surbReply id) →
-    wrap path filler payload st = .ok pkt st' →
+    wrap path payload st = .ok pkt st' →
     unwrapChainAux unwrap privKeys (ofVector pkt) = .ok (some (ofVector payload))
 
   /-- **Indistinguishability** (§4.4): `Indistinguishability.advantage_le`, closed over every
@@ -179,12 +200,12 @@ instance : Inhabited Sphinx := ⟨{
   kdf    := default
   stream := default
   derivePublicKey := fun _ => ByteArray.empty
-  wrap := fun _ _ _ => throw "sphinx: uninhabited"
+  wrap := fun _ _ => throw "sphinx: uninhabited"
   unwrap := fun _ _ => .ok (none, default, [], none)
-  newSURB := fun _ _ => pure (Vector.emptyWithCapacity 0, ByteArray.empty)
+  newSURB := fun _ => pure (Vector.emptyWithCapacity 0, ByteArray.empty)
   newPacketFromSURB := fun _ _ => .ok (ByteArray.empty, default)
   unwrap_complete := by
-    intro path privKeys filler payload st pkt st' _hpath _hrel _hkeys _hcmds _hsurb hwrap
+    intro path privKeys payload st pkt st' _hpath _hrel _hkeys _hcmds _hsurb hwrap
     cases hwrap
 }⟩
 

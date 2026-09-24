@@ -173,16 +173,19 @@ def runFillerRound (schemeName : String) (kem : KEM) : IO Bool := do
 /-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`kemSphinxScheme`
 instead of calling `newKEMPacket` directly. `wrapKEM` draws one seed *per hop*, so the stream
 must actually vary with the counter — unlike `NIKESphinx`'s version of this check, which draws
-only one seed total and can get away with a constant stream. -/
+only one seed total and can get away with a constant stream. A `pathLen` below `geom.nrHops`
+exercises `wrap`'s own filler draw, which reads further seeds after the per-hop ones. -/
 def runAbstractWrapRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
-    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
+    (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
+    (pathLen : Nat := geom.nrHops) : IO Bool := do
   let scheme := kemSphinxSchemeOf kem wbCipher macS kdfS streamS geom hvalid rfl h16
-  let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode kem)
+  let nodes ← (List.range pathLen).toArray.mapM (fun _ => newNode kem)
   let path ← buildPath nodes
-  let seeds ← nodes.mapM (fun _ => randomVector 32)
+  let fillerSeeds := (CryptWalker.Sphinx.Interface.fillerLength geom pathLen + 31) / 32
+  let seeds ← (List.range (pathLen + fillerSeeds)).toArray.mapM (fun _ => randomVector 32)
   let payload ← randomVector geom.forwardPayloadLength
   let stream := fun i => seeds[i]!
-  match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Interface.initWith stream) with
+  match scheme.wrap path.toList payload (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
     IO.eprintln s!"abstract wrap failed: {e}"
     pure false
@@ -198,7 +201,7 @@ def runCompletenessRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKE
   let seeds ← nodes.mapM (fun _ => randomVector 32)
   let payload ← randomVector geom.forwardPayloadLength
   let stream := fun i => seeds[i]!
-  match scheme.wrap path.toList ByteArray.empty payload (CryptWalker.Sphinx.Interface.initWith stream) with
+  match scheme.wrap path.toList payload (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
     IO.eprintln s!"completeness: wrap failed: {e}"
     pure false
@@ -228,7 +231,7 @@ def runAbstractSURBRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKE
   let path ← buildPath nodes true
   let seeds ← (List.range (nodes.size + 2)).toArray.mapM (fun _ => randomVector 32)
   let stream := fun i => seeds[i]!
-  match scheme.newSURB path.toList ByteArray.empty (CryptWalker.Sphinx.Interface.initWith stream) with
+  match scheme.newSURB path.toList (CryptWalker.Sphinx.Interface.initWith stream) with
   | .error e _ =>
     IO.eprintln s!"abstract newSURB failed: {e}"
     pure false
@@ -370,6 +373,15 @@ def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
   let abstractOk ← runAbstractWrapRound kem geom3 hvalid3 h163
   IO.println s!"abstract Sphinx.Interface.wrap (3 hops): {if abstractOk then "ok" else "FAIL"}"
   ok := ok && abstractOk
+
+  let geom5 := ofKEMWith schemeName kem 103 false 5
+  let hvalid5 := ofKEMWith_validForKEM schemeName kem 103 false 5
+  let h165 : 16 ≤ geom5.payloadTagLength + geom5.forwardPayloadLength := by
+    rw [ofKEMWith_payloadTagLength schemeName kem 103 false 5]
+    unfold CryptWalker.Sphinx.Constants.payloadTagLength; omega
+  let abstractFillerOk ← runAbstractWrapRound kem geom5 hvalid5 h165 3
+  IO.println s!"abstract Sphinx.Interface.wrap (3 hops of 5, drawn filler): {if abstractFillerOk then "ok" else "FAIL"}"
+  ok := ok && abstractFillerOk
 
   let completeOk ← runCompletenessRound kem geom3 hvalid3 h163
   IO.println s!"Sphinx.Interface.unwrap_complete via unwrapChainAux (3 hops): {if completeOk then "ok" else "FAIL"}"
