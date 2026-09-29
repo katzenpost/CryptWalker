@@ -108,3 +108,12 @@ name = "CryptWalker.Sphinx.kem_hybrid_vectors_test"
 
 [[lean_exe]]
 name = "CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test"
+
+[[lean_exe]]
+name = "CryptWalker.KEM.MLKEMHedged.mlkemhedged768_test"
+
+[[lean_exe]]
+name = "CryptWalker.KEM.mlkem768_hedged_test"
+
+[[lean_exe]]
+name = "CryptWalker.KEM.gen_mlkem768_hedged_vectors"

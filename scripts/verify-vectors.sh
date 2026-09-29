@@ -32,6 +32,11 @@ hpqc_pairs=(
   "testdata/sha512.json                                      testvectors/primitives/sha512.json"
   "testdata/mlkem768_x25519_combiner.json                    testvectors/kem/mlkem768_x25519_combiner.json"
   "testdata/lean_mlkem768_x25519_combiner_vectors.json       kem/combiner/testdata/lean_mlkem768_x25519_combiner_vectors.json"
+  "testdata/mlkem768_hedged.json                            testvectors/kem/mlkem768_hedged.json"
+  "testdata/lean_mlkem768_hedged_vectors.json                kem/mlkem768/testdata/lean_mlkem768_hedged_vectors.json"
+  "testdata/mlkem768_keygen.json                             kem/mlkem768/testdata/mlkem768_keygen.json"
+  "testdata/mlkem768_encapdecap.json                         kem/mlkem768/testdata/mlkem768_encapdecap.json"
+  "testdata/mlkem768_keycheck.json                           kem/mlkem768/testdata/mlkem768_keycheck.json"
 )
 
 katzenpost_pairs=(

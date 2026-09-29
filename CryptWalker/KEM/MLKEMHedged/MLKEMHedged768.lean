@@ -59,6 +59,14 @@ def encaps768Hedged (ek : EncapsulationKey params encoding) (m : Message) :
   let (k, r) := primitives.gEncaps mh ekHash
   (k, KPKE.encrypt ring encoding primitives ek mh r)
 
+/-- Hedged encapsulation is exactly FIPS 203's `Encaps_internal` (`MLKEM768.encaps768`) applied to
+`H(m)`. This is why NIST's ACVP encapsulation vectors, which give `Encaps_internal`'s input
+directly, check the hedged scheme everywhere except the pre-hash itself. -/
+theorem encaps768Hedged_eq_encaps768_hashH (ek : EncapsulationKey params encoding) (m : Message) :
+    encaps768Hedged ek m
+      = CryptWalker.KEM.MLKEM768.encaps768 ek (CryptWalker.KEM.MLKEM768.hashH (ofVector m)) :=
+  rfl
+
 private theorem encaps768Hedged_ct_wf (ek : EncapsulationKey params encoding) (m : Message) :
     (uBytes (encaps768Hedged ek m).2.uEncoded).size = 32 * params.du * params.k ∧
       (vBytes (encaps768Hedged ek m).2.vEncoded).size = 32 * params.dv := by
