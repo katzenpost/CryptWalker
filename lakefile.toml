@@ -117,3 +117,9 @@ name = "CryptWalker.KEM.mlkem768_hedged_test"
 
 [[lean_exe]]
 name = "CryptWalker.KEM.gen_mlkem768_hedged_vectors"
+
+[[lean_exe]]
+name = "CryptWalker.MultiRecipientHybrid.multirecipient_hybrid_test"
+
+[[lean_exe]]
+name = "CryptWalker.MultiRecipientHybrid.gen_multirecipient_hybrid_vectors"
