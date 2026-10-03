@@ -4,6 +4,11 @@ set -uo pipefail
 cd "$(dirname "$0")"
 status=0
 for cfg in ${@:-MC_*.cfg}; do
+    # FAST=1 (CI) skips configs marked "\* SLOW" on their second line.
+    if [ "${FAST:-0}" = 1 ] && sed -n 2p "$cfg" | grep -q '^\\\* SLOW'; then
+        echo "skip $cfg: slow"
+        continue
+    fi
     expect=$(sed -n 's/^\\\* EXPECT \(pass\|violated [A-Za-z]*\).*/\1/p' "$cfg" | head -1)
     out=$(./run.sh "$cfg" 2>&1)
     if grep -q "No error has been found" <<<"$out"; then
