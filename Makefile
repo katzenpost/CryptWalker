@@ -36,7 +36,8 @@ TESTS := \
 	CryptWalker.KEM.MLKEMHedged.mlkemhedged768_test \
 	CryptWalker.KEM.mlkem768_hedged_test \
 	CryptWalker.Sphinx.kem_hybrid_vectors_test \
-	CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test
+	CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test \
+	CryptWalker.GroupChat.ack_codec_test
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 

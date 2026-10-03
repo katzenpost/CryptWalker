@@ -68,3 +68,4 @@ import CryptWalker.Sphinx.nike_sphinx_theorems
 import CryptWalker.Sphinx.kem_sphinx_theorems
 import CryptWalker.Sphinx.schemes
 import CryptWalker.Sphinx.bench_registry
+import CryptWalker.GroupChat.AckCodec
