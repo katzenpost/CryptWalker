@@ -13,8 +13,10 @@ for cfg in ${@:-MC_*.cfg}; do
     out=$(./run.sh "$cfg" 2>&1)
     if grep -q "No error has been found" <<<"$out"; then
         got=pass
-    elif v=$(grep -oE "(Invariant|Temporal property) [A-Za-z]+ is violated|Property [A-Za-z]+ is violated" <<<"$out" | head -1); [ -n "$v" ]; then
+    elif v=$(grep -oE "(Invariant|Temporal property|Property) [A-Za-z]+ (is|was) violated" <<<"$out" | head -1); [ -n "$v" ]; then
         got="violated $(awk '{print $(NF-2)}' <<<"$v")"
+    elif grep -q "Temporal properties were violated" <<<"$out"; then
+        got="violated $(sed -n 's/^PROPERTY \([A-Za-z]*\).*/\1/p' "$cfg" | head -1)"
     else
         got="error"
     fi
