@@ -1,0 +1,232 @@
+------------------------------ MODULE Backfill ------------------------------
+(***************************************************************************)
+(* One member's stream: backfill, retention, acknowledgements and the      *)
+(* reader's scan, over the replica as katzenpost/replica/state.go stores   *)
+(* boxes. See "Opportunistic acknowledgements and backfill" and "Rewrite   *)
+(* and scan" in the group chat spec.                                       *)
+(*                                                                         *)
+(* The replica keys a box by the epoch it was stored in and keeps the      *)
+(* current and previous epochs. A write that matches what is stored is a   *)
+(* no-op and is not stored again; a tombstone is always stored at the      *)
+(* current epoch. Reads and writes look at the kept epochs, newest first.  *)
+(*                                                                         *)
+(* Acknowledgements travel on the reader's own messages, which the owner   *)
+(* reads at some later time or never: LearnAck abstracts that whole path.  *)
+(***************************************************************************)
+EXTENDS Integers, FiniteSets, TLC
+
+CONSTANTS
+    Readers,        \* the other members, all reading this stream
+    N,              \* positions the owner may write
+    MaxEpoch,       \* the last replica epoch explored
+    Retention,      \* epochs a Sent-box record is kept after its write
+    RefreshOnMatch, \* the replica stores a matching rewrite at the current epoch
+    NaiveAdopt,     \* a scan adopts its first empty probe, even right after the stuck position
+    AckFurthest     \* an ack names the furthest box read, as the spec says, not the end of the unbroken run
+
+VARIABLES
+    epoch,   \* current replica epoch
+    store,   \* store[p]: set of <<epoch, kind>> held for position p
+    written, \* positions 0..written-1 have been written by the owner
+    wEpoch,  \* wEpoch[p]: epoch of the first write of p
+    record,  \* record[p]: the owner's Sent-box record: "none", "plain", "held" (position only) or "gone"
+    lastRw,  \* lastRw[p]: last epoch the owner wrote or rewrote p
+    online,  \* the owner's client is running
+    cursor,  \* cursor[r]: next position r expects
+    mode,    \* mode[r]: "reading" or "scanning"
+    probe,   \* probe[r]: position a scan looks at next
+    seen,    \* seen[r]: positions r has read, data or tombstone
+    got,     \* got[r]: positions whose message r has ingested
+    acked    \* acked[r]: how far the owner knows r has read, -1 for nothing
+
+vars == <<epoch, store, written, wEpoch, record, lastRw, online,
+          cursor, mode, probe, seen, got, acked>>
+
+Pos == 0..(N - 1)
+Epochs == 0..MaxEpoch
+None == -1
+
+Kept(e) == IF e = 0 THEN {0} ELSE {e, e - 1}
+
+Visible(p) == {x \in store[p] : x[1] \in Kept(epoch)}
+
+\* What a read of p returns: the newest kept entry, or "none" (BoxIDNotFound).
+Look(p) ==
+    IF Visible(p) = {} THEN "none"
+    ELSE LET newest == CHOOSE x \in Visible(p) : \A y \in Visible(p) : y[1] <= x[1]
+         IN newest[2]
+
+Put(p, k) == [store EXCEPT ![p] = {x \in @ : x[1] # epoch} \cup {<<epoch, k>>}]
+
+\* The replica's handling of a write of kind k ("data" or "tomb") to p.
+Stored(p, k) ==
+    IF k = "tomb" THEN Put(p, "tomb")
+    ELSE IF Look(p) = "none" THEN Put(p, "data")
+    ELSE IF Look(p) = "data" /\ RefreshOnMatch THEN Put(p, "data")
+    ELSE store   \* matching data: idempotent no-op; a tombstone: refused
+
+Max(S) == CHOOSE m \in S : \A x \in S : x <= m
+
+\* How far r's next ack reaches.
+Front(r) ==
+    IF seen[r] = {} THEN None
+    ELSE IF AckFurthest THEN Max(seen[r])
+    ELSE LET run == {p \in seen[r] : \A q \in 0..p : q \in seen[r]}
+         IN IF run = {} THEN None ELSE Max(run)
+
+AllAcked(p) == \A r \in Readers : acked[r] >= p
+
+TypeOK ==
+    /\ epoch \in Epochs
+    /\ store \in [Pos -> SUBSET (Epochs \X {"data", "tomb"})]
+    /\ written \in 0..N
+    /\ wEpoch \in [Pos -> Epochs]
+    /\ record \in [Pos -> {"none", "plain", "held", "gone"}]
+    /\ lastRw \in [Pos -> Epochs \cup {None}]
+    /\ online \in BOOLEAN
+    /\ cursor \in [Readers -> 0..N]
+    /\ mode \in [Readers -> {"reading", "scanning"}]
+    /\ probe \in [Readers -> 0..N]
+    /\ seen \in [Readers -> SUBSET Pos]
+    /\ got \in [Readers -> SUBSET Pos]
+    /\ acked \in [Readers -> Pos \cup {None}]
+
+Init ==
+    /\ epoch = 0
+    /\ store = [p \in Pos |-> {}]
+    /\ written = 0
+    /\ wEpoch = [p \in Pos |-> 0]
+    /\ record = [p \in Pos |-> "none"]
+    /\ lastRw = [p \in Pos |-> None]
+    /\ online = TRUE
+    /\ cursor = [r \in Readers |-> 0]
+    /\ mode = [r \in Readers |-> "reading"]
+    /\ probe = [r \in Readers |-> 0]
+    /\ seen = [r \in Readers |-> {}]
+    /\ got = [r \in Readers |-> {}]
+    /\ acked = [r \in Readers |-> None]
+
+ReaderVars == <<cursor, mode, probe, seen, got>>
+
+(* Time and the replica *)
+
+Tick ==
+    /\ epoch < MaxEpoch
+    /\ epoch' = epoch + 1
+    \* GC: drop what no longer falls in the kept window. Reads and writes
+    \* ignore it already; dropping it only keeps the state small.
+    /\ store' = [p \in Pos |-> {x \in store[p] : x[1] \in Kept(epoch + 1)}]
+    /\ UNCHANGED <<written, wEpoch, record, lastRw, online, acked, ReaderVars>>
+
+(* The stream owner *)
+
+GoOffline == online /\ online' = FALSE /\ UNCHANGED <<epoch, store, written, wEpoch, record, lastRw, acked, ReaderVars>>
+GoOnline == ~online /\ online' = TRUE /\ UNCHANGED <<epoch, store, written, wEpoch, record, lastRw, acked, ReaderVars>>
+
+Send ==
+    /\ online
+    /\ written < N
+    /\ store' = Stored(written, "data")
+    /\ wEpoch' = [wEpoch EXCEPT ![written] = epoch]
+    /\ record' = [record EXCEPT ![written] = "plain"]
+    /\ lastRw' = [lastRw EXCEPT ![written] = epoch]
+    /\ written' = written + 1
+    /\ UNCHANGED <<epoch, online, acked, ReaderVars>>
+
+\* The periodic rewrite, at most once per epoch per box.
+Rewrite(p) ==
+    /\ online
+    /\ record[p] \in {"plain", "held"}
+    /\ lastRw[p] < epoch
+    /\ IF AllAcked(p)
+       THEN /\ store' = Stored(p, "tomb")
+            /\ record' = [record EXCEPT ![p] = "held"]
+       ELSE /\ store' = Stored(p, "data")
+            /\ UNCHANGED record
+    /\ lastRw' = [lastRw EXCEPT ![p] = epoch]
+    /\ UNCHANGED <<epoch, written, wEpoch, online, acked, ReaderVars>>
+
+\* The bounded retention window.
+Discard(p) ==
+    /\ record[p] \in {"plain", "held"}
+    /\ epoch >= wEpoch[p] + Retention
+    /\ record' = [record EXCEPT ![p] = "gone"]
+    /\ UNCHANGED <<epoch, store, written, wEpoch, lastRw, online, acked, ReaderVars>>
+
+\* r's ack reaches the owner, carried by some later message of r's.
+LearnAck(r) ==
+    /\ Front(r) > acked[r]
+    /\ acked' = [acked EXCEPT ![r] = Front(r)]
+    /\ UNCHANGED <<epoch, store, written, wEpoch, record, lastRw, online, ReaderVars>>
+
+(* A reader: the two-state machine of "Rewrite and scan" *)
+
+Ingest(r, p) ==
+    /\ seen' = [seen EXCEPT ![r] = @ \cup {p}]
+    /\ got' = [got EXCEPT ![r] = IF Look(p) = "data" THEN @ \cup {p} ELSE @]
+
+Read(r) ==
+    /\ mode[r] = "reading"
+    /\ cursor[r] < N
+    /\ Look(cursor[r]) # "none"
+    /\ Ingest(r, cursor[r])
+    /\ cursor' = [cursor EXCEPT ![r] = @ + 1]
+    /\ UNCHANGED <<mode, probe, epoch, store, written, wEpoch, record, lastRw, online, acked>>
+
+RequestScan(r) ==
+    /\ mode[r] = "reading"
+    /\ cursor[r] < N
+    /\ mode' = [mode EXCEPT ![r] = "scanning"]
+    /\ probe' = [probe EXCEPT ![r] = cursor[r] + 1]
+    /\ UNCHANGED <<cursor, seen, got, epoch, store, written, wEpoch, record, lastRw, online, acked>>
+
+ScanFound(r) ==
+    /\ mode[r] = "scanning"
+    /\ probe[r] < N
+    /\ Look(probe[r]) # "none"
+    /\ Ingest(r, probe[r])
+    /\ probe' = [probe EXCEPT ![r] = @ + 1]
+    /\ UNCHANGED <<cursor, mode, epoch, store, written, wEpoch, record, lastRw, online, acked>>
+
+\* BoxIDNotFound at the probe (or the end of the modelled stream): the
+\* scan ends. Unless NaiveAdopt, a scan that found nothing past the stuck
+\* position leaves the reader where it was.
+ScanEnd(r) ==
+    /\ mode[r] = "scanning"
+    /\ IF probe[r] >= N THEN TRUE ELSE Look(probe[r]) = "none"
+    /\ mode' = [mode EXCEPT ![r] = "reading"]
+    /\ cursor' = [cursor EXCEPT ![r] =
+                    IF NaiveAdopt \/ probe[r] > @ + 1 THEN probe[r] ELSE @]
+    /\ UNCHANGED <<probe, seen, got, epoch, store, written, wEpoch, record, lastRw, online, acked>>
+
+Next ==
+    \/ Tick \/ GoOffline \/ GoOnline \/ Send
+    \/ \E p \in Pos : Rewrite(p) \/ Discard(p)
+    \/ \E r \in Readers : LearnAck(r) \/ Read(r) \/ RequestScan(r) \/ ScanFound(r) \/ ScanEnd(r)
+
+Spec == Init /\ [][Next]_vars
+
+(* Properties *)
+
+\* "Every position stays populated": a box whose owner wrote or rewrote it
+\* in this epoch or the last can be read.
+Populated ==
+    \A p \in Pos : (record[p] \in {"plain", "held"} /\ lastRw[p] # None /\ lastRw[p] >= epoch - 1)
+                   => Look(p) # "none"
+
+\* "Acknowledging a stream's Nth box implies every earlier one has been
+\* read": what the owner counts as acknowledged, the reader has.
+NoSilentLoss ==
+    \A r \in Readers : \A p \in Pos : p <= acked[r] => p \in got[r]
+
+\* A reader never expects a position beyond the one the owner writes next.
+NoOvershoot ==
+    \A r \in Readers : cursor[r] <= written
+
+\* A tombstone stands only where every reader has acknowledged.
+NoPrematureTombstone ==
+    \A p \in Pos : Look(p) = "tomb" => AllAcked(p)
+
+Symmetry == Permutations(Readers)
+
+=============================================================================
