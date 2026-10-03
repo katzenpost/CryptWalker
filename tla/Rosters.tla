@@ -237,6 +237,10 @@ Converged ==
     Quiet => \A m, x \in joined : m # x =>
         LET f == Follow(m, x) IN f.ok /\ ~f.stuck /\ f.seq = roster[x]
 
+\* Messages written across the group, for bounding a model run.
+RECURSIVE SumLen(_, _)
+SumLen(f, S) == IF S = {} THEN 0 ELSE LET x == CHOOSE x \in S : TRUE IN Len(f[x]) + SumLen(f, S \ {x})
+
 Symmetry == Permutations(Joiners)
 
 =============================================================================
