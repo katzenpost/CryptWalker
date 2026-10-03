@@ -24,12 +24,9 @@ CONSTANTS BugNoWaitAcks, BugNoWaitIntro, BugCancelKeepsAcks, MaxQueue
 VARIABLES
     outbox,  \* outbox[m]: m's queued messages, oldest first
     taken,   \* taken[m][y]: how far m's queued or written messages acknowledge y's stream (acked_index)
-    owed,    \* owed[m]: ids of m's messages an induction waits for (OutgoingAcks rows)
-    nextId
+    owed     \* owed[m]: ids of m's messages an induction waits for (OutgoingAcks rows)
 
-cvars == <<vars, outbox, taken, owed, nextId>>
-
-Ids == 0..(2 * MaxLen * Cardinality(Members))
+cvars == <<vars, outbox, taken, owed>>
 
 \* A queued message. Text carries no reply; an Introduction carries the
 \* reply as built when the induction began.
@@ -51,23 +48,26 @@ PendingC(m) == {y \in Range(roster[m]) \ {m} : read[m][y] > taken[m][y]}
 
 Room(m) == Len(stream[m]) + Len(outbox[m]) < MaxLen /\ Len(outbox[m]) < MaxQueue
 
+\* The smallest id not queued or waited on: ids need only tell m's own messages apart.
+FreshId(m) == CHOOSE i \in 0..(MaxQueue + MaxLen) :
+                  /\ i \notin owed[m] /\ i \notin {q.id : q \in Queued(m)}
+                  /\ \A j \in 0..(i - 1) : j \in owed[m] \/ j \in {q.id : q \in Queued(m)}
+
 CInit ==
     /\ Init
     /\ outbox = [m \in Members |-> <<>>]
     /\ taken = [m \in Members |-> [y \in Members |-> 0]]
     /\ owed = [m \in Members |-> {}]
-    /\ nextId = 0
 
 \* Queue a text message with every acknowledgement pending.
 Attach(m) ==
     /\ m \in joined
     /\ Room(m)
     /\ LET acks == {<<IndexOf(roster[m], y), read[m][y]>> : y \in PendingC(m)}
-       IN /\ outbox' = [outbox EXCEPT ![m] = Append(@, Text(acks, nextId))]
+       IN /\ outbox' = [outbox EXCEPT ![m] = Append(@, Text(acks, FreshId(m)))]
           /\ taken' = [taken EXCEPT ![m] = [y \in Members |->
                           IF y \in PendingC(m) THEN read[m][y] ELSE @[y]]]
-          /\ owed' = IF acks # {} THEN [owed EXCEPT ![m] = @ \cup {nextId}] ELSE owed
-    /\ nextId' = nextId + 1
+          /\ owed' = IF acks # {} THEN [owed EXCEPT ![m] = @ \cup {FreshId(m)}] ELSE owed
     /\ UNCHANGED vars
 
 \* Begin inducting n: build the reply from what is written, queue the Introduction.
@@ -79,12 +79,11 @@ Induct(i, n) ==
     /\ BugNoWaitIntro \/ \A q \in Queued(i) : q.intro = NoOne
     /\ LET own == Append(roster[i], n)
            hand == HandSet(i) \ {n}
-           msg == [acks |-> {}, intro |-> n, id |-> nextId, own |-> own,
+           msg == [acks |-> {}, intro |-> n, id |-> FreshId(i), own |-> own,
                    hread |-> [y \in Members |-> IF y \in hand THEN ReadPos(i, y) ELSE 0],
                    hknow |-> (IF Extended THEN know[i] ELSE {}),
                    hbase |-> [y \in Members |-> IF y \in hand THEN HandedBase(i, n, y, own) ELSE <<"none">>]]
        IN outbox' = [outbox EXCEPT ![i] = Append(@, msg)]
-    /\ nextId' = nextId + 1
     /\ UNCHANGED <<vars, taken, owed>>
 
 \* Write the oldest queued message to the stream.
@@ -111,7 +110,6 @@ Write(m) ==
                      /\ know' = [know EXCEPT ![n] =
                                    msg.hknow \cup (IF Extended THEN {<<m, q>> : q \in 1..pos} ELSE {<<m, pos>>})]
                      /\ base' = [base EXCEPT ![n] = msg.hbase, ![m][n] = <<"given", msg.own>>]
-    /\ UNCHANGED nextId
 
 \* Cancel a queued text message. Its acknowledgements are owed again on
 \* the next message, unless BugCancelKeepsAcks.
@@ -129,10 +127,10 @@ Cancel(m, k) ==
                                      \cup {AckedBy(m, y), floor[m][y]}
                        IN IF y \in Range(roster[m]) THEN CHOOSE l \in levels : \A x \in levels : x <= l
                           ELSE @[y]]]
-    /\ UNCHANGED <<vars, nextId>>
+    /\ UNCHANGED vars
 
 CNext ==
-    \/ \E m, y \in Members : Read(m, y) /\ UNCHANGED <<outbox, taken, owed, nextId>>
+    \/ \E m, y \in Members : Read(m, y) /\ UNCHANGED <<outbox, taken, owed>>
     \/ \E m \in Members : Attach(m) \/ Write(m)
     \/ \E i, n \in Members : Induct(i, n)
     \/ \E m \in Members : \E k \in 1..MaxQueue : Cancel(m, k)
