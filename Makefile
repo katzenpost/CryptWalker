@@ -36,7 +36,8 @@ TESTS := \
 	CryptWalker.KEM.MLKEMHedged.mlkemhedged768_test \
 	CryptWalker.KEM.mlkem768_hedged_test \
 	CryptWalker.Sphinx.kem_hybrid_vectors_test \
-	CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test
+	CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test \
+	CryptWalker.GroupChat.ack_codec_test
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 
@@ -51,7 +52,7 @@ EXES := $(TESTS) CryptWalker.Bench.benchmark CryptWalker.Sphinx.gen_nike_vectors
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
-.PHONY: verify-vectors
+.PHONY: verify-vectors axioms tla
 
 all: build ## build everything, library and executables
 
@@ -128,9 +129,16 @@ gen-hedged-vectors: build ## build hedged ML-KEM-768 vectors, for cross-checking
 # checked out at ../hpqc, ../katzenpost.
 HPQC_DIR ?= ../hpqc
 KATZENPOST_DIR ?= ../katzenpost
+KATZENQT_DIR ?= ../katzenqt
 
-verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc/katzenpost source copies
-	@./scripts/verify-vectors.sh "$(HPQC_DIR)" "$(KATZENPOST_DIR)"
+verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc/katzenpost/katzenqt source copies
+	@./scripts/verify-vectors.sh "$(HPQC_DIR)" "$(KATZENPOST_DIR)" "$(KATZENQT_DIR)"
+
+axioms: build ## fail if a group chat theorem rests on sorry, native_decide or a declared axiom
+	@./scripts/check-axioms.sh
+
+tla: ## model-check every tla/protocol and tla/impl config against its EXPECT line (needs java and tla2tools.jar)
+	@./tla/check.sh
 
 test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer vectors
 	@$(BIN)/CryptWalker-Sphinx-kem_selftest
