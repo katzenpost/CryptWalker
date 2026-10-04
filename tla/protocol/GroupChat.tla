@@ -1,4 +1,4 @@
------------------------------- MODULE Rosters ------------------------------
+----------------------------- MODULE GroupChat -----------------------------
 (***************************************************************************)
 (* Rosters and acknowledgements across a group. See "Rosters" in the group *)
 (* chat spec.                                                              *)
@@ -11,6 +11,11 @@
 (* stream order, stopping at the first acknowledgement the watcher cannot  *)
 (* yet read. Storage is reliable here; Backfill.tla covers its loss.       *)
 (*                                                                         *)
+(* HandIntroductions chooses the reply to a new member: FALSE is the       *)
+(* spec's, the introducer's rosters alone; TRUE also hands over the        *)
+(* Introductions and acknowledgements the introducer has read, as          *)
+(* katzenqt does.                                                          *)
+(*                                                                         *)
 (* Positions count from 1. An acknowledgement <<i, r>> says the sender has *)
 (* read r boxes of the stream at its roster index i (indexes count from    *)
 (* 0); it covers an Introduction at position q when q <= r.                *)
@@ -22,7 +27,7 @@ CONSTANTS
     Joiners,      \* members who may be inducted later
     NoOne,        \* "this message introduces nobody"
     MaxLen,       \* the most messages a stream holds
-    Extended,     \* the reply to a new member carries what katzenqt hands over, not the spec's Rosters alone
+    HandIntroductions, \* the reply to a new member carries the Introductions and acknowledgements read, not Rosters alone
     AcksOnIntro,  \* an Introduction may carry acknowledgements
     AckAll        \* a message acknowledges every stream newly read, as far as read, as katzenqt does
 
@@ -182,30 +187,35 @@ HandedBase(i, n, y, own) ==
     IF y = i THEN <<"given", own>>
     ELSE LET f == Follow(i, y)
          IN IF f.ok THEN <<"given", f.seq>>
-            ELSE IF Extended THEN base[i][y] ELSE <<"none">>
+            ELSE IF HandIntroductions THEN base[i][y] ELSE <<"none">>
 
-\* i inducts n: the Introduction on i's stream and the reply to n, all or nothing.
+\* The Introduction of n on i's stream, carrying acks, and the reply to n,
+\* all or nothing. ownI is i's roster afterwards and ownN the roster the
+\* reply gives n; the protocol makes them the same.
+IntroduceWith(i, n, acks, ownI, ownN) ==
+    LET pos == Len(stream[i]) + 1
+        hand == HandSet(i) \ {n}
+    IN /\ stream' = [stream EXCEPT ![i] = Append(@, [acks |-> acks, intro |-> n])]
+       /\ roster' = [roster EXCEPT ![i] = ownI, ![n] = ownN]
+       /\ joined' = joined \cup {n}
+       /\ promised' = [promised EXCEPT ![n] = Len(ownN) - 1]
+       /\ introducer' = [introducer EXCEPT ![n] = i]
+       /\ read' = [read EXCEPT ![n] = [y \in Members |->
+                     IF y = i THEN pos ELSE IF y \in hand THEN ReadPos(i, y) ELSE 0]]
+       /\ floor' = [floor EXCEPT ![n] = read'[n]]
+       /\ know' = [know EXCEPT ![n] =
+                     (IF HandIntroductions THEN know[i] \cup {<<i, q>> : q \in 1..pos} ELSE {<<i, pos>>})]
+       /\ base' = [base EXCEPT
+                     ![n] = [y \in Members |-> IF y \in hand THEN HandedBase(i, n, y, ownN) ELSE <<"none">>],
+                     ![i][n] = <<"given", ownN>>]
+
+\* i inducts n.
 Introduce(i, n) ==
     /\ i \in joined /\ n \in Joiners \ joined
     /\ Len(stream[i]) < MaxLen
     /\ \E acks \in (IF AcksOnIntro THEN AckChoices(i) ELSE {{}}) :
-         LET grown == Grown(i, roster[i], acks)
-             own == Append(grown, n)
-             pos == Len(stream[i]) + 1
-             hand == HandSet(i) \ {n}
-         IN /\ stream' = [stream EXCEPT ![i] = Append(@, [acks |-> acks, intro |-> n])]
-            /\ roster' = [roster EXCEPT ![i] = own, ![n] = own]
-            /\ joined' = joined \cup {n}
-            /\ promised' = [promised EXCEPT ![n] = Len(own) - 1]
-            /\ introducer' = [introducer EXCEPT ![n] = i]
-            /\ read' = [read EXCEPT ![n] = [y \in Members |->
-                          IF y = i THEN pos ELSE IF y \in hand THEN ReadPos(i, y) ELSE 0]]
-            /\ floor' = [floor EXCEPT ![n] = read'[n]]
-            /\ know' = [know EXCEPT ![n] =
-                          (IF Extended THEN know[i] \cup {<<i, q>> : q \in 1..pos} ELSE {<<i, pos>>})]
-            /\ base' = [base EXCEPT
-                          ![n] = [y \in Members |-> IF y \in hand THEN HandedBase(i, n, y, own) ELSE <<"none">>],
-                          ![i][n] = <<"given", own>>]
+         LET own == Append(Grown(i, roster[i], acks), n)
+         IN IntroduceWith(i, n, acks, own, own)
 
 Next ==
     \/ \E m \in Members : Send(m)

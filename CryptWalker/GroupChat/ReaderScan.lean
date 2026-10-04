@@ -18,7 +18,7 @@ should do.
 * `ingest_iff_data`: a message is ingested exactly when a box held one.
 
 Which position a scan should adopt is the driver's business and not in `step`; that question is
-`NoOvershoot` in `tla/Backfill.tla`. -/
+`NoOvershoot` in `tla/protocol/Backfill.tla`. -/
 
 namespace CryptWalker.GroupChat.ReaderScan
 

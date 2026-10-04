@@ -3,7 +3,7 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 status=0
-for cfg in ${@:-MC_*.cfg}; do
+for cfg in ${@:-protocol/MC_*.cfg impl/MC_*.cfg}; do
     # FAST=1 (CI) skips configs marked "\* SLOW" on their second line.
     if [ "${FAST:-0}" = 1 ] && sed -n 2p "$cfg" | grep -q '^\\\* SLOW'; then
         echo "skip $cfg: slow"
@@ -15,7 +15,7 @@ for cfg in ${@:-MC_*.cfg}; do
         got=pass
     elif v=$(grep -oE "(Invariant|Temporal property|Property) [A-Za-z]+ (is|was) violated" <<<"$out" | head -1); [ -n "$v" ]; then
         got="violated $(awk '{print $(NF-2)}' <<<"$v")"
-    elif grep -q "Temporal properties were violated" <<<"$out"; then
+    elif grep -qE "Temporal properties were violated|Action property .* is violated" <<<"$out"; then
         got="violated $(sed -n 's/^PROPERTY \([A-Za-z]*\).*/\1/p' "$cfg" | head -1)"
     else
         got="error"

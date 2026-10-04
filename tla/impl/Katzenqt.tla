@@ -1,13 +1,22 @@
---------------------------- MODULE RostersClient ---------------------------
+------------------------------ MODULE Katzenqt ------------------------------
 (***************************************************************************)
-(* A client's send path over Rosters.tla, as katzenqt's acks.py runs it.   *)
+(* katzenqt's send path, as acks.py and voucher.py run it, over the        *)
+(* protocol model GroupChat.tla.                                           *)
 (*                                                                         *)
 (* A message takes its acknowledgements when it is queued and numbers     *)
-(* anyone only when it is written. An induction builds the reply to the    *)
-(* new member from what is written so far, and queues the Introduction;   *)
-(* the new member gets the reply when the Introduction is written, the    *)
-(* two going in one all-or-nothing write. A queued message may be          *)
-(* cancelled.                                                              *)
+(* anyone only when it is written. An induction fixes the roster it will   *)
+(* promise the new member from what is written so far, and queues the     *)
+(* Introduction; the new member gets the reply when the Introduction is    *)
+(* written, the two going in one all-or-nothing write. A queued message    *)
+(* may be cancelled.                                                       *)
+(*                                                                         *)
+(* katzenqt builds the whole reply when the induction begins. Here only    *)
+(* the promised roster is fixed then; the rest is read off at the write,   *)
+(* as the protocol does. An earlier view of read positions is still a     *)
+(* valid reply, and the promised roster is what #108's bugs got wrong.     *)
+(*                                                                         *)
+(* ProtocolSpec is GroupChat's Spec: every write katzenqt makes must be a  *)
+(* step the protocol allows.                                               *)
 (*                                                                         *)
 (* Each Bug flag undoes one fix from katzenqt#108:                         *)
 (*   BugNoWaitAcks       6f06a4b: an induction need not wait for queued    *)
@@ -17,7 +26,7 @@
 (*   BugCancelKeepsAcks  f2e4c01: cancelling a message keeps the           *)
 (*                       acknowledgements it took, and what waits on them. *)
 (***************************************************************************)
-EXTENDS Rosters
+EXTENDS GroupChat
 
 CONSTANTS BugNoWaitAcks, BugNoWaitIntro, BugCancelKeepsAcks, MaxQueue
 
@@ -28,11 +37,8 @@ VARIABLES
 
 cvars == <<vars, outbox, taken, owed>>
 
-\* A queued message. Text carries no reply; an Introduction carries the
-\* reply as built when the induction began.
-Text(acks, id) == [acks |-> acks, intro |-> NoOne, id |-> id,
-                   own |-> <<>>, hread |-> [y \in Members |-> 0], hknow |-> {},
-                   hbase |-> [y \in Members |-> <<"none">>]]
+\* A queued message. An Introduction carries the roster its reply promises.
+Text(acks, id) == [acks |-> acks, intro |-> NoOne, id |-> id, own |-> <<>>]
 
 Queued(m) == {outbox[m][k] : k \in DOMAIN outbox[m]}
 
@@ -70,20 +76,15 @@ Attach(m) ==
           /\ owed' = IF acks # {} THEN [owed EXCEPT ![m] = @ \cup {FreshId(m)}] ELSE owed
     /\ UNCHANGED vars
 
-\* Begin inducting n: build the reply from what is written, queue the Introduction.
+\* Begin inducting n: fix the roster to promise from what is written, queue the Introduction.
 Induct(i, n) ==
     /\ i \in joined /\ n \in Joiners \ joined
     /\ \A m \in Members : \A q \in Queued(m) : q.intro # n
     /\ Room(i)
     /\ BugNoWaitAcks \/ owed[i] = {}
     /\ BugNoWaitIntro \/ \A q \in Queued(i) : q.intro = NoOne
-    /\ LET own == Append(roster[i], n)
-           hand == HandSet(i) \ {n}
-           msg == [acks |-> {}, intro |-> n, id |-> FreshId(i), own |-> own,
-                   hread |-> [y \in Members |-> IF y \in hand THEN ReadPos(i, y) ELSE 0],
-                   hknow |-> (IF Extended THEN know[i] ELSE {}),
-                   hbase |-> [y \in Members |-> IF y \in hand THEN HandedBase(i, n, y, own) ELSE <<"none">>]]
-       IN outbox' = [outbox EXCEPT ![i] = Append(@, msg)]
+    /\ outbox' = [outbox EXCEPT ![i] = Append(@,
+                    [acks |-> {}, intro |-> n, id |-> FreshId(i), own |-> Append(roster[i], n)])]
     /\ UNCHANGED <<vars, taken, owed>>
 
 \* Write the oldest queued message to the stream.
@@ -91,25 +92,15 @@ Write(m) ==
     /\ outbox[m] # <<>>
     /\ LET msg == Head(outbox[m])
            grown == Grown(m, roster[m], msg.acks)
-           pos == Len(stream[m]) + 1
            n == msg.intro
-       IN /\ stream' = [stream EXCEPT ![m] = Append(@, [acks |-> msg.acks, intro |-> n])]
-          /\ outbox' = [outbox EXCEPT ![m] = Tail(@)]
+       IN /\ outbox' = [outbox EXCEPT ![m] = Tail(@)]
           /\ owed' = [owed EXCEPT ![m] = @ \ {msg.id}]
           /\ IF n = NoOne
-             THEN /\ roster' = [roster EXCEPT ![m] = grown]
+             THEN /\ stream' = [stream EXCEPT ![m] = Append(@, [acks |-> msg.acks, intro |-> NoOne])]
+                  /\ roster' = [roster EXCEPT ![m] = grown]
                   /\ UNCHANGED <<joined, read, know, base, promised, introducer, floor, taken>>
-             ELSE LET hread == [msg.hread EXCEPT ![m] = pos]
-                  IN /\ roster' = [roster EXCEPT ![m] = Append(grown, n), ![n] = msg.own]
-                     /\ joined' = joined \cup {n}
-                     /\ promised' = [promised EXCEPT ![n] = Len(msg.own) - 1]
-                     /\ introducer' = [introducer EXCEPT ![n] = m]
-                     /\ read' = [read EXCEPT ![n] = hread]
-                     /\ floor' = [floor EXCEPT ![n] = hread]
-                     /\ taken' = [taken EXCEPT ![n] = hread]
-                     /\ know' = [know EXCEPT ![n] =
-                                   msg.hknow \cup (IF Extended THEN {<<m, q>> : q \in 1..pos} ELSE {<<m, pos>>})]
-                     /\ base' = [base EXCEPT ![n] = msg.hbase, ![m][n] = <<"given", msg.own>>]
+             ELSE /\ IntroduceWith(m, n, msg.acks, Append(grown, n), msg.own)
+                  /\ taken' = [taken EXCEPT ![n] = read'[n]]
 
 \* Cancel a queued text message. Its acknowledgements are owed again on
 \* the next message, unless BugCancelKeepsAcks.
@@ -138,6 +129,9 @@ CNext ==
 CSpec == CInit /\ [][CNext]_cvars
 
 (* Properties *)
+
+\* Every write katzenqt makes is a step the protocol allows.
+ProtocolSpec == Spec
 
 \* A client never counts as acknowledged what no written or queued message says.
 NoLostAck == \A m \in joined : \A y \in Members : taken[m][y] <= Claimed(m, y)

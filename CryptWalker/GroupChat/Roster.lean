@@ -25,7 +25,7 @@ message at position `q` of `y`'s stream.
   any number of messages, provided the owner numbered with complete knowledge too.
 * `incomplete_breaks_watch`: a new member handed only rosters (the spec's `ReplyWho`) does not
   have the Introductions before where it starts reading, and misplaces a member. This is the
-  counterexample TLC finds in `tla/MC_Rosters_SpecOnly.cfg`. -/
+  counterexample TLC finds in `tla/protocol/MC_GroupChat_SpecReply.cfg`. -/
 
 namespace CryptWalker.GroupChat.Roster
 

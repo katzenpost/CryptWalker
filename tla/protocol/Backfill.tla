@@ -1,26 +1,27 @@
 ------------------------------ MODULE Backfill ------------------------------
 (***************************************************************************)
 (* One member's stream: backfill, retention, acknowledgements and the      *)
-(* reader's scan, over the replica as katzenpost/replica/state.go stores   *)
-(* boxes. See "Opportunistic acknowledgements and backfill" and "Rewrite   *)
-(* and scan" in the group chat spec.                                       *)
+(* reader's scan. See "Opportunistic acknowledgements and backfill" and    *)
+(* "Rewrite and scan" in the group chat spec.                              *)
 (*                                                                         *)
-(* The replica keys a box by the epoch it was stored in and keeps the      *)
-(* current and previous epochs. A write that matches what is stored is a   *)
-(* no-op and is not stored again; a tombstone is always stored at the      *)
-(* current epoch. Reads and writes look at the kept epochs, newest first.  *)
+(* StoredOp is how a replica handles a write: Replica.tla's SpecStored for *)
+(* the protocol, impl/KatzenpostReplica.tla's DeployedStored for the       *)
+(* replica as deployed.                                                    *)
+(*                                                                         *)
+(* NaiveAdopt, AckFurthest and KeepHoles choose between the spec as        *)
+(* written and the changes these models propose.                           *)
 (*                                                                         *)
 (* Acknowledgements travel on the reader's own messages, which the owner   *)
 (* reads at some later time or never: LearnAck abstracts that whole path.  *)
 (***************************************************************************)
-EXTENDS Integers, FiniteSets, TLC
+EXTENDS Replica, FiniteSets, TLC
 
 CONSTANTS
     Readers,        \* the other members, all reading this stream
     N,              \* positions the owner may write
     MaxEpoch,       \* the last replica epoch explored
     Retention,      \* epochs a Sent-box record is kept after its write
-    RefreshOnMatch, \* the replica stores a matching rewrite at the current epoch
+    StoredOp(_, _, _), \* a replica's handling of a write: StoredOp(entries, epoch, kind)
     NaiveAdopt,     \* a scan adopts its first empty probe, even right after the stuck position
     AckFurthest,    \* an ack names the furthest box read, as the spec says, not the end of the unbroken run
     AllowScan,      \* the user may ask for a scan
@@ -49,24 +50,11 @@ Pos == 0..(N - 1)
 Epochs == 0..MaxEpoch
 None == -1
 
-Kept(e) == IF e = 0 THEN {0} ELSE {e, e - 1}
-
-Visible(p) == {x \in store[p] : x[1] \in Kept(epoch)}
-
 \* What a read of p returns: the newest kept entry, or "none" (BoxIDNotFound).
-Look(p) ==
-    IF Visible(p) = {} THEN "none"
-    ELSE LET newest == CHOOSE x \in Visible(p) : \A y \in Visible(p) : y[1] <= x[1]
-         IN newest[2]
+Look(p) == LookIn(store[p], epoch)
 
-Put(p, k) == [store EXCEPT ![p] = {x \in @ : x[1] # epoch} \cup {<<epoch, k>>}]
-
-\* The replica's handling of a write of kind k ("data" or "tomb") to p.
-Stored(p, k) ==
-    IF k = "tomb" THEN Put(p, "tomb")
-    ELSE IF Look(p) = "none" THEN Put(p, "data")
-    ELSE IF Look(p) = "data" /\ RefreshOnMatch THEN Put(p, "data")
-    ELSE store   \* matching data: idempotent no-op; a tombstone: refused
+\* The store after a write of kind k ("data" or "tomb") to p.
+Stored(p, k) == [store EXCEPT ![p] = StoredOp(store[p], epoch, k)]
 
 Max(S) == CHOOSE m \in S : \A x \in S : x <= m
 

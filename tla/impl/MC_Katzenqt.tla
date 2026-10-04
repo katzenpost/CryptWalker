@@ -1,5 +1,5 @@
--------------------------- MODULE MC_RostersClient --------------------------
-EXTENDS RostersClient
+---------------------------- MODULE MC_Katzenqt ----------------------------
+EXTENDS Katzenqt
 CONSTANTS a, b, c, d, MCMaxTotal
 MCFounderSeq == <<a, b>>
 MCJoiners == {c, d}

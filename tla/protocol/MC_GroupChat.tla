@@ -1,5 +1,5 @@
------------------------------ MODULE MC_Rosters -----------------------------
-EXTENDS Rosters
+---------------------------- MODULE MC_GroupChat ----------------------------
+EXTENDS GroupChat
 CONSTANTS a, b, c, d, MCMaxTotal
 MCFounderSeq == <<a, b>>
 MCJoiners == {c, d}

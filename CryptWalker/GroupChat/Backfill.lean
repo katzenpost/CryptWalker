@@ -24,7 +24,7 @@ move it to the current epoch.
   rewritten in epoch `e` could be read through `e + 1`, whatever it held before.
 * `tomb_kept`: a tombstone is stored at the current epoch either way, and shadows older data.
 
-The `Retention`, scan and acknowledgement questions are in `tla/Backfill.tla`. -/
+The `Retention`, scan and acknowledgement questions are in `tla/protocol/Backfill.tla`. -/
 
 namespace CryptWalker.GroupChat.Backfill
 
@@ -79,8 +79,8 @@ theorem look_put_next {now : ℕ} {k : Kind} {b : Box} (hb : Settled now b) :
 
 /-- **A box written in epoch `e` and rewritten in `e + 1` is gone in `e + 2`.** The rewrite
 matched what was stored, so nothing was stored at `e + 1`, and the entry from `e` is outside the
-kept window. This is the counterexample TLC finds in `tla/MC_Backfill_Deployed.cfg`, for every
-epoch rather than the first few. -/
+kept window. This is the counterexample TLC finds in
+`tla/impl/MC_KatzenpostReplica_Populated.cfg`, for every epoch rather than the first few. -/
 theorem deployed_rewrite_lost (e : ℕ) :
     let first := write false e .data []
     let rewritten := write false (e + 1) .data first
