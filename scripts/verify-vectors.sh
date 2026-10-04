@@ -5,7 +5,7 @@
 # same check by hand with two `sha256sum` invocations per file listed below.
 #
 # Usage:
-#   scripts/verify-vectors.sh [HPQC_DIR] [KATZENPOST_DIR]
+#   scripts/verify-vectors.sh [HPQC_DIR] [KATZENPOST_DIR] [KATZENQT_DIR]
 #
 # Both default to sibling checkouts (../hpqc, ../katzenpost relative to this repo) if not given
 # and not already set as environment variables (HPQC_DIR, KATZENPOST_DIR).
@@ -19,6 +19,7 @@ cd "$repo_root"
 
 HPQC_DIR="${1:-${HPQC_DIR:-../hpqc}}"
 KATZENPOST_DIR="${2:-${KATZENPOST_DIR:-../katzenpost}}"
+KATZENQT_DIR="${3:-${KATZENQT_DIR:-../katzenqt}}"
 
 # Each entry: "CryptWalker path" "source repo path, relative to HPQC_DIR or KATZENPOST_DIR".
 # The source path's own repo root is substituted at comparison time.
@@ -68,6 +69,11 @@ katzenpost_pairs=(
   "testdata/lean_kem_hybrid_vectors.json                     core/sphinx/testdata/lean_kem_hybrid_vectors.json"
 )
 
+# acks_vectors.json comes from katzenqt#108 until it merges.
+katzenqt_pairs=(
+  "testdata/acks_vectors.json                                tests/data/acks_vectors.json"
+)
+
 sha256_of() {
   if [ ! -f "$1" ]; then
     echo "MISSING"
@@ -108,6 +114,7 @@ check_group() {
 ok=1
 check_group "hpqc" "$HPQC_DIR" hpqc_pairs || ok=0
 check_group "katzenpost" "$KATZENPOST_DIR" katzenpost_pairs || ok=0
+check_group "katzenqt" "$KATZENQT_DIR" katzenqt_pairs || ok=0
 
 echo
 if [ "$ok" -eq 1 ]; then
