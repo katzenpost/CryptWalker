@@ -77,10 +77,16 @@ structure ReadCap where
 def marshalReadCap (rc : ReadCap) : Vector UInt8 ReadCapSize :=
   (rc.rootPublicKey ++ marshalMessageBoxIndex rc.messageBoxIndex : Vector UInt8 136)
 
-def unmarshalReadCap (data : Vector UInt8 ReadCapSize) : ReadCap where
-  rootPublicKey   := Vector.ofFn fun i : Fin 32 => data[i.val]!
-  messageBoxIndex := unmarshalMessageBoxIndex (Vector.ofFn fun i : Fin MessageBoxIndexSize =>
-    data[i.val + 32]!)
+/-- Deserialize `pubkey ++ index`, or `none` if the root public key is not a point on
+edwards25519. Go's `ReadCap.UnmarshalBinary` and Python's `ReadCap.from_bytes` reject the same
+blobs; like Go's `Point.SetBytes`, `decodePoint` accepts an unreduced `y`. -/
+def unmarshalReadCap (data : Vector UInt8 ReadCapSize) : Option ReadCap :=
+  let pk : Vector UInt8 32 := Vector.ofFn fun i : Fin 32 => data[i.val]!
+  if (CryptWalker.Sign.Ed25519Math.decodePoint pk).isSome then
+    some { rootPublicKey := pk
+           messageBoxIndex := unmarshalMessageBoxIndex (Vector.ofFn fun i : Fin MessageBoxIndexSize =>
+             data[i.val + 32]!) }
+  else none
 
 /-- A write capability: the root Ed25519 *seed* plus the earliest index the holder can reach.
 
@@ -126,12 +132,16 @@ def ReadCap.withMessageBoxIndex (rc : ReadCap) (idx : MessageBoxIndex) : ReadCap
 def marshalWriteCap (wc : WriteCap) : Vector UInt8 WriteCapSize :=
   (wc.rootSeed ++ wc.rootPublicKey ++ marshalMessageBoxIndex wc.messageBoxIndex : Vector UInt8 168)
 
-/-- Deserialize `seed ++ pubkey ++ index`. The stored public key is ignored: it is implied by
-the seed, and re-deriving it is what Go's `UnmarshalBinary` does too. -/
-def unmarshalWriteCap (data : Vector UInt8 WriteCapSize) : WriteCap where
-  rootSeed        := Vector.ofFn fun i : Fin 32 => data[i.val]!
-  messageBoxIndex := unmarshalMessageBoxIndex (Vector.ofFn fun i : Fin MessageBoxIndexSize =>
-    data[i.val + 64]!)
+/-- Deserialize `seed ++ pubkey ++ index`, or `none` if the stored public key is not the one the
+seed derives. Go's `WriteCap.UnmarshalBinary` and Python's `WriteCap.from_bytes` reject the same
+blobs: a cap whose halves disagreed would derive box IDs from one key and sign with another. -/
+def unmarshalWriteCap (data : Vector UInt8 WriteCapSize) : Option WriteCap :=
+  let wc : WriteCap :=
+    { rootSeed        := Vector.ofFn fun i : Fin 32 => data[i.val]!
+      messageBoxIndex := unmarshalMessageBoxIndex (Vector.ofFn fun i : Fin MessageBoxIndexSize =>
+        data[i.val + 64]!) }
+  let stored : Vector UInt8 32 := Vector.ofFn fun i : Fin 32 => data[i.val + 32]!
+  if wc.rootPublicKey == stored then some wc else none
 
 /-! Each `unmarshal ∘ marshal` below is the identity. The two `Vector.append` indexing lemmas
 split a marshalled buffer back into its fields, one for each side of a concatenation, and
@@ -207,14 +217,18 @@ private theorem getU64LE_putU64LE (v : UInt64) : getU64LE (putU64LE v) = v := by
   simp only [unmarshalMessageBoxIndex, marshalMessageBoxIndex, h0, h8, h40, h72,
     getU64LE_putU64LE]
 
-@[simp] theorem unmarshal_marshal_readCap (rc : ReadCap) :
-    unmarshalReadCap (marshalReadCap rc) = rc := by
+/-- A read cap whose root public key is a curve point round-trips. -/
+theorem unmarshal_marshal_readCap (rc : ReadCap)
+    (h : (CryptWalker.Sign.Ed25519Math.decodePoint rc.rootPublicKey).isSome) :
+    unmarshalReadCap (marshalReadCap rc) = some rc := by
   obtain ⟨pub, idx⟩ := rc
   simp only [unmarshalReadCap, marshalReadCap, ofFn_append_left,
     ofFn_append_right _ _ rfl, unmarshal_marshal_messageBoxIndex]
+  rw [if_pos h]
 
+/-- Every write cap round-trips: `marshalWriteCap` writes the public key its seed derives. -/
 @[simp] theorem unmarshal_marshal_writeCap (wc : WriteCap) :
-    unmarshalWriteCap (marshalWriteCap wc) = wc := by
+    unmarshalWriteCap (marshalWriteCap wc) = some wc := by
   obtain ⟨seed, idx⟩ := wc
   have hseed : (Vector.ofFn fun i : Fin 32 =>
       ((seed ++ WriteCap.rootPublicKey ⟨seed, idx⟩) ++ marshalMessageBoxIndex idx :
@@ -223,7 +237,14 @@ private theorem getU64LE_putU64LE (v : UInt64) : getU64LE (putU64LE v) = v := by
     intro i hi
     rw [Vector.getElem_ofFn, getElem!_append_left _ _ _ (by omega),
       getElem!_append_left _ _ _ hi, getElem!_pos _ i hi]
-  simp only [unmarshalWriteCap, marshalWriteCap, hseed,
-    ofFn_append_right _ _ rfl, unmarshal_marshal_messageBoxIndex]
+  have hpub : (Vector.ofFn fun i : Fin 32 =>
+      ((seed ++ WriteCap.rootPublicKey ⟨seed, idx⟩) ++ marshalMessageBoxIndex idx :
+        Vector UInt8 168)[i.val + 32]!) = WriteCap.rootPublicKey ⟨seed, idx⟩ := by
+    apply Vector.ext
+    intro i hi
+    rw [Vector.getElem_ofFn, getElem!_append_left _ _ _ (by omega),
+      getElem!_append_right _ _ _ _ hi rfl, getElem!_pos _ i hi]
+  simp only [unmarshalWriteCap, marshalWriteCap, hseed, hpub,
+    ofFn_append_right _ _ rfl, unmarshal_marshal_messageBoxIndex, beq_self_eq_true, if_true]
 
 end CryptWalker.BACAP.Types
