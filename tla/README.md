@@ -71,6 +71,14 @@ chooses between them: `NaiveAdopt`, `AckFurthest` and `KeepHoles` in `Backfill.t
 | `MC_Katzenqt_NoWaitIntro` | violated `ProtocolSpec` | b88abff undone: two inductions promise the same roster index |
 | `MC_Katzenqt_CancelKeepsAcks` | violated `NoLostAck` | f2e4c01 undone. Every step is still one the protocol allows; only katzenqt's own invariant catches this bug |
 
+Both implementations use BACAP's stateless API. katzenqt keeps its own read and write positions
+and hands kpclientd a capability and an index with each request; kpclientd keeps no reader or
+writer state (katzenpost#1200). The models have the same shape: a member's `read` and a reader's
+`cursor`, `probe` and `holes` are client state, and a scan's probe is a read at a position of the
+client's choosing, which the old stateful reader, able only to read its next box, could not make.
+kpclientd also refuses an index that is not on its capability's stream (katzenpost#1202), so, as
+here, a box is named by its stream and position alone.
+
 katzenqt builds the whole reply to a new member when an induction begins. `Katzenqt.tla` fixes
 only the promised roster at that point, and reads the rest off when the Introduction is written,
 as the protocol does. An earlier view of read positions is still a valid reply, and the promised
