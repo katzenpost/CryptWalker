@@ -5,7 +5,7 @@
 # same check by hand with two `sha256sum` invocations per file listed below.
 #
 # Usage:
-#   scripts/verify-vectors.sh [HPQC_DIR] [KATZENPOST_DIR]
+#   scripts/verify-vectors.sh [HPQC_DIR] [KATZENPOST_DIR] [KATZENQT_DIR]
 #
 # Both default to sibling checkouts (../hpqc, ../katzenpost relative to this repo) if not given
 # and not already set as environment variables (HPQC_DIR, KATZENPOST_DIR).
@@ -19,6 +19,7 @@ cd "$repo_root"
 
 HPQC_DIR="${1:-${HPQC_DIR:-../hpqc}}"
 KATZENPOST_DIR="${2:-${KATZENPOST_DIR:-../katzenpost}}"
+KATZENQT_DIR="${3:-${KATZENQT_DIR:-../katzenqt}}"
 
 # Each entry: "CryptWalker path" "source repo path, relative to HPQC_DIR or KATZENPOST_DIR".
 # The source path's own repo root is substituted at comparison time.
@@ -39,6 +40,19 @@ hpqc_pairs=(
   "testdata/mlkem768_keygen.json                             kem/mlkem768/testdata/mlkem768_keygen.json"
   "testdata/mlkem768_encapdecap.json                         kem/mlkem768/testdata/mlkem768_encapdecap.json"
   "testdata/mlkem768_keycheck.json                           kem/mlkem768/testdata/mlkem768_keycheck.json"
+  "testdata/sha512_256.json                                  testvectors/primitives/sha512_256.json"
+  "testdata/blake2b_512.json                                 testvectors/primitives/blake2b_512.json"
+  "testdata/ed25519.json                                     testvectors/primitives/ed25519.json"
+  "CryptWalker/testdata/hkdf_blake2b.json                    testvectors/primitives/hkdf_blake2b.json"
+  "CryptWalker/testdata/message_box_index.json               testvectors/bacap/message_box_index.json"
+  "CryptWalker/testdata/box_id.json                          testvectors/bacap/box_id.json"
+  "CryptWalker/testdata/encrypt.json                         testvectors/bacap/encrypt.json"
+  "CryptWalker/testdata/mutate_kdf_state.json                testvectors/bacap/mutate_kdf_state.json"
+  "CryptWalker/testdata/layout.json                          testvectors/bacap/layout.json"
+  "CryptWalker/testdata/tombstone.json                       testvectors/bacap/tombstone.json"
+  "CryptWalker/testdata/position.json                        testvectors/bacap/position.json"
+  "CryptWalker/testdata/negative.json                        testvectors/bacap/negative.json"
+  "CryptWalker/testdata/bacap_inputs.json                    testvectors/bacap/inputs.json"
 )
 
 katzenpost_pairs=(
@@ -55,6 +69,11 @@ katzenpost_pairs=(
   "testdata/lean_kem_vectors.json                            core/sphinx/testdata/lean_kem_vectors.json"
   "testdata/lean_nike_vectors.json                           core/sphinx/testdata/lean_nike_vectors.json"
   "testdata/lean_kem_hybrid_vectors.json                     core/sphinx/testdata/lean_kem_hybrid_vectors.json"
+)
+
+# acks_vectors.json comes from katzenqt#108 until it merges.
+katzenqt_pairs=(
+  "testdata/acks_vectors.json                                tests/data/acks_vectors.json"
 )
 
 sha256_of() {
@@ -97,6 +116,7 @@ check_group() {
 ok=1
 check_group "hpqc" "$HPQC_DIR" hpqc_pairs || ok=0
 check_group "katzenpost" "$KATZENPOST_DIR" katzenpost_pairs || ok=0
+check_group "katzenqt" "$KATZENQT_DIR" katzenqt_pairs || ok=0
 
 echo
 if [ "$ok" -eq 1 ]; then
