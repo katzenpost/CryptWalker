@@ -119,4 +119,10 @@ name = "CryptWalker.KEM.mlkem768_hedged_test"
 name = "CryptWalker.KEM.gen_mlkem768_hedged_vectors"
 
 [[lean_exe]]
+name = "CryptWalker.BACAP.primitive_vectors_test"
+
+[[lean_exe]]
+name = "CryptWalker.BACAP.gen_vectors"
+
+[[lean_exe]]
 name = "CryptWalker.GroupChat.ack_codec_test"

@@ -38,6 +38,10 @@ hpqc_pairs=(
   "testdata/mlkem768_keygen.json                             kem/mlkem768/testdata/mlkem768_keygen.json"
   "testdata/mlkem768_encapdecap.json                         kem/mlkem768/testdata/mlkem768_encapdecap.json"
   "testdata/mlkem768_keycheck.json                           kem/mlkem768/testdata/mlkem768_keycheck.json"
+  "testdata/sha512_256.json                                  testvectors/primitives/sha512_256.json"
+  "testdata/blake2b_512.json                                 testvectors/primitives/blake2b_512.json"
+  "testdata/ed25519.json                                     testvectors/primitives/ed25519.json"
+  "CryptWalker/testdata/hkdf_blake2b.json                    testvectors/primitives/hkdf_blake2b.json"
   "CryptWalker/testdata/message_box_index.json               testvectors/bacap/message_box_index.json"
   "CryptWalker/testdata/box_id.json                          testvectors/bacap/box_id.json"
   "CryptWalker/testdata/encrypt.json                         testvectors/bacap/encrypt.json"
@@ -46,6 +50,7 @@ hpqc_pairs=(
   "CryptWalker/testdata/tombstone.json                       testvectors/bacap/tombstone.json"
   "CryptWalker/testdata/position.json                        testvectors/bacap/position.json"
   "CryptWalker/testdata/negative.json                        testvectors/bacap/negative.json"
+  "CryptWalker/testdata/bacap_inputs.json                    testvectors/bacap/inputs.json"
 )
 
 katzenpost_pairs=(
