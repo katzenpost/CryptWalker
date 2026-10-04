@@ -49,6 +49,7 @@ hpqc_pairs=(
   "CryptWalker/testdata/tombstone.json                       testvectors/bacap/tombstone.json"
   "CryptWalker/testdata/position.json                        testvectors/bacap/position.json"
   "CryptWalker/testdata/negative.json                        testvectors/bacap/negative.json"
+  "CryptWalker/testdata/bacap_inputs.json                    testvectors/bacap/inputs.json"
 )
 
 katzenpost_pairs=(

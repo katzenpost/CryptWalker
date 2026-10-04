@@ -44,7 +44,7 @@ TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 # Bare `lake build` builds only defaultTargets, which is the library. The
 # executables have to be named or the test targets run whatever binary was left
 # in .lake/build/bin by an earlier build.
-EXES := $(TESTS) CryptWalker.Bench.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors CryptWalker.KEM.gen_mlkem768_hedged_vectors
+EXES := $(TESTS) CryptWalker.BACAP.gen_vectors CryptWalker.Bench.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors CryptWalker.KEM.gen_mlkem768_hedged_vectors
 
 .DEFAULT_GOAL := help
 
@@ -52,7 +52,7 @@ EXES := $(TESTS) CryptWalker.Bench.benchmark CryptWalker.Sphinx.gen_nike_vectors
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
-.PHONY: verify-vectors
+.PHONY: verify-vectors check-bacap-vectors
 
 all: build ## build everything, library and executables
 
@@ -129,6 +129,10 @@ gen-hedged-vectors: build ## build hedged ML-KEM-768 vectors, for cross-checking
 # checked out at ../hpqc, ../katzenpost.
 HPQC_DIR ?= ../hpqc
 KATZENPOST_DIR ?= ../katzenpost
+
+check-bacap-vectors: build ## generate hpqc's BACAP vectors with the Lean implementation and compare
+	@$(BIN)/CryptWalker-BACAP-gen_vectors --check
+	@$(BIN)/CryptWalker-BACAP-test
 
 verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc/katzenpost source copies
 	@./scripts/verify-vectors.sh "$(HPQC_DIR)" "$(KATZENPOST_DIR)"
