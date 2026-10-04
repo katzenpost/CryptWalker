@@ -123,3 +123,6 @@ name = "CryptWalker.BACAP.primitive_vectors_test"
 
 [[lean_exe]]
 name = "CryptWalker.BACAP.gen_vectors"
+
+[[lean_exe]]
+name = "CryptWalker.GroupChat.ack_codec_test"

@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@v1
         with:
-          build-args: "CryptWalker CryptWalker.Data.test CryptWalker.NIKE.test CryptWalker.KEM.test CryptWalker.KEM.vectors CryptWalker.Hash.test CryptWalker.Hash.hkdf_test CryptWalker.Cipher.test CryptWalker.Bench.benchmark CryptWalker.BACAP.primitive_vectors_test CryptWalker.BACAP.gen_vectors CryptWalker.BACAP.test"
+          build-args: "CryptWalker CryptWalker.Data.test CryptWalker.NIKE.test CryptWalker.KEM.test CryptWalker.KEM.vectors CryptWalker.Hash.test CryptWalker.Hash.hkdf_test CryptWalker.Cipher.test CryptWalker.Bench.benchmark CryptWalker.GroupChat.ack_codec_test CryptWalker.BACAP.primitive_vectors_test CryptWalker.BACAP.gen_vectors CryptWalker.BACAP.test"
       - name: Run tests
         env:
           # panics in compiled Lean print a message but exit 0 unless this is set
@@ -29,3 +29,21 @@ jobs:
           ./.lake/build/bin/CryptWalker-BACAP-primitive_vectors_test
           ./.lake/build/bin/CryptWalker-BACAP-test
           ./.lake/build/bin/CryptWalker-BACAP-gen_vectors --check
+          ./.lake/build/bin/CryptWalker-GroupChat-ack_codec_test
+      - name: Check the group chat theorems use no axioms beyond Lean's own
+        run: ./scripts/check-axioms.sh
+
+  tla:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Fetch TLC
+        run: curl -sSL -o tla/tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+      - name: Model-check the group chat specs
+        env:
+          FAST: "1"
+        run: ./tla/check.sh
