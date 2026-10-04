@@ -4,7 +4,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Lean.Data.Json
-import CryptWalker.BACAP.API
+import CryptWalker.BACAP.Position
 import CryptWalker.BACAP.Types
 import CryptWalker.Util.newhex
 
@@ -96,11 +96,11 @@ def buildCap (j : Json) : Gen WriteCap := do
 def capBlob (wc : WriteCap) : String := hexOf (marshalWriteCap wc)
 def idxHex (m : MessageBoxIndex) : String := hexOf (marshalMessageBoxIndex m)
 
-/-- Whether stepping the read cap's own index forward reaches `idx`. -/
+/-- Whether `idx` is on the read cap's stream. -/
 def reachable (rc : ReadCap) (idx : MessageBoxIndex) : Bool :=
-  let start := rc.messageBoxIndex
-  idx.idx64 ≥ start.idx64 &&
-    ((start.advanceIndexTo idx.idx64).map idxHex) == some (idxHex idx)
+  match rc.contains idx with
+  | .ok () => true
+  | .error _ => false
 
 def flipped (b : ByteArray) (i : Nat) : ByteArray := b.set! i (b[i]! ^^^ 1)
 
@@ -248,6 +248,11 @@ def generate (inp : Json) : Gen (List (String × Json)) := do
           | k => throw s!"unknown flip field {k}"
         else pure (ct, sig)
       advBy ← nat v "advance_by"
+      if op == "open" then
+        let idx ← advanced wc.messageBoxIndex advBy
+        if let .ok _ := idx.openForContext wc.readCap (← optBytes v "ctx") b ct
+            (Vector.ofFn fun i : Fin 64 => sig[i.val]!) then
+          throw s!"negative vector {← str v "name"}: opens"
       fs := [("writecap_hex", s (capBlob wc)), ("ctx_hex", s (byteArrayToHex (← optBytes v "ctx"))),
         ("box_id_hex", s (hexOf b)), ("ciphertext_hex", s (byteArrayToHex ct)),
         ("signature_hex", s (byteArrayToHex sig))]
