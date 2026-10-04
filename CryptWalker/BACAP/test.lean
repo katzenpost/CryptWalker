@@ -6,6 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Lean.Data.Json
 
 import CryptWalker.BACAP.API
+import CryptWalker.BACAP.Position
 import CryptWalker.BACAP.Impl
 import CryptWalker.BACAP.Types
 import CryptWalker.Util.newhex
@@ -476,12 +477,12 @@ def testTombstone : IO UInt32 := do
     ok := (← report good name) && ok
   pure (if ok then 0 else 1)
 
-/-- Whether stepping the cap's own index forward reaches `idx`. -/
+/-- Whether `idx` is on the cap's stream, by `contains` and by `positionAt`. -/
 def reachable (rc : ReadCap) (idx : MessageBoxIndex) : Bool :=
-  let start := rc.messageBoxIndex
-  idx.idx64 ≥ start.idx64 &&
-    ((start.advanceIndexTo idx.idx64).map fun m => vecToByteArray (marshalMessageBoxIndex m)) ==
-      some (vecToByteArray (marshalMessageBoxIndex idx))
+  match rc.contains idx, rc.positionAt idx with
+  | .ok (), .ok p => vecToByteArray (marshalMessageBoxIndex p.index) ==
+      vecToByteArray (marshalMessageBoxIndex idx)
+  | _, _ => false
 
 def testPosition : IO UInt32 := do
   let vecs ← loadVectors "CryptWalker/testdata/position.json" "bacap_position" pure
@@ -526,7 +527,12 @@ def rejects (v : Json) : Except String Bool := do
     | _, _ => pure true
   | "open" =>
     let (wc, idx) ← capIndex
-    pure (vecToByteArray (idx.boxIDForContext wc.readCap ctx) != box)
+    match toVec 32 box, toVec 64 sig with
+    | some b, some s =>
+      pure (match idx.openForContext wc.readCap ctx b ct s with
+        | .error .boxMismatch => true
+        | _ => false)
+    | _, _ => pure true
   | "verify_box" =>
     match toVec 32 box, toVec 64 sig with
     | some b, some s => pure !(verifyBox b ct s)

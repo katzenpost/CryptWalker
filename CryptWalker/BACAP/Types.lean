@@ -186,6 +186,19 @@ private theorem getU64LE_putU64LE (v : UInt64) : getU64LE (putU64LE v) = v := by
     show UInt64.ofNat (8 * 6) = 48 from rfl, show UInt64.ofNat (8 * 7) = 56 from rfl]
   bv_decide
 
+private theorem putU64LE_getU64LE (d : Vector UInt8 8) : putU64LE (getU64LE d) = d := by
+  apply Vector.ext
+  intro i hi
+  rw [putU64LE, Vector.getElem_ofFn]
+  apply UInt8.eq_of_toBitVec_eq
+  apply BitVec.eq_of_getLsbD_eq
+  intro j hj
+  have hb : ∀ k (hk : k < 8), d[k]! = d[k] := fun k hk => getElem!_pos d k hk
+  simp only [getU64LE, hb 0 (by omega), hb 1 (by omega), hb 2 (by omega), hb 3 (by omega),
+    hb 4 (by omega), hb 5 (by omega), hb 6 (by omega), hb 7 (by omega)]
+  interval_cases i <;> interval_cases j <;> simp [UInt64.toBitVec_or, UInt64.toBitVec_shiftLeft,
+    UInt64.toBitVec_shiftRight, UInt8.toBitVec_toUInt64, UInt64.toBitVec_toUInt8]
+
 @[simp] theorem unmarshal_marshal_messageBoxIndex (m : MessageBoxIndex) :
     unmarshalMessageBoxIndex (marshalMessageBoxIndex m) = m := by
   obtain ⟨idx, cbf, cek, hs⟩ := m
@@ -246,5 +259,59 @@ theorem unmarshal_marshal_readCap (rc : ReadCap)
       getElem!_append_right _ _ _ _ hi rfl, getElem!_pos _ i hi]
   simp only [unmarshalWriteCap, marshalWriteCap, hseed, hpub,
     ofFn_append_right _ _ rfl, unmarshal_marshal_messageBoxIndex, beq_self_eq_true, if_true]
+
+/-! The converse: every blob that parses is the serialization of what it parses to, so each
+value has exactly one encoding. Go and Python accept the same blobs (see `negative.json`). -/
+
+private theorem ofFn_slices {n m : Nat} (d : Vector UInt8 (n + m)) :
+    ((Vector.ofFn fun i : Fin n => d[i.val]!) ++ (Vector.ofFn fun i : Fin m => d[i.val + n]!) :
+      Vector UInt8 (n + m)) = d := by
+  apply Vector.ext
+  intro i hi
+  rw [Vector.getElem_append]
+  split
+  · rw [Vector.getElem_ofFn, getElem!_pos d i hi]
+  · rw [Vector.getElem_ofFn, getElem!_pos d _ (by omega)]
+    dsimp only
+    congr 1
+    omega
+
+@[simp] theorem marshal_unmarshal_messageBoxIndex (d : Vector UInt8 MessageBoxIndexSize) :
+    marshalMessageBoxIndex (unmarshalMessageBoxIndex d) = d := by
+  simp only [marshalMessageBoxIndex, unmarshalMessageBoxIndex, putU64LE_getU64LE]
+  apply Vector.ext
+  intro i hi
+  simp only [Vector.getElem_append, Vector.getElem_ofFn]
+  split_ifs <;> rw [getElem!_pos d _ (by unfold MessageBoxIndexSize; omega)] <;> congr 1 <;> omega
+
+/-- A read cap that parses re-serializes to the bytes it came from. -/
+theorem marshal_unmarshal_readCap {data : Vector UInt8 ReadCapSize} {rc : ReadCap}
+    (h : unmarshalReadCap data = some rc) : marshalReadCap rc = data := by
+  unfold unmarshalReadCap at h
+  dsimp only at h
+  split at h
+  · rw [Option.some.injEq] at h
+    subst h
+    simp only [marshalReadCap, marshal_unmarshal_messageBoxIndex]
+    exact ofFn_slices (n := 32) (m := 104) data
+  · exact absurd h nofun
+
+/-- A write cap that parses re-serializes to the bytes it came from: the stored public key is
+the one the seed derives, which is what `marshalWriteCap` writes. -/
+theorem marshal_unmarshal_writeCap {data : Vector UInt8 WriteCapSize} {wc : WriteCap}
+    (h : unmarshalWriteCap data = some wc) : marshalWriteCap wc = data := by
+  unfold unmarshalWriteCap at h
+  dsimp only at h
+  split at h
+  · rename_i hpub
+    rw [Option.some.injEq] at h
+    subst h
+    rw [beq_iff_eq] at hpub
+    simp only [marshalWriteCap, hpub, marshal_unmarshal_messageBoxIndex]
+    apply Vector.ext
+    intro i hi
+    simp only [Vector.getElem_append, Vector.getElem_ofFn]
+    split_ifs <;> rw [getElem!_pos data _ (by simp only [WriteCapSize, MessageBoxIndexSize] at *; omega)] <;> congr 1 <;> omega
+  · exact absurd h nofun
 
 end CryptWalker.BACAP.Types
