@@ -3,288 +3,282 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import Mathlib.Data.List.Infix
-import Mathlib.Tactic.Ring
-import Mathlib.Tactic.Push
+import Mathlib.Order.Basic
 
 /-! # Rosters: following another member's numbering
 
-See "Rosters" in the group chat spec, and katzenqt's `rosters.py` (`grow`, `follow`), which this
-follows. Every member numbers the members it knows, and nobody states a number. A member's roster
-grows when one of its messages acknowledges a stream far enough to cover an `Introduction` there,
-and when it introduces someone itself. Everyone else works out its roster by replaying its
-messages, stopping at the first acknowledgement that reaches further than they have read.
+See "Rosters" in the group chat spec, and katzenqt's `groupchat/numbering.py` (`resolve`) and
+`groupchat/group.py` (`_ingest`, `_started`), which this follows. Every roster index is announced
+in the Numbers of a message: as the member it names, or as the `Introduction` that introduced it,
+named by its introducer and its box. A box `B` is opaque: only compared for equality. A member's
+roster began as its introducer's, up to the index the introducer gave it, and a watcher learns
+which introducer from the member's `IntroducedAt`.
 
-Positions count from 1; an acknowledgement `(i, r)` says the sender has read `r` boxes of the
-stream at its roster index `i`. What a member knows of a stream is `K y q`: whether it has the
-message at position `q` of `y`'s stream.
+A watcher holds, for each roster, the entries it has read, the Introductions it knows and where
+the roster began. The world holds each roster as its owner keeps it, and whom each Introduction
+introduced.
 
-* `follow_eq_of_complete`: a watcher that has every message below how far it has read computes
-  exactly what full knowledge would, so the answer does not depend on who is asking.
-* `watch_prefix`: hence its copy of a roster is a prefix of the owner's, for any group size and
-  any number of messages, provided the owner numbered with complete knowledge too.
-* `incomplete_breaks_watch`: a new member handed only rosters (the spec's `ReplyWho`) does not
-  have the Introductions before where it starts reading, and misplaces a member. This is the
-  counterexample TLC finds in `tla/protocol/MC_GroupChat_SpecReply.cfg`. -/
+* `resolve_sound`: whoever a watcher names at an index of a roster is whoever its owner put
+  there, however many messages it missed, for any group size.
+* `ingest_sound`, `introduce_sound`, `begin_sound`: reading a truthful message, learning an
+  Introduction, and following an `IntroducedAt` each keep a watcher sound. So a watcher that
+  skips boxes leaves indexes unresolved, never misplaced.
+* `first_introduction_misplaces`: a watcher that takes the first Introduction of a member it
+  reads as where its roster began, without `IntroducedAt`, misplaces a member introduced twice.
+  This is the counterexample TLC finds in `tla/protocol/MC_GroupChat_NoIntroducedAt.cfg`. -/
 
 namespace CryptWalker.GroupChat.Roster
 
-/-- A message, as far as rosters are concerned. -/
-structure Msg (M : Type) where
-  acks : List (ℕ × ℕ)
-  intro : Option M
+/-- A roster entry as a watcher holds it. -/
+inductive Val (M B : Type)
+  | key (m : M)
+  | intro (introducer : M) (box : B)
+  | unknown
   deriving DecidableEq
 
-variable {M : Type} [DecidableEq M]
+structure Watcher (M B : Type) where
+  entries : M → ℕ → Option (Val M B)
+  introductions : M → B → Option M
+  started : M → Option (M × ℕ)
 
-/-- Members introduced on a stream at positions `1..r` that `K` has, in stream order. -/
-def introsOn (s : List (Msg M)) (K : ℕ → Bool) (r : ℕ) : List M :=
-  ((s.take r).zipIdx 1).filterMap fun p => if K p.2 then p.1.intro else none
+structure World (M B : Type) where
+  roster : M → ℕ → Option M
+  introduced : M → B → Option M
 
-/-- Append each member not already present, in order. -/
-def appendNew : List M → List M → List M
-  | s, [] => s
-  | s, x :: xs => appendNew (if x ∈ s then s else s ++ [x]) xs
+variable {M B : Type}
 
-variable (streams : M → List (Msg M))
+/-- Who `x` numbered `k`, if the watcher can tell: from its own entry, else from the roster it
+began as, through the index its introducer gave it. `fuel` bounds the chain of introducers. -/
+def resolve (w : Watcher M B) : ℕ → M → ℕ → Option M
+  | fuel, x, k =>
+    match w.entries x k with
+    | some (.key m) => some m
+    | some (.intro i b) => w.introductions i b
+    | some .unknown => none
+    | none =>
+      match fuel with
+      | 0 => none
+      | f + 1 =>
+        match w.started x with
+        | some (i, top) => if k ≤ top then resolve w f i k else none
+        | none => none
 
-/-- The members one message numbers through its acknowledgements: by the introducer's place in
-the roster, then by position on its stream. `seq` is the roster before the message. -/
-def grow (K : M → ℕ → Bool) (seq : List M) (acks : List (ℕ × ℕ)) : List M :=
-  (seq.zipIdx).foldl (fun acc p =>
-    match acks.lookup p.2 with
-    | some r => appendNew acc (introsOn (streams p.1) (K p.1) r)
-    | none => acc) seq
+/-- Everything the watcher holds is true of the world. -/
+structure Sound (w : Watcher M B) (W : World M B) : Prop where
+  key : ∀ x k m, w.entries x k = some (.key m) → W.roster x k = some m
+  intro : ∀ x k i b n, w.entries x k = some (.intro i b) → W.introduced i b = some n →
+    W.roster x k = some n
+  introductions : ∀ i b n, w.introductions i b = some n → W.introduced i b = some n
+  started : ∀ x i top, w.started x = some (i, top) → ∀ j ≤ top, W.roster x j = W.roster i j
 
-/-- Number the member a message introduces, unless already numbered. -/
-def addIntro (s : List M) : Option M → List M
-  | some n => if n ∈ s then s else s ++ [n]
-  | none => s
+theorem resolve_sound {w : Watcher M B} {W : World M B} (h : Sound w W) :
+    ∀ fuel x k n, resolve w fuel x k = some n → W.roster x k = some n := by
+  intro fuel
+  induction fuel with
+  | zero =>
+    intro x k n hr
+    unfold resolve at hr
+    split at hr
+    · cases hr; exact h.key _ _ _ ‹_›
+    · exact h.intro _ _ _ _ _ ‹_› (h.introductions _ _ _ hr)
+    · cases hr
+    · cases hr
+  | succ f ih =>
+    intro x k n hr
+    unfold resolve at hr
+    split at hr
+    · cases hr; exact h.key _ _ _ ‹_›
+    · exact h.intro _ _ _ _ _ ‹_› (h.introductions _ _ _ hr)
+    · cases hr
+    · cases hs : w.started x with
+      | none => simp [hs] at hr
+      | some p =>
+        obtain ⟨i, top⟩ := p
+        simp only [hs] at hr
+        split_ifs at hr with hk
+        rw [h.started x i top hs k hk]
+        exact ih i k n hr
 
-/-- One message applied to a roster: what its acknowledgements number, then whom it introduces. -/
-def step (K : M → ℕ → Bool) (seq : List M) (msg : Msg M) : List M :=
-  addIntro (if msg.acks = [] then seq else grow streams K seq msg.acks) msg.intro
+/-! ## Reading keeps a watcher sound -/
 
-/-- Whether every stream an acknowledgement names has been read as far as it reaches. -/
-def readable (R : M → ℕ) (seq : List M) (acks : List (ℕ × ℕ)) : Bool :=
-  acks.all fun a => match seq[a.1]? with
-    | some y => decide (a.2 ≤ R y)
-    | none => false
+/-- A Numbers entry: the `Introduction` the message itself carries, or one named by its
+introducer's index in the sender's roster and its box. -/
+inductive Ref (B : Type)
+  | own
+  | via (introducer : ℕ) (box : B)
 
-/-- A watcher's copy of a roster: replay the owner's messages from `seq`, stopping at the first
-acknowledgement it cannot yet read (`rosters.follow`). -/
-def follow (K : M → ℕ → Bool) (R : M → ℕ) : List M → List (Msg M) → List M
-  | seq, [] => seq
-  | seq, msg :: rest =>
-    if msg.acks ≠ [] ∧ readable R seq msg.acks = false then seq
-    else follow K R (step streams K seq msg) rest
+/-- A message of `x`'s stream, as far as rosters are concerned. -/
+structure Msg (M B : Type) where
+  box : B
+  numbers : List (ℕ × Ref B)
+  intro : Option M
 
-/-- Knowing everything: what the owner, numbering as it sends, works from. -/
-def all : M → ℕ → Bool := fun _ _ => true
+/-- What `x` says is true: each number names whom its Introduction introduced, and the message
+introduces whom it says. -/
+structure Truthful (W : World M B) (x : M) (msg : Msg M B) : Prop where
+  own : ∀ k n, (k, Ref.own) ∈ msg.numbers → msg.intro = some n → W.roster x k = some n
+  via : ∀ k idx b i n, (k, Ref.via idx b) ∈ msg.numbers → W.roster x idx = some i →
+    W.introduced i b = some n → W.roster x k = some n
+  introduced : W.introduced x msg.box = msg.intro
 
-/-- `K` has every message below how far `R` says it has read. -/
-def Complete (K : M → ℕ → Bool) (R : M → ℕ) : Prop := ∀ y q, q ≤ R y → K y q = true
+/-- The entry a watcher keeps for one Numbers entry of `x`'s message: the Introduction it names,
+with its introducer resolved now, or nothing it can use. -/
+def value (fuel : ℕ) (x : M) (msg : Msg M B) (w : Watcher M B) : Ref B → Val M B
+  | .own => match msg.intro with
+    | some _ => .intro x msg.box
+    | none => .unknown
+  | .via idx b => match resolve w fuel x idx with
+    | some i => .intro i b
+    | none => .unknown
 
-/-! ## Rosters only grow -/
+/-- Take one Numbers entry of `x`'s message, keeping any entry already held. -/
+def ingestOne [DecidableEq M] (fuel : ℕ) (x : M) (msg : Msg M B) (w : Watcher M B) :
+    ℕ × Ref B → Watcher M B
+  | (k, r) =>
+    if (w.entries x k).isSome then w
+    else { w with entries := fun y j => if y = x ∧ j = k then some (value fuel x msg w r)
+                                        else w.entries y j }
 
-theorem prefix_appendNew : ∀ (s more : List M), s <+: appendNew s more
-  | s, [] => List.prefix_refl s
-  | s, x :: xs => by
-    simp only [appendNew]
-    refine List.IsPrefix.trans ?_ (prefix_appendNew _ xs)
-    split_ifs
-    · exact List.prefix_refl s
-    · exact List.prefix_append s [x]
+def ingest [DecidableEq M] (fuel : ℕ) (x : M) (msg : Msg M B) (w : Watcher M B) : Watcher M B :=
+  msg.numbers.foldl (ingestOne fuel x msg) w
 
-theorem prefix_grow (K : M → ℕ → Bool) (seq : List M) (acks : List (ℕ × ℕ)) :
-    seq <+: grow streams K seq acks := by
-  unfold grow
-  suffices h : ∀ (l : List (M × ℕ)) (acc : List M), seq <+: acc → seq <+: l.foldl (fun acc p =>
-      match acks.lookup p.2 with
-      | some r => appendNew acc (introsOn (streams p.1) (K p.1) r)
-      | none => acc) acc from h _ _ (List.prefix_refl _)
+theorem value_ne_key {fuel : ℕ} {x : M} {msg : Msg M B} {w : Watcher M B} {r : Ref B} {m : M} :
+    value fuel x msg w r ≠ .key m := by
+  cases r with
+  | own => cases hi : msg.intro <;> simp [value, hi]
+  | via idx b => cases hi : resolve w fuel x idx <;> simp [value, hi]
+
+theorem value_sound {w : Watcher M B} {W : World M B} {fuel : ℕ} {x : M} {msg : Msg M B}
+    (h : Sound w W) (ht : Truthful W x msg) {k : ℕ} {r : Ref B} (he : (k, r) ∈ msg.numbers)
+    {i : M} {b : B} {n : M} (hv : value fuel x msg w r = .intro i b)
+    (hn : W.introduced i b = some n) : W.roster x k = some n := by
+  cases r with
+  | own =>
+    cases hi : msg.intro with
+    | none => simp [value, hi] at hv
+    | some n' =>
+      simp only [value, hi, Val.intro.injEq] at hv
+      obtain ⟨rfl, rfl⟩ := hv
+      rw [ht.introduced, hi] at hn
+      cases hn
+      exact ht.own _ _ he hi
+  | via idx b' =>
+    cases hi : resolve w fuel x idx with
+    | none => simp [value, hi] at hv
+    | some i' =>
+      simp only [value, hi, Val.intro.injEq] at hv
+      obtain ⟨rfl, rfl⟩ := hv
+      exact ht.via _ _ _ _ _ he (resolve_sound h _ _ _ _ hi) hn
+
+theorem ingestOne_sound [DecidableEq M] {w : Watcher M B} {W : World M B} {fuel : ℕ} {x : M}
+    {msg : Msg M B} (h : Sound w W) (ht : Truthful W x msg) {e : ℕ × Ref B}
+    (he : e ∈ msg.numbers) : Sound (ingestOne fuel x msg w e) W := by
+  obtain ⟨k, r⟩ := e
+  dsimp only [ingestOne]
+  split_ifs with hs
+  · exact h
+  refine ⟨?_, ?_, h.introductions, h.started⟩
+  · intro y j m hy
+    dsimp only at hy
+    split_ifs at hy with hyj
+    · exact absurd (Option.some.inj hy) value_ne_key
+    · exact h.key _ _ _ hy
+  · intro y j i b n hy hn
+    dsimp only at hy
+    split_ifs at hy with hyj
+    · obtain ⟨rfl, rfl⟩ := hyj
+      exact value_sound h ht he (Option.some.inj hy) hn
+    · exact h.intro _ _ _ _ _ hy hn
+
+theorem ingest_sound [DecidableEq M] {w : Watcher M B} {W : World M B} {fuel : ℕ} {x : M}
+    {msg : Msg M B} (h : Sound w W) (ht : Truthful W x msg) : Sound (ingest fuel x msg w) W := by
+  unfold ingest
+  suffices hl : ∀ l : List (ℕ × Ref B), (∀ e ∈ l, e ∈ msg.numbers) →
+      ∀ w : Watcher M B, Sound w W → Sound (l.foldl (ingestOne fuel x msg) w) W from
+    hl _ (fun _ he => he) w h
   intro l
   induction l with
-  | nil => intro acc h; exact h
-  | cons p ps ih =>
-    intro acc h
-    apply ih
-    dsimp only
-    split
-    · exact h.trans (prefix_appendNew _ _)
-    · exact h
+  | nil => intro _ w h; exact h
+  | cons e es ih =>
+    intro hl w h
+    exact ih (fun e' he' => hl e' (List.mem_cons_of_mem _ he')) _
+      (ingestOne_sound h ht (hl e List.mem_cons_self))
 
-theorem prefix_addIntro (s : List M) (o : Option M) : s <+: addIntro s o := by
-  cases o with
-  | none => exact List.prefix_refl s
-  | some n =>
-    simp only [addIntro]
-    split_ifs
-    · exact List.prefix_refl s
-    · exact List.prefix_append s [n]
+/-- Learn that the Introduction in `x`'s box introduced `n`. -/
+def introduce [DecidableEq M] [DecidableEq B] (x : M) (box : B) (n : M) (w : Watcher M B) :
+    Watcher M B :=
+  { w with introductions := fun i b => if i = x ∧ b = box then some n else w.introductions i b }
 
-theorem prefix_step (K : M → ℕ → Bool) (seq : List M) (msg : Msg M) :
-    seq <+: step streams K seq msg := by
-  unfold step
-  have h1 : seq <+: (if msg.acks = [] then seq else grow streams K seq msg.acks) := by
-    split_ifs
-    · exact List.prefix_refl _
-    · exact prefix_grow streams K seq msg.acks
-  exact h1.trans (prefix_addIntro _ _)
+theorem introduce_sound [DecidableEq M] [DecidableEq B] {w : Watcher M B} {W : World M B}
+    {x : M} {box : B} {n : M} (h : Sound w W) (hi : W.introduced x box = some n) :
+    Sound (introduce x box n w) W := by
+  refine ⟨h.key, ?_, ?_, h.started⟩
+  · exact h.intro
+  · intro i b m hm
+    dsimp only [introduce] at hm
+    split_ifs at hm with hib
+    · obtain ⟨rfl, rfl⟩ := hib; cases hm; exact hi
+    · exact h.introductions _ _ _ hm
 
-/-- **A watcher's copy is a prefix of the full replay**: stopping early only loses entries at the
-end, because each message only appends. -/
-theorem follow_prefix (K : M → ℕ → Bool) (R : M → ℕ) :
-    ∀ (seq : List M) (msgs : List (Msg M)),
-      follow streams K R seq msgs <+: msgs.foldl (step streams K) seq
-  | seq, [] => List.prefix_refl _
-  | seq, msg :: rest => by
-    simp only [follow, List.foldl_cons]
-    split_ifs
-    · -- stopped here: everything after only appends
-      suffices h : ∀ (l : List (Msg M)) (s : List M), s <+: l.foldl (step streams K) s from
-        (prefix_step streams K seq msg).trans (h rest _)
-      intro l
-      induction l with
-      | nil => intro s; exact List.prefix_refl s
-      | cons m ms ih => intro s; exact (prefix_step streams K s m).trans (ih _)
-    · exact follow_prefix K R _ rest
+/-! ## Following an `IntroducedAt` keeps a watcher sound -/
 
-/-! ## Complete knowledge makes the answer independent of who asks -/
+/-- `x`'s roster began as `i`'s, through the index `i` gave it. -/
+def JoinedThrough (W : World M B) (x i : M) : Prop :=
+  ∃ k₀, W.roster i k₀ = some x ∧ (∀ k, W.roster i k = some x → k = k₀) ∧
+    ∀ j ≤ k₀, W.roster x j = W.roster i j
 
-omit [DecidableEq M] in
-theorem introsOn_congr (s : List (Msg M)) {K K' : ℕ → Bool} {r : ℕ}
-    (h : ∀ q, q ≤ r → K q = K' q) : introsOn s K r = introsOn s K' r := by
-  unfold introsOn
-  apply List.filterMap_congr
-  intro p hp
-  have hq : p.2 ≤ r := by
-    rcases List.mem_iff_getElem.1 hp with ⟨k, hk, rfl⟩
-    simp only [List.getElem_zipIdx, List.length_zipIdx, List.length_take] at hk ⊢
-    omega
-  rw [h _ hq]
+/-- `x` says it joined through the Introduction in box `b`: its roster began as that
+introducer's, through the index the watcher finds `x` at in that introducer's roster. -/
+def begin [DecidableEq M] (x i : M) (top : ℕ) (w : Watcher M B) : Watcher M B :=
+  { w with started := fun y => if y = x then some (i, top) else w.started y }
 
-theorem mem_of_lookup {acks : List (ℕ × ℕ)} {i r : ℕ} (h : acks.lookup i = some r) :
-    (i, r) ∈ acks := by
-  induction acks with
-  | nil => simp [List.lookup] at h
-  | cons a t ih =>
-    obtain ⟨k, v⟩ := a
-    by_cases hk : i = k
-    · subst hk; simp [List.lookup] at h; subst h; exact List.mem_cons_self ..
-    · have : (i == k) = false := by simpa using hk
-      simp only [List.lookup, this] at h
-      exact List.mem_cons_of_mem _ (ih h)
+theorem begin_sound [DecidableEq M] {w : Watcher M B} {W : World M B} {fuel : ℕ} {x i : M}
+    {b : B} {top : ℕ} (h : Sound w W) (hb : w.introductions i b = some x)
+    (hat : ∀ i', W.introduced i' b = some x → JoinedThrough W x i')
+    (htop : resolve w fuel i top = some x) : Sound (begin x i top w) W := by
+  refine ⟨h.key, h.intro, h.introductions, ?_⟩
+  intro y i' t hy j hj
+  dsimp only [begin] at hy
+  split_ifs at hy with hyx
+  · cases hy
+    subst hyx
+    obtain ⟨k₀, -, huniq, hpre⟩ := hat i (h.introductions _ _ _ hb)
+    have := huniq _ (resolve_sound h _ _ _ _ htop)
+    subst this
+    exact hpre j hj
+  · exact h.started _ _ _ hy j hj
 
-/-- Under complete knowledge, every acknowledgement a watcher can read sees exactly the
-Introductions full knowledge would. -/
-theorem grow_eq_of_complete {K : M → ℕ → Bool} {R : M → ℕ} (hK : Complete K R)
-    {seq : List M} {acks : List (ℕ × ℕ)} (hr : readable R seq acks = true) :
-    grow streams K seq acks = grow streams all seq acks := by
-  unfold grow
-  suffices h : ∀ (l : List (M × ℕ)), (∀ p ∈ l, seq[p.2]? = some p.1) → ∀ acc : List M,
-      l.foldl (fun acc p =>
-        match acks.lookup p.2 with
-        | some r => appendNew acc (introsOn (streams p.1) (K p.1) r)
-        | none => acc) acc =
-      l.foldl (fun acc p =>
-        match acks.lookup p.2 with
-        | some r => appendNew acc (introsOn (streams p.1) (all p.1) r)
-        | none => acc) acc by
-    apply h
-    intro p hp
-    rcases List.mem_iff_getElem.1 hp with ⟨k, hk, rfl⟩
-    simp [List.getElem_zipIdx]
-  intro l
-  induction l with
-  | nil => intro _ acc; rfl
-  | cons p ps ih =>
-    intro hl acc
-    simp only [List.foldl_cons]
-    rw [ih (fun q hq => hl q (List.mem_cons_of_mem _ hq))]
-    congr 1
-    cases hlook : acks.lookup p.2 with
-    | none => rfl
-    | some r =>
-      simp only
-      congr 1
-      apply introsOn_congr
-      intro q hq
-      -- the acknowledgement of p's stream is readable, so it reaches no further than read
-      have hmem : (p.2, r) ∈ acks := mem_of_lookup hlook
-      have hall := List.all_eq_true.1 hr _ hmem
-      rw [hl p (List.mem_cons_self ..)] at hall
-      simp only [decide_eq_true_eq] at hall
-      rw [hK p.1 q (le_trans hq hall)]; rfl
+/-! ## Without `IntroducedAt`, a member introduced twice is misplaced -/
 
-theorem step_eq_of_complete {K : M → ℕ → Bool} {R : M → ℕ} (hK : Complete K R)
-    {seq : List M} {msg : Msg M} (hr : msg.acks = [] ∨ readable R seq msg.acks = true) :
-    step streams K seq msg = step streams all seq msg := by
-  unfold step
-  by_cases ha : msg.acks = []
-  · simp [ha]
-  · rw [if_neg ha, if_neg ha, grow_eq_of_complete streams hK (hr.resolve_left ha)]
+/-- Founders `0` and `1`. `0` introduces `2`, and `1` introduces `3`, who joins through `1`. `0`
+then introduces `3` again, in its box `1`, and numbers it `3`. -/
+def exWorld : World (Fin 4) (Fin 2) where
+  roster
+    | 0, k => [some 0, some 1, some 2, some 3][k]?.join
+    | 1, k => [some 0, some 1, some 3][k]?.join
+    | 3, k => [some 0, some 1, some 3][k]?.join
+    | _, _ => none
+  introduced
+    | 0, 0 => some 2
+    | 0, 1 => some 3
+    | 1, 0 => some 3
+    | _, _ => none
 
-/-- **Watching does not depend on the watcher**, given complete knowledge: its copy is what
-full knowledge would give, replayed as far as it can read. -/
-theorem follow_eq_of_complete {K : M → ℕ → Bool} {R : M → ℕ} (hK : Complete K R) :
-    ∀ (seq : List M) (msgs : List (Msg M)),
-      follow streams K R seq msgs = follow streams all R seq msgs
-  | seq, [] => rfl
-  | seq, msg :: rest => by
-    simp only [follow]
-    split_ifs with h
-    · rfl
-    · push Not at h
-      have hr : msg.acks = [] ∨ readable R seq msg.acks = true := by
-        by_cases ha : msg.acks = []
-        · exact Or.inl ha
-        · exact Or.inr (by simpa using h ha)
-      rw [step_eq_of_complete streams hK hr]
-      exact follow_eq_of_complete hK _ rest
+/-- A watcher that read `0`'s roster and its second Introduction of `3` first, and took that as
+where `3`'s roster began. -/
+def exWatcher : Watcher (Fin 4) (Fin 2) where
+  entries
+    | 0, k => if h : k < 4 then some (.key ⟨k, h⟩) else none
+    | _, _ => none
+  introductions
+    | 0, 1 => some 3
+    | _, _ => none
+  started
+    | 3 => some (0, 3)
+    | _ => none
 
-/-- **What a watcher can tell of a roster is right as far as it goes.** The owner numbered with
-complete knowledge as it sent each message (so its roster is the full replay of all its messages);
-the watcher has every message below how far it has read, starts from the same base, and has read
-some prefix of the owner's messages. Then its copy is a prefix of the owner's roster. -/
-theorem watch_prefix {K : M → ℕ → Bool} {R : M → ℕ} (hK : Complete K R)
-    (base : List M) (msgs sent : List (Msg M)) (hpre : msgs <+: sent) :
-    follow streams K R base msgs <+: sent.foldl (step streams all) base := by
-  rw [follow_eq_of_complete streams hK]
-  obtain ⟨tail, rfl⟩ := hpre
-  rw [List.foldl_append]
-  refine (follow_prefix streams all R base msgs).trans ?_
-  suffices h : ∀ (l : List (Msg M)) (s : List M), s <+: l.foldl (step streams all) s from h _ _
-  intro l
-  induction l with
-  | nil => intro s; exact List.prefix_refl s
-  | cons m ms ih => intro s; exact (prefix_step streams all s m).trans (ih _)
-
-/-! ## Without the Introductions, a new member misplaces a member -/
-
-/-- Founders `a = 0` and `b = 1`; `a` introduces `c = 2` and then `d = 3`; `b` acknowledges both
-boxes of `a`'s stream, which numbers `c` then `d`. -/
-def exStreams : Fin 4 → List (Msg (Fin 4))
-  | 0 => [⟨[], some 2⟩, ⟨[], some 3⟩]
-  | 1 => [⟨[(0, 2)], none⟩]
-  | _ => []
-
-/-- `d` was handed rosters and began reading `a`'s stream at its own Introduction: it has box 2 of
-`a`'s stream but not box 1, where `c` was introduced. -/
-def exKnowsD : Fin 4 → ℕ → Bool
-  | 0, q => q = 2
-  | _, _ => true
-
-def exReadD : Fin 4 → ℕ
-  | 0 => 2
-  | 1 => 1
-  | _ => 0
-
-theorem incomplete_breaks_watch :
-    (exStreams 1).foldl (step exStreams all) [0, 1] = [0, 1, 2, 3] ∧
-    follow exStreams exKnowsD exReadD [0, 1] (exStreams 1) = [0, 1, 3] ∧
-    ¬ (follow exStreams exKnowsD exReadD [0, 1] (exStreams 1) <+:
-        (exStreams 1).foldl (step exStreams all) [0, 1]) := by
+theorem first_introduction_misplaces :
+    resolve exWatcher 4 3 2 = some 2 ∧ exWorld.roster 3 2 = some 3 := by
   decide
 
 end CryptWalker.GroupChat.Roster
