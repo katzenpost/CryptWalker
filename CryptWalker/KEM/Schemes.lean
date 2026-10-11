@@ -86,12 +86,11 @@ def blake2bXOFPRF : Adapter.PRF where
 naming. -/
 def kemX25519Ladder : KEM := kemOfNike sha256v1PRF X25519_montgomery_ladder.LadderScheme
 
-/-- The group-formulation X25519 implementation, wrapped into a KEM. Registered under
-`"X25519KEM"` — the two NIKEs agree byte-for-byte
-(`CryptWalker.NIKE.test`'s `testX25519GroupAgreesWithLadder`), so either can serve as *the*
-`"X25519KEM"` KEM; picking the group one here is purely for naming symmetry with
-`NIKE.Schemes`'s own `x25519GroupEntry`. -/
-def kemX25519 : KEM := kemOfNike sha256v1PRF CryptWalker.NIKE.X25519.Scheme
+/-- The limb-ladder X25519 implementation (`NIKE.Schemes`'s `"x25519"`), wrapped into a KEM.
+Registered under `"X25519KEM"`. The X25519 NIKEs agree byte-for-byte
+(`CryptWalker.NIKE.test`'s `testX25519GroupAgreesWithLadder`, `NIKE.field25519_test`), so this is
+the same KEM as before, computed by the fastest of them. -/
+def kemX25519 : KEM := kemOfNike sha256v1PRF X25519_montgomery_ladder.FeScheme
 
 /-- X25519 under the deployed `blake2b-xof` adapter PRF, vs. `kemX25519`'s portable `sha256-v1`
 stand-in. Not in `registry`: `kemX25519` already fills that slot; callers wanting the deployed
