@@ -32,7 +32,9 @@ private def keystream (key : Key) (n : Nonce) (len : Nat) : ByteArray :=
     (fun out i => out ++ block key n (UInt32.ofNat (i + 1))) #[]).extract 0 len⟩
 
 private def xorKeystream (ks d : ByteArray) : ByteArray :=
-  ⟨d.data.mapIdx fun i b => b ^^^ ks.data.getD i 0⟩
+  -- `ByteArray.data` copies, so convert once rather than per byte
+  let k := ks.data
+  ⟨d.data.mapIdx fun i b => b ^^^ k.getD i 0⟩
 
 /-- RFC 8439 §2.4: encryption starts at counter 1, block 0 being reserved for the Poly1305 key. -/
 def chacha20 (key : Key) (n : Nonce) (d : ByteArray) : ByteArray :=
@@ -44,8 +46,10 @@ def poly1305 (otk : Vector UInt8 32) (msg : ByteArray) : Vector UInt8 16 :=
   let r := le (otk.toArray.extract 0 16) &&& 0x0ffffffc0ffffffc0ffffffc0fffffff
   let s := le (otk.toArray.extract 16 32)
   let p := 2 ^ 130 - 5
+  -- `ByteArray.data` copies, so convert once rather than per chunk
+  let m := msg.data
   let acc := (List.range ((msg.size + 15) / 16)).foldl (fun acc i =>
-    let chunk := msg.data.extract (16 * i) (16 * i + 16)
+    let chunk := m.extract (16 * i) (16 * i + 16)
     (acc + le chunk + 2 ^ (8 * chunk.size)) * r % p) 0
   let t := (acc + s) % 2 ^ 128
   Vector.ofFn fun i : Fin 16 => UInt8.ofNat (t >>> (8 * i.val))
