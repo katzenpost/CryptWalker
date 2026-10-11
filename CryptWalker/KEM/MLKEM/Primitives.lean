@@ -100,6 +100,33 @@ def hashG (input : ByteArray) : Seed32 × Seed32 :=
 def hashH (input : ByteArray) : Vector UInt8 32 :=
   byteArrayToVector (sha3_256 input) 0 32
 
+/-! ## A faster `byteEncodeVec`
+
+VCVio's `byteEncodeVec` computes each output byte by encoding that byte's whole polynomial again,
+so encoding `u` re-encodes each polynomial `32·d_u` times; it was nearly all of encapsulation's
+time. This version encodes each polynomial once and reads the bytes from that. -/
+
+def byteEncodeVecFast (d : Nat) {k : Nat} (v : RqVec k) : ByteArray :=
+  let encs : Vector ByteArray k := Vector.ofFn fun i => byteEncode d v[i]
+  let chunkSize := 32 * d
+  ByteArray.mk <| Array.ofFn fun idx : Fin (chunkSize * k) =>
+    have hpoly : idx.val / chunkSize < k := Nat.div_lt_of_lt_mul idx.isLt
+    ((encs[idx.val / chunkSize]'hpoly)[idx.val % chunkSize]?).getD 0
+
+theorem byteEncodeVecFast_eq (d : Nat) {k : Nat} (v : RqVec k) :
+    byteEncodeVecFast d v = byteEncodeVec d v := by
+  unfold byteEncodeVecFast byteEncodeVec
+  dsimp only
+  apply congrArg ByteArray.mk
+  apply congrArg Array.ofFn
+  funext idx
+  by_cases hd : d = 0
+  · exfalso
+    have := idx.isLt
+    simp [hd] at this
+  · simp only [hd, dif_neg, not_false_eq_true, Vector.getElem_ofFn]
+    rfl
+
 /-! ## Concrete `Primitives` instance, and the assembled bundle per parameter set -/
 
 /-- As `Extern.MLKEM.Instance.concretePrimitives`, verbatim except every FFI hash call routed
@@ -130,13 +157,26 @@ variable (ps : ParameterSet)
 /-- The FIPS 203 parameters of `ps`. -/
 abbrev params : Params := ps.params
 
-/-- Concrete encoding — reused unchanged from VCVio's pure-Lean `Concrete.Encoding`. -/
-abbrev encoding : Encoding (params ps) := concreteEncoding (params ps)
+/-- VCVio's pure-Lean `Concrete.Encoding`, with `byteEncodeVecFast` for `byteEncodeDUVec`. -/
+abbrev encoding : Encoding (params ps) :=
+  { concreteEncoding (params ps) with byteEncodeDUVec := byteEncodeVecFast (params ps).du }
 
-/-- Encoding round-trip laws — reused unchanged from VCVio. -/
-theorem encodingLaws : (encoding ps).Laws :=
-  concreteEncodingLaws (params ps) (by cases ps <;> decide) (by cases ps <;> decide)
+theorem encoding_eq : encoding ps = concreteEncoding (params ps) := by
+  have h : byteEncodeVecFast (params ps).du = (concreteEncoding (params ps)).byteEncodeDUVec :=
+    funext fun u => byteEncodeVecFast_eq _ u
+  simp only [encoding, h]
+
+/-- Encoding round-trip laws — VCVio's, carried over by `encoding_eq`. -/
+theorem encodingLaws : (encoding ps).Laws := by
+  rw [encoding_eq]
+  exact concreteEncodingLaws (params ps) (by cases ps <;> decide) (by cases ps <;> decide)
     (by cases ps <;> decide) (by cases ps <;> decide)
+
+theorem encoding_byteEncodeDUVec_size (u : RqVec (params ps).k) :
+    ((encoding ps).byteEncodeDUVec u : ByteArray).size = 32 * (params ps).du * (params ps).k := by
+  show (byteEncodeVecFast (params ps).du u).size = _
+  rw [byteEncodeVecFast_eq]
+  exact byteEncodeVec_size _ u
 
 /-- The assembled, pure-Lean primitives bundle. -/
 def primitives : Primitives (params ps) (encoding ps) :=

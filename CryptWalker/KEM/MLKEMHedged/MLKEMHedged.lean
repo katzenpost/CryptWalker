@@ -64,7 +64,7 @@ private theorem encapsHedged_ct_wf (ek : EncapsulationKey (params ps) (encoding 
   dsimp only
   refine ⟨?_, ?_⟩
   · show ((encoding ps).byteEncodeDUVec _ : ByteArray).size = 32 * (params ps).du * (params ps).k
-    exact concreteEncoding_byteEncodeDUVec_size (params ps) _
+    exact encoding_byteEncodeDUVec_size ps _
   · show ((encoding ps).byteEncodeDV _ : ByteArray).size = 32 * (params ps).dv
     exact concreteEncoding_byteEncodeDV_size (params ps) _
 
