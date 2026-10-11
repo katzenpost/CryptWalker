@@ -10,89 +10,94 @@ import CryptWalker.GroupChat.Member.Wire
 
 See "Numbers and IntroducedAt wire format" in the group chat spec.
 
-* `decodeNumbers_encodeNumbers`: whatever a `Numbers` field can carry decodes back to itself:
-  one-byte indexes in strictly ascending order, and either the single entry for the
-  `Introduction` the message itself carries, or entries each naming an `Introduction` by a
-  one-byte introducer index and a 104-byte box.
+* `decodeNumbers_encodeNumbers`: whatever a `Numbers` field can carry decodes back to itself: the
+  single index an `Introduction` assigns, or members at consecutive indexes from a first one, each
+  named by a distinct 8-byte key prefix, all within the 256 a roster holds.
 * `decodeIntroducedAt_encodeIntroducedAt`: likewise for `IntroducedAt`. -/
 
 namespace CryptWalker.GroupChat.Member
 
+/-- Members at consecutive indexes from `first`, each named by its prefix. -/
+def consecutive (first : Nat) (ps : List ByteArray) : Numbers :=
+  ps.zipIdx.map fun (p, n) => (first + n, some p)
+
 /-- What the `Numbers` encoding can carry. -/
 def NumbersWF (ns : Numbers) : Prop :=
-  ascending (ns.map (·.1)) = true ∧ (∀ e ∈ ns, e.1 < 256) ∧
-    ((∃ k, ns = [(k, none)]) ∨
-      ∀ e ∈ ns, ∃ r, e.2 = some r ∧ r.introducer < 256 ∧ r.index.size = indexSize)
+  (∃ k, k < 256 ∧ ns = [(k, none)]) ∨
+    ∃ first ps, ns = consecutive first ps ∧ ps ≠ [] ∧ (∀ p ∈ ps, p.size = prefixSize) ∧
+      ps.Nodup ∧ first + ps.length ≤ 256
 
 theorem toUInt8_toNat {k : Nat} (h : k < 256) : k.toUInt8.toNat = k := by
   simp [Nat.toUInt8]; omega
 
-/-- One entry naming an `Introduction`, as the encoding writes it. -/
-def entryBytes (e : Nat × Option IntroRef) : List UInt8 :=
-  match e with
-  | (k, some r) => k.toUInt8 :: r.introducer.toUInt8 :: r.index.data.toList
-  | (_, none) => []
-
-theorem entries_flatMap {α : Type} (g : α → List UInt8) :
-    ∀ l : List α, (∀ x ∈ l, (g x).length = entrySize) →
-      entries l.length (l.flatMap g) = l.map g
+theorem prefixes_flatMap :
+    ∀ ps : List ByteArray, (∀ p ∈ ps, p.size = prefixSize) →
+      prefixes ps.length (ps.flatMap (·.data.toList)) = ps.map (·.data.toList)
   | [], _ => rfl
-  | x :: xs, h => by
-    have hx := h x List.mem_cons_self
-    simp only [List.length_cons, List.flatMap_cons, entries, List.map_cons]
-    rw [List.take_left' hx, List.drop_left' hx,
-      entries_flatMap g xs fun y hy => h y (List.mem_cons_of_mem _ hy)]
+  | p :: ps, h => by
+    have hp : p.data.toList.length = prefixSize := by
+      rw [Array.length_toList]; exact h p List.mem_cons_self
+    simp only [List.length_cons, List.flatMap_cons, prefixes, List.map_cons]
+    rw [List.take_left' hp, List.drop_left' hp,
+      prefixes_flatMap ps fun q hq => h q (List.mem_cons_of_mem _ hq)]
 
-theorem encodeNumbers_of_all : ∀ {ns : Numbers}, (∀ e ∈ ns, ∃ r, e.2 = some r) →
-    encodeNumbers ns = ns.flatMap entryBytes
-  | [], _ => rfl
-  | [(_, some _)], _ => by simp [encodeNumbers, entryBytes]
-  | [(_, none)], h => by obtain ⟨r, hr⟩ := h _ List.mem_cons_self; simp at hr
-  | _ :: _ :: _, _ => by
-    simp only [encodeNumbers]
-    congr 1
+theorem data_toList_injective : Function.Injective fun p : ByteArray => p.data.toList := by
+  intro a b h
+  cases a; cases b
+  simp only [ByteArray.mk.injEq]
+  exact Array.ext' h
+
+theorem encodeNumbers_some (k : Nat) (p : ByteArray) (rest : Numbers) :
+    encodeNumbers ((k, some p) :: rest) = k.toUInt8 :: ((some p :: rest.map (·.2)).flatMap fun
+      | some p => p.data.toList
+      | none => []) := by
+  cases rest <;> rfl
 
 theorem decodeNumbers_encodeNumbers {ns : Numbers} (h : NumbersWF ns) :
     decodeNumbers (encodeNumbers ns) = ns := by
-  obtain ⟨hasc, hk, hshape⟩ := h
-  rcases hshape with ⟨k, rfl⟩ | hall
-  · have : k < 256 := hk _ List.mem_cons_self
-    simp [encodeNumbers, decodeNumbers, toUInt8_toNat this]
-  · rw [encodeNumbers_of_all fun e he => (hall e he).imp fun r h => h.1]
-    have hlen : ∀ e ∈ ns, (entryBytes e).length = entrySize := by
-      intro e he
-      obtain ⟨r, hr, -, hsize⟩ := hall e he
-      obtain ⟨k, _⟩ := e
-      simp only at hr
-      subst hr
-      have h104 : r.index.data.size = 104 := hsize
-      simp [entryBytes, entrySize, indexSize, h104]
-    have htotal : (ns.flatMap entryBytes).length = ns.length * entrySize := by
-      rw [List.length_flatMap, List.map_congr_left hlen]
-      simp [List.map_const', List.sum_replicate, mul_comm]
-    have hdec : (entries ns.length (ns.flatMap entryBytes)).map (fun e =>
-        ((e.getD 0 0).toNat, some (⟨(e.getD 1 0).toNat, ⟨(e.drop 2).toArray⟩⟩ : IntroRef))) = ns := by
-      rw [entries_flatMap entryBytes ns hlen, List.map_map]
-      conv_rhs => rw [← List.map_id ns]
-      apply List.map_congr_left
-      intro e he
-      obtain ⟨r, hr, hi, -⟩ := hall e he
-      obtain ⟨k, _⟩ := e
-      simp only at hr
-      subst hr
-      have hk' : k < 256 := hk _ he
-      simp [entryBytes, toUInt8_toNat hk', toUInt8_toNat hi]
-    unfold decodeNumbers
-    split
-    · next b heq =>
-      have hl := congrArg List.length heq
-      simp only [htotal, List.length_singleton, entrySize, indexSize] at hl
-      omega
-    · have hmod : (ns.flatMap entryBytes).length % entrySize = 0 := by
-        rw [htotal]; simp
-      have hdiv : (ns.flatMap entryBytes).length / entrySize = ns.length := by
-        rw [htotal]; simp [entrySize, indexSize]
-      simp only [hmod, ne_eq, not_true_eq_false, if_false, hdiv, hdec, hasc, if_true]
+  rcases h with ⟨k, hk, rfl⟩ | ⟨first, ps, rfl, hne, hsize, hnodup, hlen⟩
+  · simp [encodeNumbers, decodeNumbers, toUInt8_toNat hk]
+  obtain ⟨p0, rest, rfl⟩ := List.exists_cons_of_ne_nil hne
+  have hfirst : first < 256 := by simp at hlen; omega
+  have hmap : ∀ (l : List ByteArray) (n : Nat),
+      ((l.zipIdx n).map fun x => (first + x.2, some x.1)).map (·.2) = l.map some := by
+    intro l; induction l with
+    | nil => intro n; rfl
+    | cons q qs ih => intro n; simp [List.zipIdx_cons, ih]
+  have henc : encodeNumbers (consecutive first (p0 :: rest)) =
+      first.toUInt8 :: (p0 :: rest).flatMap (·.data.toList) := by
+    simp only [consecutive, List.zipIdx_cons, List.map_cons, Nat.add_zero]
+    rw [encodeNumbers_some, hmap]
+    simp [List.flatMap_map]
+  rw [henc]
+  have hL : ((p0 :: rest).flatMap (·.data.toList)).length = prefixSize * (p0 :: rest).length := by
+    rw [List.length_flatMap, List.map_congr_left (fun p hp => (by
+      rw [Array.length_toList]; exact hsize p hp : p.data.toList.length = prefixSize))]
+    simp [List.map_const', List.sum_replicate]; ring
+  have hpos : 0 < ((p0 :: rest).flatMap (·.data.toList)).length := by
+    rw [hL]; simp [prefixSize]
+  unfold decodeNumbers
+  split
+  · next k heq =>
+    have := congrArg List.length heq
+    simp only [List.length_cons, List.length_nil] at this
+    omega
+  · next heq => simp at heq
+  · next f rs heq =>
+    simp only [List.cons.injEq] at heq
+    obtain ⟨rfl, rfl⟩ := heq
+    have hdiv : ((p0 :: rest).flatMap (·.data.toList)).length / prefixSize = (p0 :: rest).length := by
+      rw [hL]; simp [prefixSize]
+    have hmod : ((p0 :: rest).flatMap (·.data.toList)).length % prefixSize = 0 := by
+      rw [hL]; simp
+    rw [if_neg (by omega), hdiv, prefixes_flatMap _ hsize, toUInt8_toNat hfirst]
+    rw [if_neg (by
+      simp only [List.length_map, rosterMax, not_or, not_lt, not_not]
+      exact ⟨by omega, hnodup.map data_toList_injective⟩)]
+    simp only [consecutive, List.zipIdx_map, List.map_map]
+    apply List.map_congr_left
+    intro e _
+    simp
 
 theorem decodeIntroducedAt_encodeIntroducedAt {r : IntroRef} (hi : r.introducer < 256)
     (hs : r.index.size = indexSize) : decodeIntroducedAt (encodeIntroducedAt r) = some r := by

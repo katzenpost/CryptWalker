@@ -38,7 +38,7 @@ def message (m : Message) : Json := Json.mkObj [
   ("content", opt hex m.content),
   ("introduction", opt (fun i => Json.mkObj [("name", .str i.name), ("read_cap", hex i.readCap)])
     m.introduction),
-  ("numbers", arr (m.numbers.map fun (k, r) => arr [nat k, opt introRef r])),
+  ("numbers", arr (m.numbers.map fun (k, p) => arr [nat k, opt hex p])),
   ("introduced_at", opt introRef m.introducedAt),
   ("acks", arr (m.acks.map fun (i, v) => arr [nat i, hex v]))]
 
@@ -88,9 +88,10 @@ def reader (r : Reader) : Json := Json.mkObj [
 
 def rosters (r : Rosters) : Json := Json.mkObj [
   ("entries", pairs hex (pairs nat fun e => Json.mkObj [("key", opt hex e.key),
-    ("introduced", opt at_ e.introduced)]) r.entries),
+    ("prefix", opt hex e.prefix_)]) r.entries),
   ("started", pairs hex (fun (k, n) => arr [hex k, nat n]) r.started),
-  ("introductions", pairs at_ hex r.introductions)]
+  ("introductions", pairs at_ hex r.introductions),
+  ("keys", arr (r.keys.map hex))]
 
 def retention (p : Retention) : Json := Json.mkObj [
   ("window", nat p.window), ("discard_acked", toJson p.discardAcked),
@@ -169,7 +170,7 @@ def readMessage (j : Json) : Parse Message := do
     content := ← optional bytes (← field j "content")
     introduction := ← optional (fun i => do
       pure ⟨← (← field i "name").getStr?, ← bytes (← field i "read_cap")⟩) (← field j "introduction")
-    numbers := ← list (pair num (optional readIntroRef)) (← field j "numbers")
+    numbers := ← list (pair num (optional bytes)) (← field j "numbers")
     introducedAt := ← optional readIntroRef (← field j "introduced_at")
     acks := ← list (pair num bytes) (← field j "acks") }
 

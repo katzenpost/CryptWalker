@@ -21,7 +21,8 @@ abbrev At := Key × Index
 
 structure Entry where
   key : Option Key := none
-  introduced : Option At := none
+  /-- The start of the member's key, as a `Numbers` field names it. -/
+  prefix_ : Option ByteArray := none
   deriving DecidableEq, Inhabited
 
 structure Rosters where
@@ -29,9 +30,23 @@ structure Rosters where
   /-- A member whose roster began as its introducer's, through the index the introducer gave it. -/
   started : Dict Key (Key × Nat) := {}
   introductions : Dict At Key := {}
+  /-- Every member whose key this member knows: whom a prefix can name. -/
+  keys : List Key := []
   deriving DecidableEq, Inhabited
 
 namespace Rosters
+
+def learn (r : Rosters) (key : Key) : Rosters :=
+  if r.keys.contains key then r else { r with keys := r.keys ++ [key] }
+
+/-- Python's `bytes.startswith`. -/
+def startsWith (key p : ByteArray) : Bool := p.data.toList.isPrefixOf key.data.toList
+
+/-- The one member known whose key starts with `p`. -/
+def named (r : Rosters) (p : ByteArray) : Option Key :=
+  match r.keys.filter (startsWith · p) with
+  | [k] => some k
+  | _ => none
 
 def sortKeys (l : List Key) : List Key := l.mergeSort fun a b => !bytesLt b.toList a.toList
 
@@ -41,16 +56,17 @@ def sortNats (l : List Nat) : List Nat := l.eraseDups.mergeSort (· ≤ ·)
 def found (r : Rosters) (founders : List Key) : Rosters :=
   let roster : Dict Nat Entry :=
     Dict.ofList ((sortKeys founders).zipIdx.map fun (k, i) => (i, { key := some k }))
-  { r with entries := founders.foldl (fun e f => e.set f roster) r.entries }
+  founders.foldl (fun r f => ({ r with entries := r.entries.set f roster } : Rosters).learn f) r
 
 /-- Who `owner` numbered `index`, following where rosters began; `seen` stops a cycle. -/
 def resolveAux (r : Rosters) : Nat → List Key → Key → Nat → Option Key
   | fuel, seen, owner, index =>
     match ((r.entries.getD owner {}).get? index) with
     | some e =>
-      match e.key with
-      | some k => some k
-      | none => e.introduced.bind r.introductions.get?
+      match e.key, e.prefix_ with
+      | some k, _ => some k
+      | none, some p => if p.size = 0 then none else r.named p
+      | none, none => none
     | none =>
       match fuel with
       | 0 => none
@@ -83,22 +99,26 @@ def size (r : Rosters) (owner : Key) : Nat :=
 def indexOf (r : Rosters) (owner member : Key) : Option Nat :=
   ((r.known owner).find? (·.2 = some member)).map (·.1)
 
-/-- `owner` numbered `index`, as the member `introduced` introduced; an entry already held is
-kept. -/
-def number (r : Rosters) (owner : Key) (index : Nat) (introduced : Option At) : Rosters :=
-  { r with entries := r.entries.set owner ((r.entries.getD owner {}).setDefault index { introduced := introduced }) }
+/-- `owner` numbered `index` as `entry` says; an entry already held is kept. -/
+def number (r : Rosters) (owner : Key) (index : Nat) (entry : Entry) : Rosters :=
+  { r with entries := r.entries.set owner ((r.entries.getD owner {}).setDefault index entry) }
 
 /-- Forget `member`'s key, keeping every place it holds, under `token`. -/
 def retire (r : Rosters) (member token : Key) : Rosters :=
   let renamed := fun (k : Key) => if k = member then token else k
   let entries := r.entries.mapValues fun roster => roster.mapValues fun e =>
-    { key := e.key.map renamed, introduced := e.introduced.map fun (i, b) => (renamed i, b) }
+    let hit := e.key = some member ||
+      match e.prefix_ with
+      | some p => p.size ≠ 0 && startsWith member p
+      | none => false
+    if hit then { key := some token, prefix_ := none } else e
   let entries := match entries.get? member with
     | some roster => (entries.erase member).set token roster
     | none => entries
   { entries := entries
     started := Dict.ofList (r.started.pairs.map fun (o, (i, top)) => (renamed o, (renamed i, top)))
-    introductions := Dict.ofList (r.introductions.pairs.map fun ((i, b), k) => ((renamed i, b), renamed k)) }
+    introductions := Dict.ofList (r.introductions.pairs.map fun ((i, b), k) => ((renamed i, b), renamed k))
+    keys := r.keys.map renamed }
 
 end Rosters
 

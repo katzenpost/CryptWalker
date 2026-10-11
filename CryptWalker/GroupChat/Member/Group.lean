@@ -111,9 +111,13 @@ def joined (readCap : ByteArray) (reply : JoinReply) (policy : Retention := {})
     match order[by_]?, order[member]? with
     | some i, some m => d.set (i, index) m
     | _, _ => d) g.rosters.introductions
+  let rosters := reply.members.foldl (fun (r : Rosters) slot => match slot with
+    | some (rc, _) => r.learn (keyOf rc)
+    | none => r) { g.rosters with introductions := introductions }
+  let rosters := rosters.learn g.me
   let introducer := order.getD reply.introducer .empty
   let own := ((entries.getD introducer {}).set reply.newcomer { key := some g.me })
-  let g := { g with rosters := { g.rosters with entries := entries.set g.me own, introductions := introductions } }
+  let g := { g with rosters := { rosters with entries := entries.set g.me own } }
   let g := (reply.members.foldlM (fun _ slot => match slot with
     | some (rc, start) => follow rc start
     | none => pure ()) () |>.run g).2
@@ -157,8 +161,8 @@ def started (member : Key) (index : Index) : GM Unit := do
 
 def introduced (introducer : Key) (index : Index) (intro : Introduction) : GM Unit := do
   let new := keyOf intro.readCap
-  modify fun g => { g with rosters := { g.rosters with
-    introductions := g.rosters.introductions.set (introducer, index) new } }
+  modify fun g => { g with rosters := ({ g.rosters with
+    introductions := g.rosters.introductions.set (introducer, index) new } : Rosters).learn new }
   let g ← get
   if new = g.me && g.joinedThrough = some introducer then
     match g.rosters.indexOf g.me introducer with
@@ -187,12 +191,13 @@ def takeAck (sender : Key) (g : Group) (a : Nat × Index) : Group :=
   | none => g
 
 def ingest (sender : Key) (index : Index) (message : Message) : GM (List Effect) := do
-  for (number, ref) in message.numbers do
+  for (number, p) in message.numbers do
     modify fun g =>
-      let introduced : Option At := match ref with
-        | none => if message.introduction.isSome then some (sender, index) else none
-        | some r => (g.rosters.resolve sender r.introducer).map (·, r.index)
-      { g with rosters := g.rosters.number sender number introduced }
+      let entry : Entry := match p, message.introduction with
+        | some p, _ => { prefix_ := some p }
+        | none, some i => { key := some (keyOf i.readCap) }
+        | none, none => {}
+      { g with rosters := g.rosters.number sender number entry }
   if let some intro := message.introduction then introduced sender index intro
   if let some at_ := message.introducedAt then started sender at_.index
   modify fun g => message.acks.foldl (takeAck sender) g
@@ -222,15 +227,15 @@ def size (g : Group) : Nat :=
 
 def owesControl (g : Group) : Bool :=
   !g.ledger.holding &&
-    (g.introducedAt.isSome || g.unnumbered.any fun (i, _) => (g.rosters.indexOf g.me i).isSome)
+    (g.introducedAt.isSome || g.unnumbered.any fun a => g.rosters.introductions.contains a)
 
 /-- Number every member whose `Introduction` we have read and whose introducer we have numbered,
 from the next index on: the message, what it does once written, and who is left unnumbered. -/
 def controlStep (g : Group) (acc : Nat × Numbers × List (Nat × Option At) × List At) (a : At) :
     Nat × Numbers × List (Nat × Option At) × List At :=
-  match g.rosters.indexOf g.me a.1 with
+  match g.rosters.introductions.get? a with
   | none => acc
-  | some place => (acc.1 + 1, acc.2.1 ++ [(acc.1, some ⟨place, a.2⟩)],
+  | some new => (acc.1 + 1, acc.2.1 ++ [(acc.1, some (prefixOf new))],
       acc.2.2.1 ++ [(acc.1, some a)], acc.2.2.2.eraseP (· = a))
 
 def controlOf (g : Group) : Message × Pending × List At :=
@@ -299,9 +304,13 @@ def written (token : Nat) (index : Index) (plaintext : Option Message) : GM Unit
   | none => g
   | some p =>
     let rosters := p.numbers.foldl (fun r (number, introduced) =>
-      r.number g.me number (introduced.getD (g.me, index))) g.rosters
+      let key := match introduced with
+        | some a => g.rosters.introductions.get? a
+        | none => p.introduced
+      r.number g.me number { key := key }) g.rosters
     let rosters := match p.introduced with
-      | some n => { rosters with introductions := rosters.introductions.set (g.me, index) n }
+      | some n => let r := rosters.learn n
+        { r with introductions := r.introductions.set (g.me, index) n }
       | none => rosters
     { g with pending := g.pending.erase token, rosters := rosters,
              sent := g.sent.record index plaintext p.control g.epoch }

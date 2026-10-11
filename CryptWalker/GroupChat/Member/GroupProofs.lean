@@ -15,8 +15,8 @@ The guarantees of "Opportunistic acknowledgements and backfill" in the group cha
 member of `Member/Group.lean`.
 
 * `resolve_sound`: whoever a member names at an index of a roster is whoever the owner put there,
-  whenever what it holds is true of the world: `Roster.lean`'s theorem, carried over to the
-  member's rosters by `Rosters.toWatcher`.
+  whenever what it holds is true of the world and no two members share a key prefix:
+  `Roster.lean`'s theorem, carried over to the member's rosters by `Rosters.toWatcher`.
 * `acksOf_runs`, `acksOf_safe`: every acknowledgement a member sends names the end of the unbroken
   run its reader of that stream has read, so a box it read along with every box before it.
 * `takeAcks_credit`: an acknowledgement of our own stream counts only for a box the Sent-box check
@@ -33,54 +33,63 @@ namespace CryptWalker.GroupChat.Member
 
 /-! ## Rosters -/
 
-def Entry.toVal (e : Entry) : Roster.Val Key Index :=
-  match e.key, e.introduced with
+def Entry.toVal (e : Entry) : Roster.Val Key ByteArray :=
+  match e.key, e.prefix_ with
   | some k, _ => .key k
-  | none, some (i, b) => .intro i b
+  | none, some p => if p.size = 0 then .unknown else .named p
   | none, none => .unknown
 
-/-- A member's rosters as `Roster.lean`'s watcher. -/
-def Rosters.toWatcher (r : Rosters) : Roster.Watcher Key Index where
+/-- A member's rosters as `Roster.lean`'s watcher: a prefix names the one member known by it. -/
+def Rosters.toWatcher (r : Rosters) : Roster.Watcher Key Index ByteArray where
   entries x k := ((r.entries.getD x {}).get? k).map Entry.toVal
   introductions i b := r.introductions.get? (i, b)
   started x := r.started.get? x
+  known p := r.named p
+
+theorem entry_some (r : Rosters) (e : Entry) (n : Key)
+    (h : (match e.key, e.prefix_ with
+      | some k, _ => some k
+      | none, some p => if p.size = 0 then none else r.named p
+      | none, none => none) = some n) :
+    (match e.toVal with
+      | .key m => some m
+      | .named p => r.toWatcher.known p
+      | .unknown => none) = some n := by
+  rcases e with ⟨_ | m, _ | p⟩
+  · simp at h
+  · simp only at h
+    split_ifs at h with hp
+    simp [Entry.toVal, hp, Rosters.toWatcher, h]
+  · simpa [Entry.toVal] using h
+  · simpa [Entry.toVal] using h
 
 theorem resolveAux_some (r : Rosters) :
     ∀ fuel seen x k n, r.resolveAux fuel seen x k = some n →
       ∃ f, Roster.resolve r.toWatcher f x k = some n := by
+  have entry : ∀ x k n e, (r.entries.getD x {}).get? k = some e →
+      (match e.key, e.prefix_ with
+        | some k, _ => some k
+        | none, some p => if p.size = 0 then none else r.named p
+        | none, none => none) = some n → Roster.resolve r.toWatcher 0 x k = some n := by
+    intro x k n e he h
+    have := entry_some r e n h
+    unfold Roster.resolve
+    simp only [Rosters.toWatcher, he, Option.map_some]
+    revert this
+    cases e.toVal <;> simp [Rosters.toWatcher]
   intro fuel
   induction fuel with
   | zero =>
     intro seen x k n h
     unfold Rosters.resolveAux at h
     split at h
-    · next e he =>
-      refine ⟨0, ?_⟩
-      unfold Roster.resolve
-      simp only [Rosters.toWatcher, he, Option.map_some]
-      cases hk : e.key with
-      | some m => simp [Entry.toVal, hk] at h ⊢; exact h
-      | none =>
-        rw [hk] at h
-        cases hi : e.introduced with
-        | none => simp [hi] at h
-        | some ib => obtain ⟨i, b⟩ := ib; simpa [Entry.toVal, hk, hi] using h
+    · next e he => exact ⟨0, entry x k n e he h⟩
     · simp at h
   | succ f ih =>
     intro seen x k n h
     unfold Rosters.resolveAux at h
     split at h
-    · next e he =>
-      refine ⟨0, ?_⟩
-      unfold Roster.resolve
-      simp only [Rosters.toWatcher, he, Option.map_some]
-      cases hk : e.key with
-      | some m => simp [Entry.toVal, hk] at h ⊢; exact h
-      | none =>
-        rw [hk] at h
-        cases hi : e.introduced with
-        | none => simp [hi] at h
-        | some ib => obtain ⟨i, b⟩ := ib; simpa [Entry.toVal, hk, hi] using h
+    · next e he => exact ⟨0, entry x k n e he h⟩
     · next he =>
       simp only at h
       split at h
@@ -95,11 +104,13 @@ theorem resolveAux_some (r : Rosters) :
         exact hf'
       · simp at h
 
-/-- **Whoever a member names is right**, whenever what it holds is true of the world. -/
-theorem resolve_sound {r : Rosters} {W : Roster.World Key Index} (h : Roster.Sound r.toWatcher W)
+/-- **Whoever a member names is right**, whenever what it holds is true of the world and no two
+members share a key prefix. -/
+theorem resolve_sound {pre : Key → ByteArray} (hpre : Function.Injective pre) {r : Rosters}
+    {W : Roster.World Key Index} (h : Roster.Sound pre r.toWatcher W)
     {x : Key} {k : Nat} {n : Key} (hr : r.resolve x k = some n) : W.roster x k = some n := by
   obtain ⟨f, hf⟩ := resolveAux_some r _ _ x k n hr
-  exact Roster.resolve_sound h f x k n hf
+  exact Roster.resolve_sound hpre h f x k n hf
 
 /-! ## Acknowledgements sent -/
 

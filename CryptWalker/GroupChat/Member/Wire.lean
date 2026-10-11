@@ -22,8 +22,12 @@ def keySize : Nat := 32
 def indexSize : Nat := 104
 /-- The most entries a roster holds: roster indexes are one byte. -/
 def rosterMax : Nat := 256
+/-- How much of a member's key a `Numbers` field names it by. -/
+def prefixSize : Nat := 8
 
 def keyOf (readCap : ByteArray) : Key := readCap.extract 0 keySize
+
+def prefixOf (key : Key) : ByteArray := key.extract 0 prefixSize
 
 /-- The index a read cap starts at. -/
 def startOf (readCap : ByteArray) : Index := readCap.extract keySize readCap.size
@@ -46,9 +50,9 @@ structure Introduction where
   readCap : ByteArray
   deriving DecidableEq, Inhabited
 
-/-- Roster indexes assigned, each with the `Introduction` of the member assigned it; `none` for
-the `Introduction` the message itself carries. -/
-abbrev Numbers := List (Nat × Option IntroRef)
+/-- Roster indexes assigned, consecutive, each with the key prefix of the member assigned it;
+`none` for the member the message's own `Introduction` introduces. -/
+abbrev Numbers := List (Nat × Option ByteArray)
 
 /-- A message carries content or control, never both. `acks` is in ascending roster index. -/
 structure Message where
@@ -61,33 +65,31 @@ structure Message where
 
 /-! ## Numbers and IntroducedAt -/
 
-def entrySize : Nat := 2 + indexSize
-
+/-- The first index assigned, then the key prefix of each member, one per consecutive index; a
+lone byte for the member an `Introduction` introduces. -/
 def encodeNumbers : Numbers → List UInt8
   | [(k, none)] => [k.toUInt8]
-  | ns => ns.flatMap fun
-    | (k, some r) => k.toUInt8 :: r.introducer.toUInt8 :: r.index.data.toList
-    | (_, none) => []
+  | [] => []
+  | (k, p) :: rest => k.toUInt8 :: ((p :: rest.map (·.2)).flatMap fun
+    | some p => p.data.toList
+    | none => [])
 
-def ascending : List Nat → Bool
-  | a :: b :: rest => a < b && ascending (b :: rest)
-  | _ => true
-
-/-- Split a field into 106-byte entries. -/
-def entries : Nat → List UInt8 → List (List UInt8)
+/-- Split a field into `n` prefixes. -/
+def prefixes : Nat → List UInt8 → List (List UInt8)
   | 0, _ => []
-  | n + 1, l => l.take entrySize :: entries n (l.drop entrySize)
+  | n + 1, l => l.take prefixSize :: prefixes n (l.drop prefixSize)
 
 /-- Empty when the field is malformed. -/
 def decodeNumbers (field : List UInt8) : Numbers :=
   match field with
   | [k] => [(k.toNat, none)]
-  | _ =>
-    if field.length % entrySize ≠ 0 then []
+  | [] => []
+  | first :: rest =>
+    if rest.length = 0 ∨ rest.length % prefixSize ≠ 0 then []
     else
-      let ns := (entries (field.length / entrySize) field).map fun e =>
-        ((e.getD 0 0).toNat, some ⟨(e.getD 1 0).toNat, ⟨(e.drop 2).toArray⟩⟩)
-      if ascending (ns.map (·.1)) then ns else []
+      let ps := prefixes (rest.length / prefixSize) rest
+      if first.toNat + ps.length > rosterMax ∨ ¬ ps.Nodup then []
+      else ps.zipIdx.map fun (p, n) => (first.toNat + n, some ⟨p.toArray⟩)
 
 def encodeIntroducedAt (r : IntroRef) : List UInt8 := r.introducer.toUInt8 :: r.index.data.toList
 
