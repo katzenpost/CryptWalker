@@ -127,7 +127,9 @@ fold or a loop, so that `ctrXor_ctrXor` below is a two-line proof about one elem
 `getD` keeps it total: a keystream shorter than the buffer would XOR with zero rather than
 panic, and `size_keystream` rules that case out anyway. -/
 private def xorKeystream (ks : ByteArray) (d : ByteArray) : ByteArray :=
-  ⟨d.data.mapIdx fun i b => b ^^^ ks.data.getD i 0⟩
+  -- `ByteArray.data` copies, so convert once rather than per byte
+  let k := ks.data
+  ⟨d.data.mapIdx fun i b => b ^^^ k.getD i 0⟩
 
 /-- CTR mode: the same operation seals and opens, which is the whole reason AES needs no
 inverse cipher here. -/
