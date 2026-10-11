@@ -33,7 +33,9 @@ private def keystream (rk : Array UInt8) (n : Nonce) (len : Nat) : ByteArray :=
     ByteArray.empty).extract 0 len
 
 private def xorKeystream (ks d : ByteArray) : ByteArray :=
-  ⟨d.data.mapIdx fun i b => b ^^^ ks.data.getD i 0⟩
+  -- `ByteArray.data` copies, so convert once rather than per byte
+  let k := ks.data
+  ⟨d.data.mapIdx fun i b => b ^^^ k.getD i 0⟩
 
 def gctr (key : Key) (n : Nonce) (d : ByteArray) : ByteArray :=
   xorKeystream (keystream (expandKey key) n d.size) d

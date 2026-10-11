@@ -28,8 +28,10 @@ def mul (x y : Nat) : Nat :=
 /-- `GHASH_H` over a byte string, a short final block read as zero-padded. -/
 def ghash (h : Vector UInt8 16) (blocks : ByteArray) : Vector UInt8 16 :=
   let hf := ofBytes h.toArray
+  -- `ByteArray.data` copies, so convert once rather than per block
+  let b := blocks.data
   toBytes <| (List.range ((blocks.size + 15) / 16)).foldl (fun y i =>
-    let chunk := blocks.data.extract (16 * i) (16 * i + 16)
+    let chunk := b.extract (16 * i) (16 * i + 16)
     mul (y ^^^ (ofBytes chunk <<< (8 * (16 - chunk.size)))) hf) 0
 
 end CryptWalker.Cipher.GHash
