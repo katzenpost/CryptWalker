@@ -110,8 +110,10 @@ theorem honestRoundTripM (sk : PrivateKey) (s : State) (hrel : Reliable s)
     EStateM.Result.ok.injEq, Prod.mk.injEq] at hc
   obtain ⟨⟨hc1, hc2⟩, _hc3⟩ := hc
   refine ⟨t, ?_⟩
-  unfold decapM
-  rw [← hc1, hrel sk.1 (derivePublicKeyM sk).1 rfl, hc2]
+  have h := hrel sk.1 (derivePublicKeyM sk).1 rfl
+  unfold decaps768 at h
+  unfold decapM FIPS203.decapM
+  rw [← hc1, h, hc2]
   rfl
 
 /-- The assembled `KEM.KEM` instance for hedged ML-KEM-768. `decap`, key generation and every
