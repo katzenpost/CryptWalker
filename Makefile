@@ -167,9 +167,9 @@ test-mrhybrid: build ## multi-recipient hybrid: hpqc cross-check vectors
 	@$(BIN)/CryptWalker-MultiRecipientHybrid-multirecipient_hybrid_test
 
 test-hybrid-sphinx: build ## KEM-Sphinx round-trip self-test for the X25519+ML-KEM-768 hybrid only
-	@$(BIN)/CryptWalker-Sphinx-kem_selftest mlkem768-x25519-kem
+	@$(BIN)/CryptWalker-Sphinx-kem_selftest MLKEM768X25519
 
-# Extra LeanBench flags, e.g. `make bench BENCH_ARGS='--match "unwrap mlkem768-kem" --samples 5'`.
+# Extra LeanBench flags, e.g. `make bench BENCH_ARGS='--match "unwrap MLKEM768" --samples 5'`.
 BENCH_ARGS ?=
 
 # Quiet: otherwise Lake replays LeanBench's missing-docstring warnings and VCVio's native-backend

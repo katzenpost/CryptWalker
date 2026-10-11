@@ -29,9 +29,9 @@ def randomSeed : IO (Vector UInt8 32) :=
 /-- Every scheme in the KEM registry must round-trip. -/
 def main : IO Unit := do
   for entry in registry do
-    IO.println s!"Testing KEM {entry.hpqcName}"
+    IO.println s!"Testing KEM {entry.name}"
     match kemRoundTrip entry.scheme (← randomSeed) (← randomSeed) with
     | .ok true => IO.println "  round trip ok"
-    | .ok false => throw (IO.userError s!"{entry.hpqcName}: round trip produced mismatched secrets")
-    | .error .badCiphertext => throw (IO.userError s!"{entry.hpqcName}: bad ciphertext")
-    | .error .unsafePublicKey => throw (IO.userError s!"{entry.hpqcName}: unsafe public key")
+    | .ok false => throw (IO.userError s!"{entry.name}: round trip produced mismatched secrets")
+    | .error .badCiphertext => throw (IO.userError s!"{entry.name}: bad ciphertext")
+    | .error .unsafePublicKey => throw (IO.userError s!"{entry.name}: unsafe public key")

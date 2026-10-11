@@ -53,7 +53,7 @@ def sphinxBenchCases : List BenchCase :=
   let nikeCases := CryptWalker.NIKE.registry.flatMap fun e =>
     payloadSizes.map fun sz => { kind := .nike e.hpqcName e.scheme, payloadSize := sz }
   let kemCases := CryptWalker.KEM.registry.flatMap fun e =>
-    payloadSizes.map fun sz => { kind := .kem e.hpqcName e.scheme, payloadSize := sz }
+    payloadSizes.map fun sz => { kind := .kem e.name e.scheme, payloadSize := sz }
   nikeCases ++ kemCases
 
 end CryptWalker.Sphinx.BenchRegistry

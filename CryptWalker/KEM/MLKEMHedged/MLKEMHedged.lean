@@ -108,7 +108,7 @@ theorem honestRoundTripM (sk : (PrivateKey ps)) (s : State) (hrel : (Reliable ps
 /-- The assembled `KEM.KEM` instance for hedged ML-KEM. `decap`, key generation and every
 encode/decode function are `FIPS203`'s, unchanged; only `encap`, `Reliable` and the round-trip
 witness are this file's own. The 768 instance is registered in `KEM/Schemes.lean` as
-`"mlkem768-hedged-kem"`. -/
+`"MLKEM768Hedged"`. -/
 def kem : KEM where
   State := State
   PublicKey := (PublicKey ps)
