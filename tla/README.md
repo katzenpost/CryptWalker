@@ -85,14 +85,37 @@ and hands kpclientd a capability and an index with each request.
 
 ## Lean
 
-The Lean files split the same way. `AckCodec` and `ReaderScan` port katzenqt's code and prove
-properties of it: `ReaderScan` covers the walk to an acknowledged box (it proves the box comes
-after where the walk began, by stepping forward to it), the boxes a walk keeps, and the recheck
-window. `Roster` is a protocol claim for any group size: whoever a watcher names at an index of a
-roster is whoever its owner put there, and reading truthful messages, learning Introductions and
-following `IntroducedAt` keep that so, however many boxes it skipped. Without `IntroducedAt`, it
-misplaces a member introduced twice. `Backfill` compares the spec's storage with `state.go`'s,
-for every epoch.
+`Member/` is one member of a group as a whole, executable: katzenqt's `groupchat` state machine
+written in Lean (`Group`, with its `Reader`, `Rosters`, `SentBox` and `Ledger`), taking the same
+events and producing the same effects. What is proved about it:
+
+- `ReaderProofs`: what a reader acknowledges it has read, with every box before it, however its
+  reads, rechecks, walks and forgets interleave (`run_safe`), and reading never undoes that
+  (`Safe.mono`).
+- `GroupProofs`: every acknowledgement a member sends is such a run (`acksOf_safe`); one of our
+  own stream counts only for a box the Sent-box check finds (`takeAcks_credit`); a control
+  message numbers members at consecutive indexes from the next free one (`controlOf_consecutive`);
+  an `Introduction` gives the new member the index the reply promised when nothing composed is
+  still unwritten, and a later one otherwise (`introduction_index`, `introduction_index_pending`);
+  retention drops plaintext only once it is acknowledged or expired (`retain_spec`); a box is
+  rewritten at most once an epoch (`backfill_once`); and whoever a member names is right whenever
+  what it holds is true (`resolve_sound`, through `Roster.lean`).
+- `WireProofs`: the `Numbers` and `IntroducedAt` encodings round trip.
+
+`replay` checks katzenqt against this model. katzenqt's `groupchat/trace.py` records, for every
+call made on a simulated member, its arguments, its result and the member's whole state after
+it; the replay makes the same calls on the Lean member and requires the same results and state,
+and checks every index the trace says BACAP produced against CryptWalker's own BACAP.
+`testdata/groupchat_traces/` holds the traces of katzenqt's scenarios
+(`python tools/groupchat_traces.py DIR 0` in katzenqt regenerates them); katzenqt's nightly job
+replays fresh random runs (`tests/test_groupchat_trace.py`, with `CRYPTWALKER` set).
+
+`AckCodec` proves the `Acks` encoding. `ReaderScan` proves the walk to an acknowledged box comes
+after where it began, by stepping forward to it. `Roster` is a protocol claim for any group size:
+whoever a watcher names at an index of a roster is whoever its owner put there, and reading
+truthful messages, learning Introductions and following `IntroducedAt` keep that so, however many
+boxes it skipped. Without `IntroducedAt`, it misplaces a member introduced twice. `Backfill`
+compares the spec's storage with `state.go`'s, for every epoch.
 
 ## What is not modelled
 
