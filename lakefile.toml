@@ -33,6 +33,9 @@ name = "CryptWalker.Data.test"
 name = "CryptWalker.NIKE.test"
 
 [[lean_exe]]
+name = "CryptWalker.NIKE.field25519_test"
+
+[[lean_exe]]
 name = "CryptWalker.KEM.test"
 
 [[lean_exe]]
