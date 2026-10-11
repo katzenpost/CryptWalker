@@ -46,8 +46,10 @@ def poly1305 (otk : Vector UInt8 32) (msg : ByteArray) : Vector UInt8 16 :=
   let r := le (otk.toArray.extract 0 16) &&& 0x0ffffffc0ffffffc0ffffffc0fffffff
   let s := le (otk.toArray.extract 16 32)
   let p := 2 ^ 130 - 5
+  -- `ByteArray.data` copies, so convert once rather than per chunk
+  let m := msg.data
   let acc := (List.range ((msg.size + 15) / 16)).foldl (fun acc i =>
-    let chunk := msg.data.extract (16 * i) (16 * i + 16)
+    let chunk := m.extract (16 * i) (16 * i + 16)
     (acc + le chunk + 2 ^ (8 * chunk.size)) * r % p) 0
   let t := (acc + s) % 2 ^ 128
   Vector.ofFn fun i : Fin 16 => UInt8.ofNat (t >>> (8 * i.val))
