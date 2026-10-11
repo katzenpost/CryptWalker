@@ -5,10 +5,13 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import CryptWalker.Hash.Hash
 import CryptWalker.Hash.Blake2b
+import CryptWalker.KDF.HKDF
+import CryptWalker.Util.Bytes
 
 namespace CryptWalker.Hash.HKDF
 
 open CryptWalker.Hash.Hash
+open CryptWalker.Util.Bytes (ofVector toVecN)
 
 /-! # HKDF: HMAC-based Key Derivation Function (RFC 5869)
 
@@ -69,58 +72,18 @@ instance : Inhabited HKDF := ⟨trivialHKDF⟩
   hash_spec     := fun m => by rw [ByteArray.empty_append]
   update_append := fun _ _ _ => ByteArray.append_assoc
 
-namespace blake2b512
-
-private def block_size : Nat := 128
-
-private def xorPad (key : ByteArray) (pad : UInt8) : ByteArray :=
-  let padded := key ++ ⟨Array.replicate (block_size - key.size) 0⟩
-  ⟨padded.data.map (fun b => b ^^^ pad)⟩
-
-private def hmac64 (key msg : ByteArray) : Vector UInt8 64 :=
-  let key := if key.size > block_size then ⟨(CryptWalker.Hash.Blake2b.hash key).toArray⟩ else key
-  CryptWalker.Hash.Blake2b.hash
-    (xorPad key 0x5c ++ ⟨(CryptWalker.Hash.Blake2b.hash (xorPad key 0x36 ++ msg)).toArray⟩)
-
-def extractPRK (salt ikm : ByteArray) : Vector UInt8 64 :=
-  let salt := if salt.size = 0 then ⟨Array.replicate 64 0⟩ else salt
-  hmac64 salt ikm
-
-/-- RFC 5869 Expand: iterated HMAC over (PRK, info, counter).
-    Produces a `ByteArray` of exactly `len` bytes. -/
-def expandRaw (prk : Vector UInt8 64) (info : ByteArray) (len : Nat) : ByteArray :=
-  if len = 0 then ByteArray.empty
-  else
-    let prkBytes := ⟨prk.toArray⟩
-    let blocks := (len + 63) / 64
-    let rec go : Nat → Nat → ByteArray → ByteArray → ByteArray
-      | 0, _, _, out => out.extract 0 len
-      | fuel+1, i, prev, out =>
-        let t_i := ⟨(hmac64 prkBytes (prev ++ info ++ ⟨#[i.toUInt8]⟩)).toArray⟩
-        go fuel (i + 1) t_i (out ++ t_i)
-    go blocks 1 ByteArray.empty ByteArray.empty
-
-end blake2b512
-
-/-- HKDF-BLAKE2b-512: concrete `HKDF` instance.
-
-PRK is a 64-byte vector (one BLAKE2b-512 digest). Extract and expand are
-implemented from the same underlying HMAC. -/
-def blake2b512_hkdf : HKDF where
-  hash      := blake2b_hashScheme
-  PRK       := Vector UInt8 64
+/-- Extract-then-Expand over any `Hash`, the PRK being one digest. -/
+def ofHash (H : Hash) : HKDF where
+  hash      := H
+  PRK       := Vector UInt8 H.digestSize
   encodePRK := fun v => v
   decodePRK := some
-
-  extract := fun salt ikm => blake2b512.extractPRK salt ikm
-
-  expand := fun prk info len =>
-    let raw := blake2b512.expandRaw prk info len
-    Vector.ofFn fun i : Fin len => raw[i.val]!
-
+  extract   := CryptWalker.KDF.HKDF.extract H
+  expand    := fun prk info len =>
+    toVecN len (CryptWalker.KDF.HKDF.expand H (ofVector prk) info len)
   decode_encode_prk := fun _ => rfl
+  expand_size := fun _ _ _ => Vector.size_toArray _
 
-  expand_size := fun prk info len =>
-    (Vector.ofFn fun i : Fin len => (blake2b512.expandRaw prk info len)[i]!).size_toArray
+def blake2b512_hkdf : HKDF := ofHash blake2b_hashScheme
 
 end CryptWalker.Hash.HKDF

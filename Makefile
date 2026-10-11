@@ -17,6 +17,9 @@ TESTS := \
 	CryptWalker.KEM.vectors \
 	CryptWalker.Hash.test \
 	CryptWalker.Hash.hkdf_test \
+	CryptWalker.MAC.hmac_hkdf_test \
+	CryptWalker.Hash.blake2s_test \
+	CryptWalker.Cipher.aead_vectors_test \
 	CryptWalker.Hash.hkdf_structured_test \
 	CryptWalker.Cipher.test \
 	CryptWalker.Sign.test \
@@ -29,11 +32,11 @@ TESTS := \
 	CryptWalker.Sphinx.kem_selftest \
 	CryptWalker.Sphinx.nike_vectors_test \
 	CryptWalker.Sphinx.kem_vectors_test \
-	CryptWalker.KEM.MLKEM.mlkem768_test \
+	CryptWalker.KEM.MLKEM.mlkem_test \
 	CryptWalker.Hash.blake2b_256_test \
 	CryptWalker.Hash.blake2b_xof_test \
 	CryptWalker.KEM.mlkem768_x25519_combiner_test \
-	CryptWalker.KEM.MLKEMHedged.mlkemhedged768_test \
+	CryptWalker.KEM.MLKEMHedged.mlkemhedged_test \
 	CryptWalker.KEM.mlkem768_hedged_test \
 	CryptWalker.MultiRecipientHybrid.multirecipient_hybrid_test \
 	CryptWalker.Sphinx.kem_hybrid_vectors_test \
@@ -151,22 +154,22 @@ tla: ## model-check every tla/protocol and tla/impl config against its EXPECT li
 
 test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer vectors
 	@$(BIN)/CryptWalker-Sphinx-kem_selftest
-	@$(BIN)/CryptWalker-KEM-MLKEM-mlkem768_test
+	@$(BIN)/CryptWalker-KEM-MLKEM-mlkem_test
 
 test-mlkem-kat: build ## ML-KEM-768: NIST ACVP known-answer vectors only
-	@$(BIN)/CryptWalker-KEM-MLKEM-mlkem768_test
+	@$(BIN)/CryptWalker-KEM-MLKEM-mlkem_test
 
 test-mlkem-hedged: build ## hedged ML-KEM-768: NIST ACVP vectors + hpqc cross-check vectors
-	@$(BIN)/CryptWalker-KEM-MLKEMHedged-mlkemhedged768_test
+	@$(BIN)/CryptWalker-KEM-MLKEMHedged-mlkemhedged_test
 	@$(BIN)/CryptWalker-KEM-mlkem768_hedged_test
 
 test-mrhybrid: build ## multi-recipient hybrid: hpqc cross-check vectors
 	@$(BIN)/CryptWalker-MultiRecipientHybrid-multirecipient_hybrid_test
 
 test-hybrid-sphinx: build ## KEM-Sphinx round-trip self-test for the X25519+ML-KEM-768 hybrid only
-	@$(BIN)/CryptWalker-Sphinx-kem_selftest mlkem768-x25519-kem
+	@$(BIN)/CryptWalker-Sphinx-kem_selftest MLKEM768X25519
 
-# Extra LeanBench flags, e.g. `make bench BENCH_ARGS='--match "unwrap mlkem768-kem" --samples 5'`.
+# Extra LeanBench flags, e.g. `make bench BENCH_ARGS='--match "unwrap MLKEM768" --samples 5'`.
 BENCH_ARGS ?=
 
 # Quiet: otherwise Lake replays LeanBench's missing-docstring warnings and VCVio's native-backend

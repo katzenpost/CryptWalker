@@ -13,6 +13,6 @@ def main (args : List String) : IO UInt32 := do
   for e in CryptWalker.NIKE.registry do
     (← CryptWalker.Bench.NIKE.benches e.hpqcName e.scheme).forM LeanBench.register
   for e in CryptWalker.KEM.registry do
-    (← CryptWalker.Bench.KEM.benches e.hpqcName e.scheme).forM LeanBench.register
+    (← CryptWalker.Bench.KEM.benches e.name e.scheme).forM LeanBench.register
   (← CryptWalker.Bench.Sphinx.benches).forM LeanBench.register
   LeanBench.runMain args

@@ -29,7 +29,7 @@ below, or to `nikeSphinxScheme`/`kemSphinxScheme` directly if the kind is alread
 
 /-- Every Sphinx scheme name currently constructible, NIKE-backed and KEM-backed together. -/
 def schemeNames : List String :=
-  (CryptWalker.NIKE.registry.map (·.hpqcName)) ++ (CryptWalker.KEM.registry.map (·.hpqcName))
+  (CryptWalker.NIKE.registry.map (·.hpqcName)) ++ (CryptWalker.KEM.registry.map (·.name))
 
 /-- Build the Sphinx scheme a `Geometry` names: `NIKESphinxScheme` for `.inl _`, `KEMSphinxScheme`
 for `.inr _`. `noncomputable`, like `nikeSphinxScheme` itself, since resolving a NIKE by name at

@@ -42,7 +42,7 @@ def sliceV (b : ByteArray) (off len : Nat) : Vector UInt8 len :=
 /-- **Sphinx's KDF**: expand the raw shared secret into 160 bytes of OKM and slice it into
 `PacketKeys`, exactly as `crypto.KDF` does. -/
 def sphinxKDF (ikm : ByteArray) : PacketKeys :=
-  let okm := CryptWalker.KDF.HKDF.expand ikm kdfInfo (32 + 32 + 16 + 48 + 32)
+  let okm := CryptWalker.KDF.HKDF.expand CryptWalker.Hash.Sha2.Sha256.Scheme ikm kdfInfo (32 + 32 + 16 + 48 + 32)
   { headerMAC          := sliceV okm 0 32
     headerEncryption   := sliceV okm 32 32
     headerEncryptionIV := sliceV okm 64 16

@@ -10,7 +10,7 @@ import LatticeCrypto.MLKEM.Concrete.CBD
 import HashSig.SLHDSA.Concrete.Keccak
 import CryptWalker.Util.Bytes
 
-/-! # ML-KEM-768: pure-Lean, FFI-free primitives
+/-! # ML-KEM: pure-Lean, FFI-free primitives, for every FIPS 203 parameter set
 
 VCVio (a dependency of this project, mainly for `Sphinx.Indistinguishability`/`Integrity`'s
 oracle-computation framework) carries a full FIPS 203 ML-KEM formalization under
@@ -28,11 +28,11 @@ same function shapes, same domain-separation bytes (`0x06` for SHA-3, `0x1f` for
 is a drop-in substitution, not a reimplementation of the hashing itself.
 
 Deliberately *not* reusing `LatticeCrypto.MLKEM.KEM`'s or `LatticeCrypto.MLKEM.Internal`'s
-top-level `keygen`/`encaps`/`decaps` — see `MLKEM768.lean`, which writes those directly against
-this file's primitives instead, keeping that thin hash-composition layer (where FIPS 203 differs
+top-level `keygen`/`encaps`/`decaps` — see `MLKEM.lean`, which writes those directly against
+this file's `primitives` instead, keeping that thin hash-composition layer (where FIPS 203 differs
 from round-3 Kyber's extra `m ← H(m)` pre-hash) ours to vary later. -/
 
-namespace CryptWalker.KEM.MLKEM768
+namespace CryptWalker.KEM.FIPS203
 
 open MLKEM
 open MLKEM.Concrete
@@ -100,7 +100,7 @@ def hashG (input : ByteArray) : Seed32 × Seed32 :=
 def hashH (input : ByteArray) : Vector UInt8 32 :=
   byteArrayToVector (sha3_256 input) 0 32
 
-/-! ## Concrete `Primitives` instance, and the assembled ML-KEM-768 bundle -/
+/-! ## Concrete `Primitives` instance, and the assembled bundle per parameter set -/
 
 /-- As `Extern.MLKEM.Instance.concretePrimitives`, verbatim except every FFI hash call routed
 through `Keccak` instead. -/
@@ -123,34 +123,40 @@ def concretePrimitives (params : Params) (encoding : Encoding params)
     byteArrayToVector
       (shake256 (vectorToByteArray z ++ hU ▸ uEncoded ++ hV ▸ vEncoded) 32) 0 32
 
-/-- ML-KEM-768's fixed parameters (`k=3, eta1=2, eta2=2, du=10, dv=4`, matching FIPS 203). -/
-abbrev params : Params := mlkem768
+section
 
-/-- Concrete encoding for ML-KEM-768 — reused unchanged from VCVio's pure-Lean
-`Concrete.Encoding`. -/
-abbrev encoding : Encoding params := concreteEncoding params
+variable (ps : ParameterSet)
 
-/-- Encoding round-trip laws for ML-KEM-768 — reused unchanged from VCVio. -/
-theorem encodingLaws : encoding.Laws :=
-  concreteEncodingLaws params (by decide) (by decide) (by decide) (by decide)
+/-- The FIPS 203 parameters of `ps`. -/
+abbrev params : Params := ps.params
 
-/-- The assembled, pure-Lean primitives bundle for ML-KEM-768. -/
-def primitives : Primitives params encoding :=
-  concretePrimitives params encoding (by rfl) (by rfl) (by rfl)
+/-- Concrete encoding — reused unchanged from VCVio's pure-Lean `Concrete.Encoding`. -/
+abbrev encoding : Encoding (params ps) := concreteEncoding (params ps)
 
-/-- The NTT ring operations ML-KEM-768 uses — reused unchanged from VCVio's pure-Lean
-`Concrete.NTT`. -/
-abbrev ring : NTTRingOps := concreteNTTRingOps
+/-- Encoding round-trip laws — reused unchanged from VCVio. -/
+theorem encodingLaws : (encoding ps).Laws :=
+  concreteEncodingLaws (params ps) (by cases ps <;> decide) (by cases ps <;> decide)
+    (by cases ps <;> decide) (by cases ps <;> decide)
+
+/-- The assembled, pure-Lean primitives bundle. -/
+def primitives : Primitives (params ps) (encoding ps) :=
+  concretePrimitives (params ps) (encoding ps) (by rfl) (by rfl) (by rfl)
+
 
 /-- `encoding`'s associated types are all literally `ByteArray` for the concrete encoding — the
 same three facts `concretePrimitives` above takes as explicit hypotheses. Typeclass search (e.g.
 resolving `++`/`HAppend`) won't unfold `encoding`'s definition on its own to discover this (it
-uses a stricter transparency than plain elaboration), so `MLKEM768Encoding.lean` casts through
+uses a stricter transparency than plain elaboration), so `Encoding.lean` casts through
 these explicitly wherever it needs to treat an `EncodedTHat`/`EncodedU`/`EncodedV` value as a
 plain `ByteArray` — mirroring exactly how `Extern.MLKEM.Instance.concretePrimitives` itself
 threads the same three equalities through as parameters, for the same reason. -/
-theorem hEncEq : encoding.EncodedTHat = ByteArray := rfl
-theorem hUEq : encoding.EncodedU = ByteArray := rfl
-theorem hVEq : encoding.EncodedV = ByteArray := rfl
+theorem hEncEq : (encoding ps).EncodedTHat = ByteArray := rfl
+theorem hUEq : (encoding ps).EncodedU = ByteArray := rfl
+theorem hVEq : (encoding ps).EncodedV = ByteArray := rfl
 
-end CryptWalker.KEM.MLKEM768
+end
+
+/-- The NTT ring operations — reused unchanged from VCVio's pure-Lean `Concrete.NTT`. -/
+abbrev ring : NTTRingOps := concreteNTTRingOps
+
+end CryptWalker.KEM.FIPS203

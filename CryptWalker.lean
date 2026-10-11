@@ -6,6 +6,9 @@ import CryptWalker.Hash.Hash
 import CryptWalker.Hash.Sha512
 import CryptWalker.Hash.Blake2b
 import CryptWalker.Hash.HKDF
+import CryptWalker.Hash.Blake2s
+import CryptWalker.MAC.HMAC
+import CryptWalker.KDF.HKDF
 import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Hex
@@ -21,7 +24,12 @@ import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Schemes
 import CryptWalker.KEM.Combiner
+import CryptWalker.KEM.MLKEM.MLKEM512
+import CryptWalker.KEM.MLKEM.MLKEM768
+import CryptWalker.KEM.MLKEM.MLKEM1024
+import CryptWalker.KEM.MLKEMHedged.MLKEMHedged512
 import CryptWalker.KEM.MLKEMHedged.MLKEMHedged768
+import CryptWalker.KEM.MLKEMHedged.MLKEMHedged1024
 import CryptWalker.MKEM.MKEM
 import CryptWalker.MKEM.Adapter
 import CryptWalker.MKEM.Schemes
@@ -48,6 +56,9 @@ import CryptWalker.Cipher.AEAD
 import CryptWalker.Cipher.AES
 import CryptWalker.Cipher.Polyval
 import CryptWalker.Cipher.AESGCMSIV
+import CryptWalker.Cipher.GHash
+import CryptWalker.Cipher.AESGCM
+import CryptWalker.Cipher.ChaChaPoly
 import CryptWalker.BACAP.Types
 import CryptWalker.BACAP.Ratchet
 import CryptWalker.BACAP.Protocol

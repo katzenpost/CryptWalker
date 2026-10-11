@@ -3,35 +3,35 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
+import CryptWalker.Hash.Hash
 import CryptWalker.Hash.Sha2
 import CryptWalker.MAC.MAC
+import CryptWalker.Util.Bytes
 
 namespace CryptWalker.MAC.HMAC
 
-open CryptWalker.Hash.Sha2
+open CryptWalker.Hash.Hash
+open CryptWalker.Util.Bytes (ofVector)
 
-/-! # HMAC-SHA256
+/-! # HMAC (RFC 2104), over any `Hash` -/
 
-RFC 2104, sized to SHA-256's 64-byte block, calling `Sha256.hash` directly. -/
-
-private def blockSize : Nat := 64
-
-private def xorPad (key : ByteArray) (pad : UInt8) : ByteArray :=
-  let padded := key ++ ⟨Array.replicate (blockSize - key.size) 0⟩
+private def xorPad (H : Hash) (key : ByteArray) (pad : UInt8) : ByteArray :=
+  let padded := key ++ ⟨Array.replicate (H.blockSize - key.size) 0⟩
   ⟨padded.data.map (fun b => b ^^^ pad)⟩
 
-/-- `Sha256.hash` as a `Vector UInt8 32`, unwrapping the subtype. -/
-private def hash32 (m : ByteArray) : Vector UInt8 32 :=
-  ⟨(Sha256.hash m).1.data, (Sha256.hash m).2⟩
+/-- Keys longer than the hash's block are first hashed down, per RFC 2104 §2. -/
+def hmac (H : Hash) (key msg : ByteArray) : Vector UInt8 H.digestSize :=
+  let key := if key.size > H.blockSize then ofVector (H.hash key) else key
+  H.hash (xorPad H key 0x5c ++ ofVector (H.hash (xorPad H key 0x36 ++ msg)))
 
-/-- **HMAC-SHA256**, full 32-byte tag. Keys longer than the block are first hashed down, per
-RFC 2104 §2. -/
+def hmacMAC (H : Hash) : CryptWalker.MAC.MAC where
+  keySize := H.digestSize
+  tagSize := H.digestSize
+  mac := hmac H
+
 def hmacSha256 (key msg : ByteArray) : Vector UInt8 32 :=
-  let key := if key.size > blockSize then ⟨(hash32 key).toArray⟩ else key
-  hash32 (xorPad key 0x5c ++ ⟨(hash32 (xorPad key 0x36 ++ msg)).toArray⟩)
+  hmac CryptWalker.Hash.Sha2.Sha256.Scheme key msg
 
-/-- HMAC-SHA256, as a `MAC`: `hmacSha256`'s own signature already matches `MAC.mac`'s shape
-exactly, no `ByteArray`/`Vector` reinterpretation needed. -/
 def hmacSha256MAC : CryptWalker.MAC.MAC where
   keySize := 32
   tagSize := 32

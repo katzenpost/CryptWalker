@@ -9,28 +9,29 @@ open CryptWalker.KEM
 open CryptWalker.KEM.KEM
 open CryptWalker.KEM.Adapter
 
-def kemRoundTrip (k : KEM) : EStateM KEMError k.State Bool :=
+/-- Keys from one seed, encapsulation coins from another: with a single seed, a NIKE-based KEM's
+ephemeral key would equal its static key and the round trip would prove nothing. -/
+def kemRoundTrip (k : KEM) (keySeed encapSeed : Vector UInt8 32) : Except KEMError Bool :=
   haveI := k.plaintextEq
-  do
-    let ⟨pk, sk, _⟩ ← k.generate
-    let (c, p) ← k.encap pk
-    let p' ← k.decap sk c
-    pure (decide (p' = p))
+  match k.generate (k.stateFromSeed keySeed) with
+  | .error e _ => .error e
+  | .ok ⟨pk, sk, _⟩ _ =>
+    match k.encap pk (k.stateFromSeed encapSeed) with
+    | .error e _ => .error e
+    | .ok (c, p) _ =>
+      match k.decap sk c (k.stateFromSeed encapSeed) with
+      | .error e _ => .error e
+      | .ok p' _ => .ok (decide (p' = p))
 
-def testKEM (name : String) (k : KEM) (s : k.State) : IO Unit := do
-  IO.println s!"Testing KEM {name}"
-  match kemRoundTrip k s with
-  | .ok true  _ => IO.println "  round trip ok"
-  | .ok false _ => throw (IO.userError "round trip produced mismatched secrets")
-  | .error .badCiphertext   _ => throw (IO.userError "round trip failed: bad ciphertext")
-  | .error .unsafePublicKey _ => throw (IO.userError "round trip failed: unsafe public key")
+def randomSeed : IO (Vector UInt8 32) :=
+  (Vector.range 32).mapM fun _ => do pure (UInt8.ofNat (← IO.rand 0 255))
 
+/-- Every scheme in the KEM registry must round-trip. -/
 def main : IO Unit := do
-  let seed ← (Vector.range 32).mapM fun _ => do
-    let b ← IO.rand 0 255
-    pure (UInt8.ofNat b)
-  -- A constant stream would make the ephemeral key equal the static key, so the
-  -- round trip would pass without ever exercising a real two-party exchange.
-  let str : Nat → Vector UInt8 32 := fun i =>
-    sha256V (Adapter.toBytes seed ++ ⟨#[i.toUInt8]⟩)
-  testKEM "X25519" kemX25519 (initWith str)
+  for entry in registry do
+    IO.println s!"Testing KEM {entry.name}"
+    match kemRoundTrip entry.scheme (← randomSeed) (← randomSeed) with
+    | .ok true => IO.println "  round trip ok"
+    | .ok false => throw (IO.userError s!"{entry.name}: round trip produced mismatched secrets")
+    | .error .badCiphertext => throw (IO.userError s!"{entry.name}: bad ciphertext")
+    | .error .unsafePublicKey => throw (IO.userError s!"{entry.name}: unsafe public key")

@@ -47,6 +47,15 @@ name = "CryptWalker.Hash.test"
 name = "CryptWalker.Hash.hkdf_test"
 
 [[lean_exe]]
+name = "CryptWalker.MAC.hmac_hkdf_test"
+
+[[lean_exe]]
+name = "CryptWalker.Hash.blake2s_test"
+
+[[lean_exe]]
+name = "CryptWalker.Cipher.aead_vectors_test"
+
+[[lean_exe]]
 name = "CryptWalker.Cipher.test"
 
 [[lean_exe]]
@@ -89,7 +98,7 @@ name = "CryptWalker.Sphinx.gen_nike_vectors"
 name = "CryptWalker.Sphinx.gen_kem_vectors"
 
 [[lean_exe]]
-name = "CryptWalker.KEM.MLKEM.mlkem768_test"
+name = "CryptWalker.KEM.MLKEM.mlkem_test"
 
 [[lean_exe]]
 name = "CryptWalker.Hash.blake2b_256_test"
@@ -110,7 +119,7 @@ name = "CryptWalker.Sphinx.kem_hybrid_vectors_test"
 name = "CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test"
 
 [[lean_exe]]
-name = "CryptWalker.KEM.MLKEMHedged.mlkemhedged768_test"
+name = "CryptWalker.KEM.MLKEMHedged.mlkemhedged_test"
 
 [[lean_exe]]
 name = "CryptWalker.KEM.mlkem768_hedged_test"

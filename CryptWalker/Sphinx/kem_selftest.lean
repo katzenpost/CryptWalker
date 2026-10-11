@@ -27,11 +27,11 @@ private key" shortcut failed with a MAC mismatch, exactly as `KEM.Reliable`'s de
 a non-`Reliable` keypair. Using `kem.generate` uniformly is also simply more representative of
 how a real Sphinx mix node actually gets its keys.
 
-Runs the full round set once per registered KEM-Sphinx scheme — `"x25519-ladder-kem"`
-(`KEM.kemX25519Ladder`), `"x25519-kem"` (`KEM.kemX25519`), `"mlkem768-kem"`
-(`MLKEM768.kemMLKEM768`), and `"mlkem768-x25519-kem"` (`KEM.kemMLKEM768X25519`, the classical/
+Runs the full round set once per registered KEM-Sphinx scheme — `"X25519LadderKEM"`
+(`KEM.kemX25519Ladder`), `"X25519KEM"` (`KEM.kemX25519`), `"MLKEM768"`
+(`MLKEM768.kemMLKEM768`), and `"MLKEM768X25519"` (`KEM.kemMLKEM768X25519`, the classical/
 post-quantum hybrid built by `Combiner.combineKEM` — see `KEM/Schemes.lean`'s module doc), and the
-hedged `"mlkem768-hedged-kem"`/`"mlkem768-hedged-x25519-kem"` pair — since
+hedged `"MLKEM768Hedged"`/`"MLKEM768HedgedX25519"` pair — since
 `createKEMHeader`/`unwrapKEM` are generic over any `KEM`, not just the ladder implementation
 `kem_vectors_test`'s Go-cross-checked vectors happen to use. -/
 
@@ -413,17 +413,17 @@ def main (args : List String) : IO UInt32 := do
       let ok ← runSuite schemeName kem
       if ok then pure 0 else IO.eprintln "KEM-Sphinx round-trip self-tests FAILED"; pure 1
   | _ =>
-    let okLadder ← runSuite "x25519-ladder-kem" x25519Ladder
+    let okLadder ← runSuite "X25519LadderKEM" x25519Ladder
     IO.println ""
-    let okGroup ← runSuite "x25519-kem" x25519Group
+    let okGroup ← runSuite "X25519KEM" x25519Group
     IO.println ""
-    let okMLKEM ← runSuite "mlkem768-kem" mlkem768
+    let okMLKEM ← runSuite "MLKEM768" mlkem768
     IO.println ""
-    let okHybrid ← runSuite "mlkem768-x25519-kem" mlkem768X25519
+    let okHybrid ← runSuite "MLKEM768X25519" mlkem768X25519
     IO.println ""
-    let okHedged ← runSuite "mlkem768-hedged-kem" mlkem768Hedged
+    let okHedged ← runSuite "MLKEM768Hedged" mlkem768Hedged
     IO.println ""
-    let okHedgedHybrid ← runSuite "mlkem768-hedged-x25519-kem" mlkem768HedgedX25519
+    let okHedgedHybrid ← runSuite "MLKEM768HedgedX25519" mlkem768HedgedX25519
     IO.println ""
     if okLadder && okGroup && okMLKEM && okHybrid && okHedged && okHedgedHybrid then
       IO.println "all KEM-Sphinx round-trip self-tests passed (all six schemes)"

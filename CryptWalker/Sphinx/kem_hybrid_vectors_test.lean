@@ -13,7 +13,7 @@ import CryptWalker.Util.Bytes
 /-!
 # KEM-Sphinx full-packet cross-implementation vectors: X25519 + ML-KEM-768 hybrid
 
-As `kem_vectors_test`, but for `"mlkem768-x25519-kem"`. `testdata/sphinx_kem_hybrid_vectors.json`
+As `kem_vectors_test`, but for `"MLKEM768X25519"`. `testdata/sphinx_kem_hybrid_vectors.json`
 is `katzenpost/core/sphinx/testdata/kemsphinx_mlkem768x25519_vectors.json` (vendored as-is,
 `.sha256` records which copy) — 10 real KEM-Sphinx packets built by *Go*'s `NewKEMSphinx` with a
 combiner built directly from `adapter.FromNIKEWithPRF(x25519, SHA256v1)` and `mlkem768.Scheme()`
@@ -180,8 +180,8 @@ def main : IO UInt32 := do
       | .error e => do IO.eprintln e; pure 1
       | .ok vecs =>
         IO.println s!"KEM-Sphinx hybrid full-packet vectors ({vecs.size} from katzenpost)"
-        let geomNoSurb ← IO.ofExcept (ofKEM "mlkem768-x25519-kem" 103 false 5)
-        let geomSurb ← IO.ofExcept (ofKEM "mlkem768-x25519-kem" 103 true 5)
+        let geomNoSurb ← IO.ofExcept (ofKEM "MLKEM768X25519" 103 false 5)
+        let geomSurb ← IO.ofExcept (ofKEM "MLKEM768X25519" 103 true 5)
         let mut ok := true
         for i in [0:vecs.size] do
           let v := vecs[i]!

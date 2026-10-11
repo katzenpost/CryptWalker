@@ -4,40 +4,19 @@ SPDX-License-Identifier: AGPL-3.0-only
 -/
 
 import Lean.Data.Json
-import CryptWalker.KEM.MLKEM.MLKEM768
+import CryptWalker.KEM.MLKEM.MLKEM
 import CryptWalker.Util.newhex
 
-/-!
-# ML-KEM-768 known-answer tests: NIST ACVP vectors
+/-! # ML-KEM known-answer tests: NIST ACVP vectors for ML-KEM-512, -768 and -1024
 
-Checks `keygen768`/`encaps768`/`decaps768` (`CryptWalker/KEM/MLKEM768.lean`) against the official
-NIST ACVP-Server ML-KEM-768 test vectors (`gen-val/json-files/ML-KEM-{keyGen,encapDecap}-FIPS203/
-internalProjection.json`, vendored into `testdata/mlkem768_{keygen,encapdecap}.json` — see those
-files' `"generator"` field for the exact source), following the same
-`field`/`loadPrimitive`/hex-helper convention as `Sphinx/crypto_test.lean`.
-
-This complements, rather than replaces, `Sphinx/kem_selftest.lean`'s `"mlkem768-kem"` round: that
-checks *internal* consistency (decap undoes encap for a self-generated keypair); this checks
-*compliance* against an external, authoritative reference. The `mlkem768_encapdecap.json`
-decapsulation vectors are NIST's `VAL` group (not `AFT` — ACVP puts all decapsulation testing
-there), and include "modified ciphertext" cases exercising `decaps768`'s implicit-rejection path
-(`jReject`) — a malformed ciphertext still decapsulates to a specific, deterministic pseudorandom
-key rather than erroring, and that key is exactly what NIST's vector checks.
-
-Also checks `checkEncapsulationKey`/`checkDecapsulationKey` (FIPS 203 §7.2/§7.3's input-validation
-checks, also `MLKEM768.lean`) against NIST's `decapsulationKeyCheck`/`encapsulationKeyCheck` `VAL`
-groups, vendored into `testdata/mlkem768_keycheck.json` — the modulus check ("noisy linear system
-values too large" cases must fail) and the hash check ("modified H" cases must fail) both need to
-correctly *reject* a malformed key, not just accept a well-formed one.
-
-Local encode/decode helpers on the *raw* `EncapsulationKey`/`DecapsulationKey`/`Ciphertext`
-structures (not `MLKEM768Encoding.lean`'s `PublicKey`/`PrivateKey`/`CT` wrapper subtypes) — a KAT
-test only needs raw computation and a byte comparison, not the formal wire-type well-formedness
-machinery, and `MLKEM768Encoding.lean`'s own `decode*Val`/`encode*` are `private`. -/
+KeyGen, encapsulation, decapsulation (including implicit rejection) and the FIPS 203 §7.2/§7.3
+input checks, run for each parameter set against `testdata/mlkem<N>_{keygen,encapdecap,keycheck}.json`
+(extracted from NIST ACVP-Server by `scripts/extract_acvp_mlkem.py`). The raw encode/decode helpers
+work on the unwrapped `EncapsulationKey`/`DecapsulationKey`/`Ciphertext` structures. -/
 
 open Lean
 open MLKEM
-open CryptWalker.KEM.MLKEM768
+open CryptWalker.KEM.FIPS203
 open CryptWalker.Util.newhex
 open CryptWalker.Util.Bytes (ofVector toVecN)
 
@@ -62,48 +41,57 @@ def loadPrimitive (path prim : String) : IO (Except String (Array Json)) := do
         | .error e => pure (.error e)
         | .ok arr  => pure (.ok arr)
 
+def n : ParameterSet → Nat
+  | .MLKEM512 => 512
+  | .MLKEM768 => 768
+  | .MLKEM1024 => 1024
+
 /-! ## Raw encode/decode (no wire-type wrapper, no well-formedness proof) -/
 
-def encodeEKRaw (ek : EncapsulationKey params encoding) : ByteArray :=
-  tBytes ek.tHatEncoded ++ ofVector ek.rho
+section
 
-def decodeEKRaw (b : ByteArray) : EncapsulationKey params encoding :=
-  let a := b.extract 0 (384 * params.k)
-  let rest := b.extract (384 * params.k) b.size
-  { tHatEncoded := bytesT a, rho := toVecN 32 rest }
+variable (ps : ParameterSet)
 
-def encodeDKRaw (dk : DecapsulationKey params encoding) : ByteArray :=
-  tBytes dk.dkPKE.sHatEncoded ++ (tBytes dk.ekPKE.tHatEncoded ++ (ofVector dk.ekPKE.rho ++
+def encodeEKRaw (ek : EncapsulationKey (params ps) (encoding ps)) : ByteArray :=
+  (tBytes ps) ek.tHatEncoded ++ ofVector ek.rho
+
+def decodeEKRaw (b : ByteArray) : EncapsulationKey (params ps) (encoding ps) :=
+  let a := b.extract 0 (384 * (params ps).k)
+  let rest := b.extract (384 * (params ps).k) b.size
+  { tHatEncoded := (bytesT ps) a, rho := toVecN 32 rest }
+
+def encodeDKRaw (dk : DecapsulationKey (params ps) (encoding ps)) : ByteArray :=
+  (tBytes ps) dk.dkPKE.sHatEncoded ++ ((tBytes ps) dk.ekPKE.tHatEncoded ++ (ofVector dk.ekPKE.rho ++
     (ofVector dk.ekHash ++ ofVector dk.z)))
 
-def decodeDKRaw (b : ByteArray) : DecapsulationKey params encoding :=
-  let sHatEncoded := b.extract 0 (384 * params.k)
-  let b1 := b.extract (384 * params.k) b.size
-  let tHatEncoded := b1.extract 0 (384 * params.k)
-  let b2 := b1.extract (384 * params.k) b1.size
+def decodeDKRaw (b : ByteArray) : DecapsulationKey (params ps) (encoding ps) :=
+  let sHatEncoded := b.extract 0 (384 * (params ps).k)
+  let b1 := b.extract (384 * (params ps).k) b.size
+  let tHatEncoded := b1.extract 0 (384 * (params ps).k)
+  let b2 := b1.extract (384 * (params ps).k) b1.size
   let rho := toVecN 32 (b2.extract 0 32)
   let b3 := b2.extract 32 b2.size
   let ekHash := toVecN 32 (b3.extract 0 32)
   let b4 := b3.extract 32 b3.size
   let z := toVecN 32 (b4.extract 0 32)
-  { dkPKE := { sHatEncoded := bytesT sHatEncoded }
-    ekPKE := { tHatEncoded := bytesT tHatEncoded, rho }, ekHash, z }
+  { dkPKE := { sHatEncoded := (bytesT ps) sHatEncoded }
+    ekPKE := { tHatEncoded := (bytesT ps) tHatEncoded, rho }, ekHash, z }
 
-def encodeCTRaw (c : Ciphertext params encoding) : ByteArray :=
-  uBytes c.uEncoded ++ vBytes c.vEncoded
+def encodeCTRaw (c : Ciphertext (params ps) (encoding ps)) : ByteArray :=
+  (uBytes ps) c.uEncoded ++ (vBytes ps) c.vEncoded
 
-def decodeCTRaw (b : ByteArray) : Ciphertext params encoding :=
-  let u := b.extract 0 (32 * params.du * params.k)
-  let rest := b.extract (32 * params.du * params.k) b.size
-  { uEncoded := bytesU u, vEncoded := bytesV rest }
+def decodeCTRaw (b : ByteArray) : Ciphertext (params ps) (encoding ps) :=
+  let u := b.extract 0 (32 * (params ps).du * (params ps).k)
+  let rest := b.extract (32 * (params ps).du * (params ps).k) b.size
+  { uEncoded := (bytesU ps) u, vEncoded := (bytesV ps) rest }
 
 /-! ## KeyGen: `d, z -> ek, dk` -/
 
 def runKeyGen : IO Bool := do
-  match ← loadPrimitive "testdata/mlkem768_keygen.json" "mlkem768_keygen" with
+  match ← loadPrimitive s!"testdata/mlkem{n ps}_keygen.json" s!"mlkem{n ps}_keygen" with
   | .error e => do IO.eprintln e; pure false
   | .ok arr => do
-    IO.println s!"ML-KEM-768 KeyGen (NIST ACVP, {arr.size} vectors)"
+    IO.println s!"ML-KEM-{n ps} KeyGen (NIST ACVP, {arr.size} vectors)"
     let mut ok := true
     for j in arr do
       match (do
@@ -119,9 +107,9 @@ def runKeyGen : IO Bool := do
           ok := false
           IO.println s!"  FAIL  {name}  (d/z not 32 bytes)"
         else
-          let (ek, dk) := keygen768 (toVecN 32 d) (toVecN 32 z)
-          let gotEk := hexOfB (encodeEKRaw ek)
-          let gotDk := hexOfB (encodeDKRaw dk)
+          let (ek, dk) := (keygen ps) (toVecN 32 d) (toVecN 32 z)
+          let gotEk := hexOfB ((encodeEKRaw ps) ek)
+          let gotDk := hexOfB ((encodeDKRaw ps) dk)
           if gotEk == hexOfB wantEk ∧ gotDk == hexOfB wantDk then
             IO.println s!"  ok    {name}"
           else
@@ -138,10 +126,10 @@ def runKeyGen : IO Bool := do
 /-! ## Encapsulate/Decapsulate: `ek, m -> c, k` (AFT) and `dk, c -> k` (VAL) -/
 
 def runEncapDecap : IO Bool := do
-  match ← loadPrimitive "testdata/mlkem768_encapdecap.json" "mlkem768_encapdecap" with
+  match ← loadPrimitive s!"testdata/mlkem{n ps}_encapdecap.json" s!"mlkem{n ps}_encapdecap" with
   | .error e => do IO.eprintln e; pure false
   | .ok arr => do
-    IO.println s!"ML-KEM-768 Encaps/Decaps (NIST ACVP, {arr.size} vectors)"
+    IO.println s!"ML-KEM-{n ps} Encaps/Decaps (NIST ACVP, {arr.size} vectors)"
     let mut ok := true
     for j in arr do
       match (do
@@ -158,12 +146,12 @@ def runEncapDecap : IO Bool := do
           pure (ek, m, wantC, wantK) : Except String _) with
         | .error e => do IO.eprintln e; ok := false
         | .ok (ek, m, wantC, wantK) =>
-          if ek.size ≠ params.publicKeyBytes ∨ m.size ≠ 32 then
+          if ek.size ≠ (params ps).publicKeyBytes ∨ m.size ≠ 32 then
             ok := false
             IO.println s!"  FAIL  {name}  (ek/m wrong length)"
           else
-            let (k, c) := encaps768 (decodeEKRaw ek) (toVecN 32 m)
-            let gotC := hexOfB (encodeCTRaw c)
+            let (k, c) := (encaps ps) ((decodeEKRaw ps) ek) (toVecN 32 m)
+            let gotC := hexOfB ((encodeCTRaw ps) c)
             let gotK := hexOfB (ofVector k)
             if gotC == hexOfB wantC ∧ gotK == hexOfB wantK then
               IO.println s!"  ok    {name}"
@@ -184,11 +172,11 @@ def runEncapDecap : IO Bool := do
           pure (dk, c, wantK) : Except String _) with
         | .error e => do IO.eprintln e; ok := false
         | .ok (dk, c, wantK) =>
-          if dk.size ≠ params.secretKeyBytes ∨ c.size ≠ params.ciphertextBytes then
+          if dk.size ≠ (params ps).secretKeyBytes ∨ c.size ≠ (params ps).ciphertextBytes then
             ok := false
             IO.println s!"  FAIL  {name}  (dk/c wrong length)"
           else
-            let k := decaps768 (decodeDKRaw dk) (decodeCTRaw c)
+            let k := (decaps ps) ((decodeDKRaw ps) dk) ((decodeCTRaw ps) c)
             let gotK := hexOfB (ofVector k)
             if gotK == hexOfB wantK then
               IO.println s!"  ok    {name}"
@@ -201,13 +189,13 @@ def runEncapDecap : IO Bool := do
         IO.eprintln s!"{name}: unknown mode {mode}"; ok := false
     pure ok
 
-/-! ## Input-validation checks: `checkDecapsulationKey`/`checkEncapsulationKey` (VAL) -/
+/-! ## Input-validation checks: `(checkDecapsulationKey ps)`/`(checkEncapsulationKey ps)` (VAL) -/
 
 def runKeyCheck : IO Bool := do
-  match ← loadPrimitive "testdata/mlkem768_keycheck.json" "mlkem768_keycheck" with
+  match ← loadPrimitive s!"testdata/mlkem{n ps}_keycheck.json" s!"mlkem{n ps}_keycheck" with
   | .error e => do IO.eprintln e; pure false
   | .ok arr => do
-    IO.println s!"ML-KEM-768 key checks (NIST ACVP, {arr.size} vectors)"
+    IO.println s!"ML-KEM-{n ps} key checks (NIST ACVP, {arr.size} vectors)"
     let mut ok := true
     for j in arr do
       match (do
@@ -220,11 +208,11 @@ def runKeyCheck : IO Bool := do
         match field j "dk_hex" with
         | .error e => do IO.eprintln e; ok := false
         | .ok dk =>
-          if dk.size ≠ params.secretKeyBytes then
+          if dk.size ≠ (params ps).secretKeyBytes then
             ok := false
             IO.println s!"  FAIL  {name}  (dk wrong length)"
           else
-            let gotPass := checkDecapsulationKey (decodeDKRaw dk)
+            let gotPass := checkDecapsulationKey ps ((decodeDKRaw ps) dk)
             if gotPass == wantPass then
               IO.println s!"  ok    {name}"
             else
@@ -234,11 +222,11 @@ def runKeyCheck : IO Bool := do
         match field j "ek_hex" with
         | .error e => do IO.eprintln e; ok := false
         | .ok ek =>
-          if ek.size ≠ params.publicKeyBytes then
+          if ek.size ≠ (params ps).publicKeyBytes then
             ok := false
             IO.println s!"  FAIL  {name}  (ek wrong length)"
           else
-            let gotPass := checkEncapsulationKey (decodeEKRaw ek)
+            let gotPass := checkEncapsulationKey ps ((decodeEKRaw ps) ek)
             if gotPass == wantPass then
               IO.println s!"  ok    {name}"
             else
@@ -248,13 +236,18 @@ def runKeyCheck : IO Bool := do
         IO.eprintln s!"{name}: unknown mode {mode}"; ok := false
     pure ok
 
+end
+
 def main : IO UInt32 := do
-  let okKeyGen ← runKeyGen
-  let okEncapDecap ← runEncapDecap
-  let okKeyCheck ← runKeyCheck
-  if okKeyGen ∧ okEncapDecap ∧ okKeyCheck then
-    IO.println "ML-KEM-768 KAT: all NIST ACVP vectors passed"
+  let mut ok := true
+  for ps in [ParameterSet.MLKEM512, .MLKEM768, .MLKEM1024] do
+    let okKeyGen ← runKeyGen ps
+    let okEncapDecap ← runEncapDecap ps
+    let okKeyCheck ← runKeyCheck ps
+    ok := ok && okKeyGen && okEncapDecap && okKeyCheck
+  if ok then
+    IO.println "ML-KEM KAT: all NIST ACVP vectors passed"
     pure 0
   else
-    IO.eprintln "ML-KEM-768 KAT: FAILED"
+    IO.eprintln "ML-KEM KAT: FAILED"
     pure 1
