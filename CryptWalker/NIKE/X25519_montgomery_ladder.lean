@@ -11,6 +11,7 @@ import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 import CryptWalker.NIKE.NIKE
 import CryptWalker.NIKE.X25519Common
+import CryptWalker.NIKE.Field25519
 
 open CryptWalker.Util.newnat
 open CryptWalker.NIKE.NIKE
@@ -100,6 +101,64 @@ is total over the whole 32-byte input space, quadratic-twist points included, so
 `Option` here. -/
 def x25519 (scalarBytes uCoordBytes : Vector UInt8 keySize) : Vector UInt8 keySize :=
   curve25519 scalarBytes uCoordBytes
+
+/-! ## The same ladder on `Field25519.Fe`
+
+`montgomery_step` and `montgomery_ladder` again, on fixed-width limbs instead of `ZMod p`, with
+the swaps done by masking so the ladder does not branch on scalar bits. Checked against the `ZMod`
+ladder and RFC 7748 vectors; proving the two equal is future work. -/
+
+open CryptWalker.NIKE.Field25519 (Fe)
+
+structure LadderStateFe where
+  x1 : Fe
+  x2 : Fe
+  z2 : Fe
+  x3 : Fe
+  z3 : Fe
+
+def montgomery_step_fe (s : LadderStateFe) : LadderStateFe :=
+  let tmp0 := s.x3.sub s.z3
+  let tmp1 := s.x2.sub s.z2
+  let x2 := s.x2.add s.z2
+  let z2 := s.x3.add s.z3
+  let z3 := tmp0.mul x2
+  let z2 := z2.mul tmp1
+  let tmp0 := tmp1.sq
+  let tmp1 := x2.sq
+  let x3 := z3.add z2
+  let z2 := z3.sub z2
+  let x2 := tmp1.mul tmp0
+  let tmp1 := tmp1.sub tmp0
+  let z2 := z2.sq
+  let z3 := tmp1.mulSmall 121666
+  let x3 := x3.sq
+  let tmp0 := tmp0.add z3
+  let z3 := s.x1.mul z2
+  let z2 := tmp1.mul tmp0
+  { s with x2 := x2, z2 := z2, x3 := x3, z3 := z3 }
+
+def montgomery_ladder_fe (e : Vector UInt8 keySize) (point : Fe) : LadderStateFe := Id.run do
+  let mut state : LadderStateFe := { x1 := point, x2 := Fe.one, z2 := Fe.zero, x3 := point, z3 := Fe.one }
+  let mut swap : UInt64 := 0
+  for k in [0:255] do
+    let pos := 254 - k
+    let b : UInt64 := ((e[pos / 8]!).toUInt64 >>> (pos % 8).toUInt64) &&& 1
+    let s := swap ^^^ b
+    let (x2, x3) := Fe.cswap s state.x2 state.x3
+    let (z2, z3) := Fe.cswap s state.z2 state.z3
+    state := montgomery_step_fe { state with x2, x3, z2, z3 }
+    swap := b
+  let (x2, x3) := Fe.cswap swap state.x2 state.x3
+  let (z2, z3) := Fe.cswap swap state.z2 state.z3
+  return { state with x2, x3, z2, z3 }
+
+def scalarmult_fe (scalarBytes : Vector UInt8 keySize) (point : Fe) : Fe :=
+  let s := montgomery_ladder_fe (clampScalar scalarBytes) point
+  s.x2.mul s.z2.invert
+
+def curve25519_fe (scalar point : Vector UInt8 keySize) : Vector UInt8 keySize :=
+  (scalarmult_fe scalar (Fe.ofBytes point)).toBytes
 
 /-
   NIKE types for x25519. `PrivateKey` is `X25519Common.PrivateKey`, opened unqualified;
