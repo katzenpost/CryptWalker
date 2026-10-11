@@ -1,10 +1,11 @@
 import Lean.Data.Json
 
-import CryptWalker.Hash.Blake2b
+import CryptWalker.Hash.HKDF
+import CryptWalker.KDF.HKDF
 import CryptWalker.Util.newhex
 
 open Lean
-open CryptWalker.Hash.Blake2b
+open CryptWalker.Hash.HKDF (blake2b_hashScheme)
 open CryptWalker.Util.newhex
 
 structure HKDFVector where
@@ -47,7 +48,8 @@ def main : IO UInt32 := do
   let vectors ← unwrap (parseFile contents)
   let mut ok := true
   for vector in vectors do
-    let got := hkdf vector.secret vector.salt vector.info vector.length
+    let prk := CryptWalker.KDF.HKDF.extract blake2b_hashScheme vector.salt vector.secret
+    let got := CryptWalker.KDF.HKDF.expand blake2b_hashScheme ⟨prk.toArray⟩ vector.info vector.length
     if got == vector.output then
       IO.println s!"  ok    {vector.name} ({vector.length} bytes)"
     else

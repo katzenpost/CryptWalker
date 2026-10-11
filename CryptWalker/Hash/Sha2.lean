@@ -14,6 +14,7 @@
  limitations under the License.
 -/
 
+import CryptWalker.Hash.Hash
 import CryptWalker.Util.Hex
 import CryptWalker.Util.ByteArray
 import CryptWalker.Util.Nat
@@ -201,6 +202,21 @@ def hash (msg : ByteArray) : { out : ByteArray // out.size = 32 } :=
   let chunks := to_chunks padded
   ⟨Digest.toBytes $ List.foldr compress init_hash chunks,
    by simp [Digest.toBytes, UInt32.to_be, ByteArray.size]⟩
+
+/-- SHA-256 as a `Hash`, accumulating the message and hashing at `finalize` like `Sha512.Scheme`. -/
+def Scheme : CryptWalker.Hash.Hash.Hash where
+  State      := ByteArray
+  name       := "SHA-256"
+  digestSize := 32
+  blockSize  := 64
+
+  init     := ByteArray.empty
+  update   := fun s m => s ++ m
+  finalize := fun m => ⟨(hash m).1.data, (hash m).2⟩
+  hash     := fun m => ⟨(hash m).1.data, (hash m).2⟩
+
+  hash_spec     := fun m => by rw [ByteArray.empty_append]
+  update_append := fun _ _ _ => ByteArray.append_assoc
 
 end Sha256
 

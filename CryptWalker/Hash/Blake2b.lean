@@ -117,14 +117,6 @@ def hash256 (msg : ByteArray) : Vector UInt8 32 :=
 def hash256Keyed (key msg : ByteArray) : Vector UInt8 32 :=
   extractDigest (digestArray key 32 msg) 32
 
-private def xorPad (key : ByteArray) (pad : UInt8) : ByteArray :=
-  let key := key ++ ⟨Array.replicate (128 - key.size) 0⟩
-  ⟨key.data.map (fun b => b ^^^ pad)⟩
-
-private def hmac (key msg : ByteArray) : Vector UInt8 64 :=
-  let key := if key.size > 128 then ⟨(hash ⟨key.data⟩).toArray⟩ else key
-  hash (xorPad key 0x5c ++ ⟨(hash (xorPad key 0x36 ++ msg)).toArray⟩)
-
 private def toBytes {n : Nat} (v : Vector UInt8 n) : ByteArray := ⟨v.toArray⟩
 
 /-- BLAKE2b's XOF, BLAKE2Xb (https://www.blake2.net/blake2x.pdf). `size` (the configured stream
@@ -164,18 +156,5 @@ def xof (key : ByteArray) (size : Nat) (readLen : Nat) (msg : ByteArray) : ByteA
     let outLen := if i = lastSizeBlock ∧ boundLen % 64 ≠ 0 then boundLen % 64 else 64
     acc ++ leaf i outLen) ByteArray.empty
   full.extract 0 readLen
-
-/-- RFC 5869 HKDF using BLAKE2b-512 as the HMAC hash. -/
-def hkdf (secret salt info : ByteArray) (length : Nat) : ByteArray :=
-  let salt := if salt.size = 0 then ⟨Array.replicate 64 0⟩ else salt
-  let prk := toBytes (hmac salt secret)
-  let blocks := (length + 63) / 64
-  let rec expand (fuel i : Nat) (previous : ByteArray) (out : ByteArray) : ByteArray :=
-    if fuel = 0 then out.extract 0 length
-    else
-      let current := toBytes (hmac prk (previous ++ info ++ ⟨#[i.toUInt8]⟩))
-      expand (fuel - 1) (i + 1) current (out ++ current)
-  if length = 0 then ByteArray.empty
-  else expand blocks 1 ByteArray.empty ByteArray.empty
 
 end CryptWalker.Hash.Blake2b
