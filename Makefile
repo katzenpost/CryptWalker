@@ -17,6 +17,9 @@ TESTS := \
 	CryptWalker.KEM.vectors \
 	CryptWalker.Hash.test \
 	CryptWalker.Hash.hkdf_test \
+	CryptWalker.MAC.hmac_hkdf_test \
+	CryptWalker.Hash.blake2s_test \
+	CryptWalker.Cipher.aead_vectors_test \
 	CryptWalker.Hash.hkdf_structured_test \
 	CryptWalker.Cipher.test \
 	CryptWalker.Sign.test \
