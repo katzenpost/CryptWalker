@@ -1,0 +1,523 @@
+/-
+SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
+SPDX-License-Identifier: AGPL-3.0-only
+-/
+
+import CryptWalker.GroupChat.Member.Rosters
+import CryptWalker.GroupChat.Member.Reader
+import CryptWalker.GroupChat.Member.SentBox
+import CryptWalker.GroupChat.Member.Ledger
+
+/-! # One member of one group chat
+
+katzenqt's `groupchat/group.py`, as a state machine over `Group`. It can be driven in two ways.
+`handle` takes an event and returns the effects to carry out, the member choosing every box to
+read and write. A client that does its own reading and writing instead tells it what it read
+(`observe`), asks it what to send (`compose`), and tells it where each message landed
+(`written`). Either way a message changes rosters only once it has a box on the member's stream.
+
+Where the spec leaves a choice open, this follows katzenqt: indexes are derived `poolSize` at a
+time, effects come in the order katzenqt emits them, and composed messages are numbered by a
+running token. -/
+
+namespace CryptWalker.GroupChat.Member
+
+/-- How many of its own indexes a member derives at a time. -/
+def poolSize : Nat := 4
+
+/-- What stands in a roster for a member known only by its place. -/
+def placeholder (place : Nat) : Key := "retired".toUTF8.push place.toUInt8
+
+/-- What a composed message does once it has a box. -/
+structure Pending where
+  /-- Roster indexes it assigns, and to whose `Introduction`; `none` for the one it carries. -/
+  numbers : List (Nat × Option At) := []
+  introduced : Option Key := none
+  /-- Each stream it acknowledges: what had been published before, and now. -/
+  acks : Dict Key (Option Index × Index) := {}
+  control : Bool := false
+  deriving DecidableEq, Inhabited
+
+structure Outgoing where
+  token : Nat
+  message : Message
+  deriving DecidableEq, Inhabited
+
+structure Group where
+  /-- Our own read cap: our key and our stream's first index. -/
+  readCap : ByteArray
+  policy : Retention := {}
+  /-- How many boxes behind it a reader keeps one a scan stepped past. -/
+  recheck : Nat := 256
+  rosters : Rosters := {}
+  readers : Dict Key Reader := {}
+  sent : SentBox := {}
+  ledger : Ledger := {}
+  epoch : Nat := 0
+  pool : List Index := []
+  /-- The furthest of our own indexes derived so far. -/
+  tip : Index := .empty
+  deriving_ : Bool := false
+  /-- Content waiting for an index. -/
+  outbox : List ByteArray := []
+  /-- Messages composed that have no box yet, by token. -/
+  pending : Dict Nat Pending := {}
+  tokens : Nat := 0
+  /-- Introductions read whose member we have not numbered yet. -/
+  unnumbered : List At := []
+  /-- Owed in our next message, once we have read our `Introduction`. -/
+  introducedAt : Option IntroRef := none
+  /-- Our introducer, until we have read our `Introduction`. -/
+  joinedThrough : Option Key := none
+  /-- `IntroducedAt` read before the `Introduction` it names. -/
+  awaitingStart : Dict Key Index := {}
+  /-- Content delivered, by sender and box, and the epoch it came. -/
+  received : Dict (Key × Index) Nat := {}
+  deriving DecidableEq, Inhabited
+
+abbrev GM := StateM Group
+
+namespace Group
+
+def new (readCap : ByteArray) (policy : Retention := {}) (recheck : Nat := 256) : Group :=
+  { readCap := readCap, policy := policy, recheck := recheck, tip := startOf readCap, pool := [startOf readCap] }
+
+def me (g : Group) : Key := keyOf g.readCap
+
+def follow (readCap : ByteArray) (start : Index) : GM Unit :=
+  modify fun g => { g with readers := g.readers.set (keyOf readCap) ⟨keyOf readCap, readCap, start,
+    none, 0, [], none, .idle, []⟩ }
+
+/-- Start a group with `founders`' read caps, ours among them. -/
+def found (readCap : ByteArray) (founders : List ByteArray) (policy : Retention := {})
+    (recheck : Nat := 256) : Group :=
+  let g := new readCap policy recheck
+  let g := { g with rosters := g.rosters.found (founders.map keyOf) }
+  (founders.foldlM (fun _ cap => if keyOf cap ≠ g.me then follow cap (startOf cap) else pure ())
+    () |>.run g).2
+
+/-- Join a group from what our introducer handed us. -/
+def joined (readCap : ByteArray) (reply : JoinReply) (policy : Retention := {})
+    (recheck : Nat := 256) : Group :=
+  let g := new readCap policy recheck
+  let order : List Key := reply.members.zipIdx.map (fun (m, place) => match m with
+    | some (rc, _) => keyOf rc
+    | none => placeholder place) ++ [g.me]
+  let entries := reply.rosters.zipIdx.foldl (fun e (roster, place) => match roster, order[place]? with
+    | some roster, some owner =>
+      e.set owner (Dict.ofList (roster.map fun (index, slot) => (index, { key := slot.bind (order[·]?) })))
+    | _, _ => e) g.rosters.entries
+  let introductions := reply.introductions.foldl (fun d (by_, index, member) =>
+    match order[by_]?, order[member]? with
+    | some i, some m => d.set (i, index) m
+    | _, _ => d) g.rosters.introductions
+  let introducer := order.getD reply.introducer .empty
+  let own := ((entries.getD introducer {}).set reply.newcomer { key := some g.me })
+  let g := { g with rosters := { g.rosters with entries := entries.set g.me own, introductions := introductions } }
+  let g := (reply.members.foldlM (fun _ slot => match slot with
+    | some (rc, start) => follow rc start
+    | none => pure ()) () |>.run g).2
+  { g with joinedThrough := some introducer }
+
+/-! ## Reading -/
+
+def heard (g : Group) (stream : Key) : List Index := (g.ledger.heard.getD stream {}).values
+
+def setReader (r : Reader) : GM Unit := modify fun g => { g with readers := g.readers.set r.stream r }
+
+def scanStream (stream : Key) : GM (List Effect) := do
+  let g ← get
+  match g.readers.get? stream with
+  | none => pure []
+  | some r =>
+    let (r, es) := r.scan (g.heard stream) g.recheck
+    setReader r
+    pure es
+
+/-- Whether `member` is in our roster, or will be once what we have composed is written. -/
+def numbered (g : Group) (member : Key) : Bool :=
+  (g.rosters.indexOf g.me member).isSome ||
+    g.pending.values.any fun p => p.introduced = some member ||
+      p.numbers.any fun (_, at_) => match at_ with
+        | some a => g.rosters.introductions.get? a = some member
+        | none => false
+
+/-- `member`'s roster began as `introducer`'s, through the index `introducer` gave it. -/
+def beginRoster (member introducer : Key) : GM Unit := modify fun g =>
+  match g.rosters.indexOf introducer member with
+  | some place => { g with rosters := { g.rosters with started := g.rosters.started.set member (introducer, place) } }
+  | none => g
+
+/-- `member` says it joined through the `Introduction` at `index`. -/
+def started (member : Key) (index : Index) : GM Unit := do
+  let g ← get
+  match g.rosters.introductions.pairs.find? (fun ((_, at_), n) => n = member && at_ = index) with
+  | some ((introducer, _), _) => beginRoster member introducer
+  | none => set { g with awaitingStart := g.awaitingStart.set member index }
+
+def introduced (introducer : Key) (index : Index) (intro : Introduction) : GM Unit := do
+  let new := keyOf intro.readCap
+  modify fun g => { g with rosters := { g.rosters with
+    introductions := g.rosters.introductions.set (introducer, index) new } }
+  let g ← get
+  if new = g.me && g.joinedThrough = some introducer then
+    match g.rosters.indexOf g.me introducer with
+    | some place => set { g with introducedAt := some ⟨place, index⟩, joinedThrough := none }
+    | none => pure ()
+  let g ← get
+  if g.awaitingStart.get? new = some index then
+    set { g with awaitingStart := g.awaitingStart.erase new }
+    beginRoster new introducer
+  let g ← get
+  if new = g.me || g.numbered new then return
+  if !g.readers.contains new then follow intro.readCap (startOf intro.readCap)
+  modify fun g => if g.unnumbered.contains (introducer, index) then g
+    else { g with unnumbered := g.unnumbered ++ [(introducer, index)] }
+
+/-- Take one acknowledgement `sender` sent: of our own stream, it counts only for a box the
+Sent-box check finds; of another's, it is heard. -/
+def takeAck (sender : Key) (g : Group) (a : Nat × Index) : Group :=
+  match g.rosters.resolve sender a.1 with
+  | some acked =>
+    if acked = g.me then
+      match g.sent.check a.2 with
+      | some seq => { g with ledger := g.ledger.acked sender seq }
+      | none => g
+    else { g with ledger := g.ledger.hear acked a.2 sender }
+  | none => g
+
+def ingest (sender : Key) (index : Index) (message : Message) : GM (List Effect) := do
+  for (number, ref) in message.numbers do
+    modify fun g =>
+      let introduced : Option At := match ref with
+        | none => if message.introduction.isSome then some (sender, index) else none
+        | some r => (g.rosters.resolve sender r.introducer).map (·, r.index)
+      { g with rosters := g.rosters.number sender number introduced }
+  if let some intro := message.introduction then introduced sender index intro
+  if let some at_ := message.introducedAt then started sender at_.index
+  modify fun g => message.acks.foldl (takeAck sender) g
+  match message.content with
+  | none => pure []
+  | some content =>
+    modify fun g => { g with received := g.received.set (sender, index) g.epoch }
+    pure [.deliver sender index content]
+
+def boxRead (stream : Key) (index : Index) (result : ReadResult) (next : Option Index) :
+    GM (List Effect) := do
+  let g ← get
+  match g.readers.get? stream with
+  | none => pure []
+  | some r =>
+    let (message, r, es) := r.found index result next g.recheck
+    setReader r
+    match message with
+    | some m => pure ((← ingest stream index m) ++ es)
+    | none => pure es
+
+/-! ## Writing -/
+
+/-- The next index of our roster, counting what is composed. -/
+def size (g : Group) : Nat :=
+  (g.pending.values.flatMap (·.numbers)).foldl (fun m (n, _) => max m (n + 1)) (g.rosters.size g.me)
+
+def owesControl (g : Group) : Bool :=
+  !g.ledger.holding &&
+    (g.introducedAt.isSome || g.unnumbered.any fun (i, _) => (g.rosters.indexOf g.me i).isSome)
+
+/-- Number every member whose `Introduction` we have read and whose introducer we have numbered,
+from the next index on: the message, what it does once written, and who is left unnumbered. -/
+def controlStep (g : Group) (acc : Nat × Numbers × List (Nat × Option At) × List At) (a : At) :
+    Nat × Numbers × List (Nat × Option At) × List At :=
+  match g.rosters.indexOf g.me a.1 with
+  | none => acc
+  | some place => (acc.1 + 1, acc.2.1 ++ [(acc.1, some ⟨place, a.2⟩)],
+      acc.2.2.1 ++ [(acc.1, some a)], acc.2.2.2.eraseP (· = a))
+
+def controlOf (g : Group) : Message × Pending × List At :=
+  let r := g.unnumbered.foldl g.controlStep (g.size, [], [], g.unnumbered)
+  ({ numbers := r.2.1, introducedAt := g.introducedAt }, { numbers := r.2.2.1, control := true }, r.2.2.2)
+
+/-- Number every member whose `Introduction` we have read and whose introducer we have numbered,
+and say where we were introduced. -/
+def control : GM (Message × Pending) := do
+  let g ← get
+  let (m, p, unnumbered) := g.controlOf
+  set { g with unnumbered := unnumbered, introducedAt := none }
+  pure (m, p)
+
+def release : GM Unit := modify fun g =>
+  { g with ledger := { g.ledger with induction := .idle, invitee := none, commit := false, starts := {} } }
+
+def hold : GM Unit := modify fun g =>
+  { g with ledger := { g.ledger with induction := .inducting, starts := g.readers.mapValues (·.next) } }
+
+/-- The `Introduction` of the member read by `readCap`, numbering it next unless it is numbered
+already, and what it does once written. -/
+def introductionOf (g : Group) (name : String) (readCap : ByteArray) : Message × Pending :=
+  let new := keyOf readCap
+  let assigned : List (Nat × Option At) := if g.numbered new then [] else [(g.size, none)]
+  ({ introduction := some ⟨name, readCap⟩, numbers := assigned.map fun (n, _) => (n, none) },
+    { numbers := assigned, introduced := some new, control := true })
+
+def introduction (name : String) (readCap : ByteArray) : GM (Message × Pending) := do
+  let g ← get
+  let new := keyOf readCap
+  if !g.readers.contains new then follow readCap (startOf readCap)
+  release
+  pure (g.introductionOf name readCap)
+
+/-- Acknowledge every stream we read whose run has moved on since we last did: the
+acknowledgements, keyed by our roster index, what the message does once written, and the ledger
+after. -/
+def acksOf (g : Group) (pending : Pending) : List (Nat × Index) × Pending × Ledger :=
+  (g.rosters.known g.me).foldl
+    (fun (acc : List (Nat × Index) × Pending × Ledger) (e : Nat × Option Key) =>
+      match e.2.bind g.readers.get? with
+      | none => acc
+      | some r =>
+        match acc.2.2.owed r.stream r.run with
+        | none => acc
+        | some owed =>
+          (acc.1 ++ [(e.1, owed)],
+            { acc.2.1 with acks := acc.2.1.acks.set r.stream (acc.2.2.published.get? r.stream, owed) },
+            acc.2.2.publish r.stream owed))
+    ([], pending, g.ledger)
+
+def withAcks (message : Message) (pending : Pending) : GM (Message × Pending) := do
+  let g ← get
+  let (acks, pending, ledger) := g.acksOf pending
+  set { g with ledger := ledger }
+  pure ({ message with acks := acks }, pending)
+
+def stage (message : Message) (pending : Pending) : GM Outgoing := do
+  modify fun g => { g with tokens := g.tokens + 1, pending := g.pending.set (g.tokens + 1) pending }
+  pure ⟨(← get).tokens, message⟩
+
+/-- The message `token` landed in the box `index` of our stream. -/
+def written (token : Nat) (index : Index) (plaintext : Option Message) : GM Unit := modify fun g =>
+  match g.pending.get? token with
+  | none => g
+  | some p =>
+    let rosters := p.numbers.foldl (fun r (number, introduced) =>
+      r.number g.me number (introduced.getD (g.me, index))) g.rosters
+    let rosters := match p.introduced with
+      | some n => { rosters with introductions := rosters.introductions.set (g.me, index) n }
+      | none => rosters
+    { g with pending := g.pending.erase token, rosters := rosters,
+             sent := g.sent.record index plaintext p.control g.epoch }
+
+def write (o : Outgoing) : GM (List Effect) := do
+  match (← get).pool with
+  | [] => pure []
+  | index :: rest =>
+    modify fun g => { g with pool := rest }
+    written o.token index (some o.message)
+    pure [.writeBox index o.message]
+
+def flush : GM (List Effect) := do
+  let mut effects : List Effect := []
+  for _ in [0:(← get).pool.length] do
+    let g ← get
+    if g.pool.isEmpty || !(g.owesControl || !g.outbox.isEmpty) then break
+    let (m, p) ← if g.owesControl then control else do
+      set { g with outbox := g.outbox.drop 1 }
+      pure ({ content := g.outbox.head? }, ({} : Pending))
+    let (m, p) ← withAcks m p
+    effects := effects ++ (← write (← stage m p))
+  let g ← get
+  if g.pool.length < 2 && !g.deriving_ then
+    set { g with deriving_ := true }
+    effects := effects ++ [.deriveIndexes g.me g.tip poolSize]
+  pure effects
+
+def settled (g : Group) : Bool :=
+  g.unnumbered.isEmpty && g.outbox.isEmpty && g.readers.values.all (·.mode = .idle)
+
+/-- What to hand a new member, which will start our stream at `ownStart`. -/
+def reply (g : Group) (ownStart : Index) : JoinReply :=
+  let order := g.rosters.known g.me
+  let size := match order.getLast? with
+    | some (i, _) => i + 1
+    | none => 0
+  let place : Dict Key Nat := Dict.ofList (order.filterMap fun (i, k) => k.map (·, i))
+  let keyAt := fun (index : Nat) => ((order.find? (·.1 = index)).bind (·.2))
+  let members := (List.range size).map fun index =>
+    match keyAt index with
+    | some k =>
+      if k = g.me then some (g.readCap, ownStart)
+      else (g.readers.get? k).map fun r => (r.readCap, g.ledger.starts.getD k r.next)
+    | none => none
+  let rosters := (List.range size).map fun index =>
+    let known := match keyAt index with
+      | some k => g.rosters.known k
+      | none => []
+    if known.isEmpty then none else some (known.map fun (i, k) => (i, k.bind place.get?))
+  { members := members, rosters := rosters
+    introductions := g.rosters.introductions.pairs.filterMap fun ((i, at_), k) =>
+      match place.get? i, place.get? k with
+      | some a, some b => some (a, at_, b)
+      | _, _ => none
+    introducer := place.getD g.me 0
+    newcomer := size }
+
+def introduceNow (name : String) (readCap : ByteArray) : GM Outgoing := do
+  let (m, p) ← introduction name readCap
+  stage m p
+
+def commitInduction : GM (List Effect) := do
+  let g ← get
+  match g.ledger.invitee with
+  | none => pure []
+  | some (name, readCap) =>
+    let r := g.reply (g.pool.headD .empty)
+    let es ← write (← introduceNow name readCap)
+    pure (es ++ [.sendJoinReply readCap r] ++ (← flush))
+
+/-- Do whatever has become possible: write what is owed, finish catching up, commit an
+induction. -/
+def progress : GM (List Effect) := do
+  let effects ← flush
+  if (← get).ledger.induction = .catchingUp && (← get).settled then hold
+  let g ← get
+  if g.ledger.induction = .inducting && g.ledger.commit && !g.pool.isEmpty then
+    pure (effects ++ (← commitInduction))
+  else pure effects
+
+def derived (indexes : List Index) : GM (List Effect) := do
+  modify fun g =>
+    { g with deriving_ := false, pool := g.pool ++ indexes, tip := indexes.getLastD g.tip }
+  progress
+
+def invite (name : String) (readCap : ByteArray) (commit : Bool) : GM (List Effect) := do
+  modify fun g => { g with
+    ledger := { g.ledger with induction := .catchingUp, invitee := some (name, readCap), commit := commit } }
+  let mut effects : List Effect := []
+  for r in (← get).readers.values do
+    let (r, es) := r.read
+    setReader r
+    effects := effects ++ es
+  pure (effects ++ (← progress))
+
+/-! ## Membership and time -/
+
+/-- Stop reading `member` and forget its key, keeping its places. -/
+def remove (member : Key) : GM Unit := modify fun g =>
+  let token := match g.rosters.indexOf g.me member with
+    | some place => placeholder place
+    | none => "retired:".toUTF8 ++ member.extract 0 8
+  let rosters := g.rosters.retire member token
+  { g with rosters := rosters, readers := g.readers.erase member, ledger := g.ledger.forget member,
+           unnumbered := g.unnumbered.filter fun at_ => rosters.introductions.get? at_ ≠ some token }
+
+def everyoneAcked (g : Group) (seq : Nat) : Bool :=
+  g.readers.keys.all fun k => match g.ledger.ackedBy.get? k with
+    | some s => seq ≤ s
+    | none => false
+
+def onEpoch (epoch : Nat) : GM (List Effect) := do
+  modify fun g => { g with epoch := epoch }
+  modify fun g => { g with sent := g.sent.retain epoch g.policy g.everyoneAcked }
+  let g ← get
+  let mut effects : List Effect := []
+  if let some keep := g.policy.keepReceived then
+    for ((sender, index), at_) in g.received.pairs do
+      if at_ + keep ≤ epoch then
+        modify fun g => { g with received := g.received.erase (sender, index) }
+        effects := effects ++ [.expire sender index]
+  let g ← get
+  let (sent, backfill) := g.sent.backfill epoch
+  set { g with sent := sent }
+  pure (effects ++ backfill)
+
+/-! ## Driven by events -/
+
+def handle (event : Event) : GM (List Effect) := do
+  let g ← get
+  match event with
+  | .send content =>
+    set { g with outbox := g.outbox ++ [content] }
+    progress
+  | .read stream =>
+    match g.readers.get? stream with
+    | some r =>
+      let (r, es) := r.read
+      setReader r
+      pure es
+    | none => pure []
+  | .scan stream => scanStream stream
+  | .boxRead stream index result next => pure ((← boxRead stream index result next) ++ (← progress))
+  | .indexesDerived _ indexes => derived indexes
+  | .walked stream target skipped steps =>
+    match g.readers.get? stream with
+    | some r =>
+      let (r, es) := r.walked target skipped steps g.recheck
+      setReader r
+      pure es
+    | none => pure []
+  | .invite name readCap => invite name readCap false
+  | .introduce name readCap =>
+    if g.ledger.induction = .idle then invite name readCap true
+    else
+      set { g with ledger := { g.ledger with commit := true } }
+      progress
+  | .remove member =>
+    remove member
+    pure []
+  | .epochChanged epoch => onEpoch epoch
+
+/-! ## Driven by a client that reads and writes for itself -/
+
+/-- A box read on `stream`, in order: its message, or `none` for one that holds nothing we can
+use. -/
+def observe (stream : Key) (index : Index) (message : Option Message) (next : Index) :
+    GM (List Effect) := do
+  match (← get).readers.get? stream with
+  | none => pure []
+  | some r =>
+    setReader { r with next := index, mode := .reading }
+    let es ← boxRead stream index (.data message) (some next)
+    modify fun g => { g with readers := g.readers.modify stream fun r => { r with mode := .idle } }
+    pure (es.filter fun
+      | .deliver .. | .expire .. => true
+      | _ => false)
+
+/-- The messages to send now, in order: a control message if one is owed, then `content`. Each
+takes effect when `written`. -/
+def compose (content : Option ByteArray := none) : GM (List Outgoing) := do
+  let mut staged : List (Message × Pending) := []
+  if (← get).owesControl then staged := [← control]
+  if let some c := content then staged := staged ++ [({ content := some c }, {})]
+  let mut out : List Outgoing := []
+  for (m, p) in staged do
+    let (m, p) ← withAcks m p
+    out := out ++ [← stage m p]
+  pure out
+
+/-- The message `token` will never be written: whatever it acknowledged is owed again, and whoever
+it numbered still needs numbering. -/
+def abandoned (token : Nat) : GM Unit := modify fun g =>
+  match g.pending.get? token with
+  | none => g
+  | some p =>
+    let published := p.acks.pairs.foldl (fun d (stream, (before, sent)) =>
+      if d.get? stream = some sent then
+        match before with
+        | some b => d.set stream b
+        | none => d.erase stream
+      else d) g.ledger.published
+    { g with pending := g.pending.erase token, ledger := { g.ledger with published },
+             unnumbered := if p.introduced.isNone then g.unnumbered ++ p.numbers.filterMap (·.2)
+               else g.unnumbered }
+
+/-- Begin inducting a member, starting each stream where we have read it now. Anything owed goes
+out first. -/
+def beginInduction : GM (List Outgoing) := do
+  let out ← compose
+  hold
+  pure out
+
+def cancelInduction : GM Unit := release
+
+end Group
+
+end CryptWalker.GroupChat.Member
