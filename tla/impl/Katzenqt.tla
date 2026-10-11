@@ -53,12 +53,12 @@ Inducting(n) == \E m \in Members : holding[m] = n \/ \E p \in PendingRange(m) : 
 Staged(m) ==
     LET who(u) == Named(intros[m], u[1], u[2])
         stale == {u \in unnumbered[m] : who(u) \in Numbering(m)}
-        can == {u \in unnumbered[m] \ stale : u[1] \in Range(roster[m])}
+        can == unnumbered[m] \ stale
         order == CHOOSE o \in [1..Cardinality(can) -> can] : Range(o) = can
         size == Size(m)
     IN [refs |-> order,
         first |-> size,
-        nums |-> {<<size + k - 1, IndexOf(roster[m], order[k][1]), order[k][2]>> : k \in 1..Cardinality(can)},
+        nums |-> {<<size + k - 1, who(order[k])>> : k \in 1..Cardinality(can)},
         newcomers |-> [k \in 1..Cardinality(can) |-> who(order[k])],
         intro |-> NoOne,
         iat |-> owesIat[m],
@@ -74,7 +74,7 @@ Compose(m) ==
     /\ pending' = [pending EXCEPT ![m] = Append(@, Staged(m))]
     /\ unnumbered' = [unnumbered EXCEPT ![m] = @ \ Staged(m).done]
     /\ owesIat' = [owesIat EXCEPT ![m] = None]
-    /\ UNCHANGED <<stream, joined, roster, read, ent, intros, started, awaiting, introducer, skipped,
+    /\ UNCHANGED <<stream, joined, roster, read, ent, keys, intros, started, awaiting, introducer, skipped,
                    holding, starts, reply, gap>>
 
 \* i begins inducting n: anything owed is composed first.
@@ -89,7 +89,7 @@ BeginInduction(i, n) ==
        ELSE UNCHANGED <<pending, unnumbered, owesIat>>
     /\ holding' = [holding EXCEPT ![i] = n]
     /\ starts' = [starts EXCEPT ![i] = read[i]]
-    /\ UNCHANGED <<stream, joined, roster, read, ent, intros, started, awaiting, introducer, skipped, reply, gap>>
+    /\ UNCHANGED <<stream, joined, roster, read, ent, keys, intros, started, awaiting, introducer, skipped, reply, gap>>
 
 \* i hands over the reply and composes the Introduction, ending the hold.
 HandOver(i) ==
@@ -105,7 +105,8 @@ HandOver(i) ==
           /\ reply' = [reply EXCEPT ![i] =
                 [roster |-> roster[i],
                  ent |-> [x \in Members |-> IF x # n /\ x \in Range(roster[i]) THEN given(x) ELSE {}],
-                 intros |-> IF HandIntroductions THEN intros[i] ELSE {},
+                 intros |-> IF HandIntroductions THEN {t \in intros[i] : t[3] \in Range(roster[i])} ELSE {},
+                 keys |-> Range(roster[i]) \cup {n},
                  read |-> starts[i]]]
     /\ holding' = [holding EXCEPT ![i] = NoOne]
     /\ UNCHANGED <<vars, starts, gap>>
@@ -133,6 +134,8 @@ Write(m) ==
              IN ent' = IF fresh THEN [e1 EXCEPT ![n] = r.ent] ELSE e1
           /\ LET i1 == IF n = NoOne THEN intros ELSE [intros EXCEPT ![m] = @ \cup {<<m, box, n>>}]
              IN intros' = IF fresh THEN [i1 EXCEPT ![n] = r.intros] ELSE i1
+          /\ LET k1 == IF n = NoOne THEN keys ELSE [keys EXCEPT ![m] = @ \cup {n}]
+             IN keys' = IF fresh THEN [k1 EXCEPT ![n] = r.keys] ELSE k1
           /\ read' = IF fresh THEN [read EXCEPT ![n] = [y \in Members |-> IF y = m THEN box[2] - 1 ELSE r.read[y]]]
                      ELSE read
           /\ joined' = IF fresh THEN joined \cup {n} ELSE joined
@@ -147,7 +150,7 @@ Abandon(m, k) ==
     /\ LET p == pending[m][k]
        IN /\ pending' = [pending EXCEPT ![m] = SubSeq(@, 1, k - 1) \o SubSeq(@, k + 1, Len(@))]
           /\ unnumbered' = [unnumbered EXCEPT ![m] = @ \cup Range(p.refs)]
-    /\ UNCHANGED <<stream, joined, roster, read, ent, intros, started, owesIat, awaiting, introducer, skipped,
+    /\ UNCHANGED <<stream, joined, roster, read, ent, keys, intros, started, owesIat, awaiting, introducer, skipped,
                    holding, starts, reply, gap>>
 
 CInit ==

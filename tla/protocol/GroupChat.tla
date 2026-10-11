@@ -9,9 +9,12 @@
 (* next box, as BACAP steps an index forward.                              *)
 (*                                                                         *)
 (* A member numbers another by announcing it in the Numbers of a control   *)
-(* message: the index assigned, its introducer's index in the sender's     *)
-(* roster, and the MessageBoxIndex of the Introduction. An Introduction    *)
-(* numbers the member it introduces with the index alone. A new member     *)
+(* message: the index assigned and a prefix of the member's key. Prefixes  *)
+(* are long enough that no two members share one, so here a prefix is the  *)
+(* member itself; a watcher can name it once it knows the member's key,    *)
+(* from an Introduction it read or the reply that inducted it. An          *)
+(* Introduction numbers the member it introduces with the index alone. A   *)
+(* new member                                                              *)
 (* says where it joined with IntroducedAt, once it has read its            *)
 (* Introduction; its roster began as its introducer's, up to the index the *)
 (* introducer gave it. An introducer cannot tell which invitation a member *)
@@ -19,11 +22,12 @@
 (* skips (a hole, a jump, content its owner deleted) leaves indexes        *)
 (* unresolved, never misplaced.                                            *)
 (*                                                                         *)
-(* A watcher resolves each Numbers entry as it reads it, as a client does: *)
-(* to a member's key, to the Introduction that names it, or to nothing.    *)
+(* A watcher keeps each Numbers entry as it reads it, as a client does: a  *)
+(* member's key, a prefix, or nothing.                                     *)
 (*                                                                         *)
 (* HandIntroductions chooses whether the reply to a new member hands over  *)
-(* the Introductions its introducer has read, as well as the rosters.      *)
+(* the Introductions its introducer has read of members in its roster, as  *)
+(* well as the rosters.                                                    *)
 (* UseIntroducedAt chooses whether a watcher waits for IntroducedAt to     *)
 (* know where a member's roster began, or takes the first Introduction of  *)
 (* it that it reads.                                                       *)
@@ -49,7 +53,8 @@ VARIABLES
     joined,     \* members in the group
     roster,     \* roster[m]: m's own roster
     read,       \* read[m][y]: boxes of y's stream m has passed
-    ent,        \* ent[m][x]: <<index, value>> m has for x's roster; value is <<key>>, <<introducer, box>> or None
+    ent,        \* ent[m][x]: <<index, value>> m has for x's roster; value is <<key>>, <<member, "prefix">> or None
+    keys,       \* keys[m]: members whose key m knows, whom a prefix can name
     intros,     \* intros[m]: <<introducer, box, member>> for each Introduction m has read or been handed
     started,    \* started[m][x]: <<introducer, index>>: x's roster began as the introducer's through index; or None
     unnumbered, \* unnumbered[m]: <<introducer, box>> of Introductions read whose member m has not numbered
@@ -58,26 +63,26 @@ VARIABLES
     introducer, \* introducer[n]: who inducted n
     skipped     \* some reader has passed a box without reading it
 
-vars == <<stream, joined, roster, read, ent, intros, started, unnumbered, owesIat, awaiting, introducer, skipped>>
+vars == <<stream, joined, roster, read, ent, keys, intros, started, unnumbered, owesIat, awaiting, introducer, skipped>>
 
 Range(s) == {s[i] : i \in DOMAIN s}
 IndexOf(s, e) == (CHOOSE i \in DOMAIN s : s[i] = e) - 1
 NoDup(s) == \A i, j \in DOMAIN s : s[i] = s[j] => i = j
 
-(* What a watcher can tell of a roster, from its entries E, Introductions I *)
-(* and starts S.                                                           *)
+(* What a watcher can tell of a roster, from its entries E, Introductions I,*)
+(* starts S and the keys K it knows.                                       *)
 
 \* Who the Introduction in box b, by introducer by, introduced.
 Named(I, by, b) == IF \E t \in I : t[1] = by /\ t[2] = b THEN (CHOOSE t \in I : t[1] = by /\ t[2] = b)[3] ELSE NoOne
 
-RECURSIVE Res(_, _, _, _, _, _)
-Res(E, I, S, x, k, d) ==
+RECURSIVE Res(_, _, _, _, _, _, _)
+Res(E, I, S, K, x, k, d) ==
     IF \E e \in E[x] : e[1] = k
     THEN LET v == (CHOOSE e \in E[x] : e[1] = k)[2]
          IN CASE Len(v) = 1 -> v[1]
-              [] Len(v) = 2 -> Named(I, v[1], v[2])
+              [] Len(v) = 2 -> IF v[1] \in K THEN v[1] ELSE NoOne
               [] OTHER -> NoOne
-    ELSE IF S[x] # None /\ k <= S[x][2] /\ d > 0 THEN Res(E, I, S, S[x][1], k, d - 1)
+    ELSE IF S[x] # None /\ k <= S[x][2] /\ d > 0 THEN Res(E, I, S, K, S[x][1], k, d - 1)
     ELSE NoOne
 
 RECURSIVE Idx(_, _, _, _)
@@ -85,17 +90,17 @@ Idx(E, S, x, d) ==
     {e[1] : e \in E[x]} \cup
         (IF S[x] # None /\ d > 0 THEN {k \in Idx(E, S, S[x][1], d - 1) : k <= S[x][2]} ELSE {})
 
-IndexIn(E, I, S, x, n) ==
-    LET ks == {k \in Idx(E, S, x, Depth) : Res(E, I, S, x, k, Depth) = n}
+IndexIn(E, I, S, K, x, n) ==
+    LET ks == {k \in Idx(E, S, x, Depth) : Res(E, I, S, K, x, k, Depth) = n}
     IN IF ks = {} THEN -1 ELSE CHOOSE k \in ks : TRUE
 
 \* n's roster began as i's, through the index i gave n, if that is known.
-Begin(E, I, S, n, i) ==
-    LET k == IndexIn(E, I, S, i, n)
+Begin(E, I, S, K, n, i) ==
+    LET k == IndexIn(E, I, S, K, i, n)
     IN IF k < 0 THEN S ELSE [S EXCEPT ![n] = <<i, k>>]
 
 View(m, x) ==
-    {<<k, Res(ent[m], intros[m], started[m], x, k, Depth)>> : k \in Idx(ent[m], started[m], x, Depth)}
+    {<<k, Res(ent[m], intros[m], started[m], keys[m], x, k, Depth)>> : k \in Idx(ent[m], started[m], x, Depth)}
 
 \* The member at index i among entries, a set of <<index, member>>.
 At(entries, i) == IF \E e \in entries : e[1] = i THEN (CHOOSE e \in entries : e[1] = i)[2] ELSE NoOne
@@ -114,6 +119,7 @@ Init ==
     /\ ent = [m \in Members |-> [x \in Members |->
                 IF m \in Founders /\ x \in Founders
                 THEN {<<i - 1, <<FounderSeq[i]>>>> : i \in DOMAIN FounderSeq} ELSE {}]]
+    /\ keys = [m \in Members |-> IF m \in Founders THEN Founders ELSE {}]
     /\ intros = [m \in Members |-> {}]
     /\ started = [m \in Members |-> [x \in Members |-> None]]
     /\ unnumbered = [m \in Members |-> {}]
@@ -139,10 +145,10 @@ Read(m, y) ==
            E0 == ent[m]
            I0 == intros[m]
            S0 == started[m]
+           K1 == IF n = NoOne THEN keys[m] ELSE keys[m] \cup {n}
            value(e) ==
-               IF Len(e) = 1 THEN IF n # NoOne THEN <<y, box>> ELSE None
-               ELSE LET by == Res(E0, I0, S0, y, e[2], Depth)
-                    IN IF by = NoOne THEN None ELSE <<by, e[3]>>
+               IF Len(e) = 1 THEN IF n # NoOne THEN <<n>> ELSE None
+               ELSE <<e[2], "prefix">>
            E1 == [E0 EXCEPT ![y] = @ \cup {<<e[1], value(e)>> :
                                             e \in {e \in msg.numbers : ~\E f \in E0[y] : f[1] = e[1]}}]
            I1 == IF n = NoOne THEN I0 ELSE I0 \cup {<<y, box, n>>}
@@ -150,15 +156,16 @@ Read(m, y) ==
            waited == UseIntroducedAt /\ n # NoOne /\ awaiting[m][n] = box
            \* without IntroducedAt, the first Introduction read
            first == ~UseIntroducedAt /\ n # NoOne /\ n # m /\ S0[n] = None /\ n \notin Founders
-           S1 == IF waited \/ first THEN Begin(E1, I1, S0, n, y) ELSE S0
+           S1 == IF waited \/ first THEN Begin(E1, I1, S0, K1, n, y) ELSE S0
            \* the Introduction y's IntroducedAt names, if m has read it
            iatKnown == UseIntroducedAt /\ msg.iat # None /\ \E t \in I1 : t[2] = msg.iat /\ t[3] = y
-           S2 == IF iatKnown THEN Begin(E1, I1, S1, y, (CHOOSE t \in I1 : t[2] = msg.iat /\ t[3] = y)[1])
+           S2 == IF iatKnown THEN Begin(E1, I1, S1, K1, y, (CHOOSE t \in I1 : t[2] = msg.iat /\ t[3] = y)[1])
                  ELSE S1
            isNew == n # NoOne /\ n # m /\ n \notin Range(roster[m])
                     /\ ~\E u \in unnumbered[m] : Named(I0, u[1], u[2]) = n
        IN /\ read' = [read EXCEPT ![m][y] = q]
           /\ ent' = [ent EXCEPT ![m] = E1]
+          /\ keys' = [keys EXCEPT ![m] = K1]
           /\ intros' = [intros EXCEPT ![m] = I1]
           /\ started' = [started EXCEPT ![m] = S2]
           /\ unnumbered' = IF isNew THEN [unnumbered EXCEPT ![m] = @ \cup {<<y, box>>}] ELSE unnumbered
@@ -179,7 +186,7 @@ Skip(m, y) ==
     /\ read[m][y] < Len(stream[y])
     /\ read' = [read EXCEPT ![m][y] = @ + 1]
     /\ skipped' = TRUE
-    /\ UNCHANGED <<stream, joined, roster, ent, intros, started, unnumbered, owesIat, awaiting, introducer>>
+    /\ UNCHANGED <<stream, joined, roster, ent, keys, intros, started, unnumbered, owesIat, awaiting, introducer>>
 
 (* Writing *)
 
@@ -189,13 +196,12 @@ Number(m) ==
     /\ Len(stream[m]) < MaxLen
     /\ LET who(u) == Named(intros[m], u[1], u[2])
            stale == {u \in unnumbered[m] : who(u) \in Range(roster[m])}
-           can == {u \in unnumbered[m] \ stale : u[1] \in Range(roster[m])}
+           can == unnumbered[m] \ stale
        IN /\ can # {} \/ owesIat[m] # None
           /\ \E order \in [1..Cardinality(can) -> can] :
                /\ Range(order) = can
                /\ LET size == Len(roster[m])
-                      nums == {<<size + k - 1, IndexOf(roster[m], order[k][1]), order[k][2]>> :
-                               k \in 1..Cardinality(can)}
+                      nums == {<<size + k - 1, who(order[k])>> : k \in 1..Cardinality(can)}
                       newcomers == [k \in 1..Cardinality(can) |-> who(order[k])]
                   IN /\ stream' = [stream EXCEPT ![m] =
                                      Append(@, [numbers |-> nums, intro |-> NoOne, iat |-> owesIat[m]])]
@@ -204,10 +210,11 @@ Number(m) ==
                                                              k \in 1..Cardinality(can)}]
           /\ unnumbered' = [unnumbered EXCEPT ![m] = @ \ (can \cup stale)]
           /\ owesIat' = [owesIat EXCEPT ![m] = None]
-    /\ UNCHANGED <<joined, read, intros, started, awaiting, introducer, skipped>>
+    /\ UNCHANGED <<joined, read, keys, intros, started, awaiting, introducer, skipped>>
 
 \* i introduces n. A new member gets the reply: i's roster with n after it,
-\* each member's roster as i can tell it, and the Introductions i has read.
+\* each member's roster as i can tell it, the read cap, and so the key, of
+\* each member of i's roster, and the Introductions i has read of them.
 \* A member already in the group is only announced again.
 Introduce(i, n) ==
     /\ i \in joined /\ n \in Joiners /\ n # i
@@ -219,12 +226,15 @@ Introduce(i, n) ==
            own == IF fresh THEN Append(roster[i], n) ELSE roster[i]
            mine == {<<k - 1, own[k]>> : k \in DOMAIN own}
            given(x) == {<<e[1], <<e[2]>>>> : e \in {e \in (IF x = i THEN mine ELSE View(i, x)) : e[2] # NoOne}}
+           handed == {t \in intros[i] : t[3] \in Range(own)}
        IN /\ stream' = [stream EXCEPT ![i] = Append(@, [numbers |-> nums, intro |-> n, iat |-> None])]
           /\ roster' = IF n \in joined THEN [roster EXCEPT ![i] = own]
                        ELSE [roster EXCEPT ![i] = own, ![n] = Append(roster[i], n)]
           /\ intros' = IF n \in joined THEN [intros EXCEPT ![i] = @ \cup {<<i, box, n>>}]
                        ELSE [intros EXCEPT ![i] = @ \cup {<<i, box, n>>},
-                                           ![n] = IF HandIntroductions THEN intros[i] ELSE {}]
+                                           ![n] = IF HandIntroductions THEN handed ELSE {}]
+          /\ keys' = IF n \in joined THEN [keys EXCEPT ![i] = @ \cup {n}]
+                     ELSE [keys EXCEPT ![i] = @ \cup {n}, ![n] = Range(own)]
           /\ ent' = IF n \in joined THEN [ent EXCEPT ![i][i] = given(i)]
                     ELSE [ent EXCEPT ![i][i] = given(i),
                                      ![n] = [x \in Members |->

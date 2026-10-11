@@ -29,7 +29,7 @@ files soon outgrow a RAM-backed `/tmp`.
 
 Each `MC_*.cfg` starts with `\* EXPECT pass` or `\* EXPECT violated <Property>`. Many configs
 exist to show that something is needed: take it away, and TLC must find the failure. With
-`FAST=1` the set runs in about fifteen minutes; `MC_GroupChat_RostersOnly` adds forty more.
+`FAST=1` the set runs in about two minutes; `MC_GroupChat_RostersOnly` adds about thirty more.
 
 ## Protocol models
 
@@ -37,7 +37,7 @@ exist to show that something is needed: take it away, and TLC must find the fail
 |---|---|
 | `Replica.tla` | One box at one replica, keyed by the epoch it was stored in; `SpecStored`, the storage the spec assumes, where every write stores the box at the current epoch |
 | `Backfill.tla` | One member's stream: periodic rewrite, Sent-box retention, acknowledgements and the readers' jumps and rechecks. The replica's write rule is the constant `StoredOp` |
-| `GroupChat.tla` | Rosters across a group with explicit numbering: Numbers, Introductions, IntroducedAt, the reply to a new member, and every watcher following every roster |
+| `GroupChat.tla` | Rosters across a group with explicit numbering: Numbers naming members by key prefix, Introductions, IntroducedAt, the reply to a new member, and every watcher following every roster |
 
 Where the spec can be read more than one way, or these models propose a change, a constant
 chooses between them: `AckFurthest` and `PollHoles` in `Backfill.tla`, and `HandIntroductions`
