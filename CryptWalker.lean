@@ -27,7 +27,9 @@ import CryptWalker.KEM.Combiner
 import CryptWalker.KEM.MLKEM.MLKEM512
 import CryptWalker.KEM.MLKEM.MLKEM768
 import CryptWalker.KEM.MLKEM.MLKEM1024
+import CryptWalker.KEM.MLKEMHedged.MLKEMHedged512
 import CryptWalker.KEM.MLKEMHedged.MLKEMHedged768
+import CryptWalker.KEM.MLKEMHedged.MLKEMHedged1024
 import CryptWalker.MKEM.MKEM
 import CryptWalker.MKEM.Adapter
 import CryptWalker.MKEM.Schemes

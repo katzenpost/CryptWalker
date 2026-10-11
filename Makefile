@@ -36,7 +36,7 @@ TESTS := \
 	CryptWalker.Hash.blake2b_256_test \
 	CryptWalker.Hash.blake2b_xof_test \
 	CryptWalker.KEM.mlkem768_x25519_combiner_test \
-	CryptWalker.KEM.MLKEMHedged.mlkemhedged768_test \
+	CryptWalker.KEM.MLKEMHedged.mlkemhedged_test \
 	CryptWalker.KEM.mlkem768_hedged_test \
 	CryptWalker.MultiRecipientHybrid.multirecipient_hybrid_test \
 	CryptWalker.Sphinx.kem_hybrid_vectors_test \
@@ -160,7 +160,7 @@ test-mlkem-kat: build ## ML-KEM-768: NIST ACVP known-answer vectors only
 	@$(BIN)/CryptWalker-KEM-MLKEM-mlkem_test
 
 test-mlkem-hedged: build ## hedged ML-KEM-768: NIST ACVP vectors + hpqc cross-check vectors
-	@$(BIN)/CryptWalker-KEM-MLKEMHedged-mlkemhedged768_test
+	@$(BIN)/CryptWalker-KEM-MLKEMHedged-mlkemhedged_test
 	@$(BIN)/CryptWalker-KEM-mlkem768_hedged_test
 
 test-mrhybrid: build ## multi-recipient hybrid: hpqc cross-check vectors
