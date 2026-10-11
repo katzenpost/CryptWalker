@@ -6,6 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Lean.Data.Json
 
 import CryptWalker.BACAP.API
+import CryptWalker.BACAP.Position
 import CryptWalker.BACAP.Impl
 import CryptWalker.BACAP.Types
 import CryptWalker.Util.newhex
@@ -65,7 +66,9 @@ def parseMessageBoxIndexHex (s : String) : Option MessageBoxIndex :=
 
 def parseWriteCap (data : ByteArray) : Except String WriteCap := do
   if h : data.data.size = WriteCapSize then
-    pure (unmarshalWriteCap ⟨data.data, h⟩)
+    match unmarshalWriteCap ⟨data.data, h⟩ with
+    | some wc => pure wc
+    | none => throw "WriteCap public key does not match its seed"
   else throw s!"WriteCap must be {WriteCapSize} bytes, got {data.data.size}"
 
 -- ── helpers ──
@@ -400,6 +403,156 @@ def testAliceBob : IO UInt32 := do
 
   pure (if ok then 0 else 1)
 
+-- ── layout, tombstone, position and negative vectors ──
+
+def toVec (n : Nat) (b : ByteArray) : Option (Vector UInt8 n) :=
+  if h : b.data.size = n then some ⟨b.data, h⟩ else none
+
+/-- A read cap from bytes, or `none` if the length or the root key is wrong. -/
+def readCapOfBytes (b : ByteArray) : Option ReadCap :=
+  toVec ReadCapSize b >>= unmarshalReadCap
+
+/-- A write cap from bytes, or `none` if the length is wrong or the key halves disagree. -/
+def writeCapOfBytes (b : ByteArray) : Option WriteCap :=
+  toVec WriteCapSize b >>= unmarshalWriteCap
+
+def indexOfBytes (b : ByteArray) : Option MessageBoxIndex :=
+  (toVec MessageBoxIndexSize b).map unmarshalMessageBoxIndex
+
+def strField (j : Json) (k : String) : Except String String := do
+  (← j.getObjVal? k).getStr?
+
+/-- An optional hex field: absent reads as empty. -/
+def optHexField (j : Json) (k : String) : Except String ByteArray :=
+  match j.getObjVal? k with
+  | .ok _ => hexField j k
+  | .error _ => pure ByteArray.empty
+
+def report (ok : Bool) (name : String) (why : String := "") : IO Bool := do
+  if ok then IO.println s!"  ok    {name}" else IO.println s!"  FAIL  {name} {why}"
+  pure ok
+
+def testLayout : IO UInt32 := do
+  let vecs ← loadVectors "CryptWalker/testdata/layout.json" "bacap_layout" pure
+  IO.println s!"Byte layouts ({vecs.size} vectors from hpqc)"
+  let mut ok := true
+  for v in vecs do
+    let name ← unwrap (strField v "name")
+    let wcBytes ← unwrap (hexField v "writecap_hex")
+    let expRC ← unwrap (hexField v "expected_readcap_hex")
+    let expPub ← unwrap (hexField v "expected_root_public_key_hex")
+    let expIdx ← unwrap (hexField v "expected_index_hex")
+    let expIdx64 ← unwrap (do (← v.getObjVal? "expected_idx64").getNat?)
+    let good := match writeCapOfBytes wcBytes with
+      | none => false
+      | some wc =>
+        let rc := wc.readCap
+        let rcBytes := vecToByteArray (marshalReadCap rc)
+        vecToByteArray (marshalWriteCap wc) == wcBytes &&
+        vecToByteArray rc.rootPublicKey == expPub &&
+        rcBytes == expRC &&
+        ((readCapOfBytes rcBytes).map fun r => vecToByteArray (marshalReadCap r)) == some rcBytes &&
+        vecToByteArray (marshalMessageBoxIndex wc.messageBoxIndex) == expIdx &&
+        wc.messageBoxIndex.idx64.toNat == expIdx64
+    ok := (← report good name) && ok
+  pure (if ok then 0 else 1)
+
+def testTombstone : IO UInt32 := do
+  let vecs ← loadVectors "CryptWalker/testdata/tombstone.json" "bacap_tombstone" pure
+  IO.println s!"Tombstones ({vecs.size} vectors from hpqc)"
+  let mut ok := true
+  for v in vecs do
+    let name ← unwrap (strField v "name")
+    let wc ← unwrap (parseWriteCap (← unwrap (hexField v "writecap_hex")))
+    let by_ ← unwrap (do (← v.getObjVal? "advance_by").getNat?)
+    let ctx ← unwrap (hexField v "ctx_hex")
+    let expBox ← unwrap (hexField v "expected_box_id_hex")
+    let expSig ← unwrap (hexField v "expected_signature_hex")
+    let good := match advancedIndex wc by_ with
+      | none => false
+      | some idx =>
+        let (box, sig) := idx.signBox wc ctx ByteArray.empty
+        vecToByteArray box == expBox && vecToByteArray sig == expSig &&
+        idx.decryptForContext box ctx ByteArray.empty sig == some ByteArray.empty
+    ok := (← report good name) && ok
+  pure (if ok then 0 else 1)
+
+/-- Whether `idx` is on the cap's stream, by `contains` and by `positionAt`. -/
+def reachable (rc : ReadCap) (idx : MessageBoxIndex) : Bool :=
+  match rc.contains idx, rc.positionAt idx with
+  | .ok (), .ok p => vecToByteArray (marshalMessageBoxIndex p.index) ==
+      vecToByteArray (marshalMessageBoxIndex idx)
+  | _, _ => false
+
+def testPosition : IO UInt32 := do
+  let vecs ← loadVectors "CryptWalker/testdata/position.json" "bacap_position" pure
+  IO.println s!"Index binding ({vecs.size} vectors from hpqc)"
+  let mut ok := true
+  for v in vecs do
+    let name ← unwrap (strField v "name")
+    let want ← unwrap (do (← v.getObjVal? "reachable").getBool?)
+    let good := match readCapOfBytes (← unwrap (hexField v "readcap_hex")),
+        indexOfBytes (← unwrap (hexField v "index_hex")) with
+      | some rc, some idx => reachable rc idx == want
+      | _, _ => false
+    ok := (← report good name) && ok
+  pure (if ok then 0 else 1)
+
+/-- Whether this implementation rejects the input a negative vector describes. -/
+def rejects (v : Json) : Except String Bool := do
+  let op ← strField v "operation"
+  let box ← optHexField v "box_id_hex"
+  let ct ← optHexField v "ciphertext_hex"
+  let sig ← optHexField v "signature_hex"
+  let ctx ← optHexField v "ctx_hex"
+  let blob ← optHexField v "blob_hex"
+  let capIndex : Except String (WriteCap × MessageBoxIndex) := do
+    let wc ← parseWriteCap (← hexField v "writecap_hex")
+    let n ← (← v.getObjVal? "advance_by").getNat?
+    match advancedIndex wc n with
+    | some idx => pure (wc, idx)
+    | none => throw "advance_by rewinds"
+  match op with
+  | "advance_index_to" =>
+    let idx ← (indexOfBytes (← hexField v "index_hex")).elim (throw "bad index") pure
+    let target ← (← v.getObjVal? "advance_to").getNat?
+    pure (idx.advanceIndexTo target.toUInt64).isNone
+  | "next_index" =>
+    let idx ← (indexOfBytes (← hexField v "index_hex")).elim (throw "bad index") pure
+    pure idx.nextIndex.isNone
+  | "decrypt" =>
+    let (_, idx) ← capIndex
+    match toVec 32 box, toVec 64 sig with
+    | some b, some s => pure (idx.decryptForContext b ctx ct s).isNone
+    | _, _ => pure true
+  | "open" =>
+    let (wc, idx) ← capIndex
+    match toVec 32 box, toVec 64 sig with
+    | some b, some s =>
+      pure (match idx.openForContext wc.readCap ctx b ct s with
+        | .error .boxMismatch => true
+        | _ => false)
+    | _, _ => pure true
+  | "verify_box" =>
+    match toVec 32 box, toVec 64 sig with
+    | some b, some s => pure !(verifyBox b ct s)
+    | _, _ => pure true
+  | "parse_message_box_index" => pure (indexOfBytes blob).isNone
+  | "parse_read_cap" => pure (readCapOfBytes blob).isNone
+  | "parse_write_cap" => pure (writeCapOfBytes blob).isNone
+  | other => throw s!"unknown operation {other}"
+
+def testNegative : IO UInt32 := do
+  let vecs ← loadVectors "CryptWalker/testdata/negative.json" "bacap_negative" pure
+  IO.println s!"Rejected inputs ({vecs.size} vectors from hpqc)"
+  let mut ok := true
+  for v in vecs do
+    let name ← unwrap (strField v "name")
+    let cat ← unwrap (strField v "category")
+    let r ← unwrap (rejects v)
+    ok := (← report r s!"{name} ({cat})" "was accepted") && ok
+  pure (if ok then 0 else 1)
+
 def main : IO UInt32 := do
   let r1 ← testMessageBoxIndex
   IO.println ""
@@ -415,7 +568,15 @@ def main : IO UInt32 := do
   IO.println ""
   let r7 ← testAliceBob
   IO.println ""
-  if r1 == 0 && r2 == 0 && r3 == 0 && r4 == 0 && r5 == 0 && r6 == 0 && r7 == 0 then
+  let r8 ← testLayout
+  IO.println ""
+  let r9 ← testTombstone
+  IO.println ""
+  let r10 ← testPosition
+  IO.println ""
+  let r11 ← testNegative
+  IO.println ""
+  if [r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11].all (· == 0) then
     IO.println "all BACAP vectors passed"
     pure 0
   else

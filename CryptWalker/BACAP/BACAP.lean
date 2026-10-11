@@ -8,4 +8,5 @@ import CryptWalker.BACAP.Ratchet
 import CryptWalker.BACAP.Protocol
 import CryptWalker.BACAP.Impl
 import CryptWalker.BACAP.API
+import CryptWalker.BACAP.Position
 import CryptWalker.BACAP.test

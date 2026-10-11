@@ -12,10 +12,10 @@ This file is the surface callers use: the same operations named and shaped as in
 `hpqc/bacap/bacap_impl.go` and `hpqc/py/hpqc/bacap/stateless.py`, taking capabilities rather
 than loose key material, with the HKDF fixed to BLAKE2b-512.
 
-Only the *stateless* API is ported. Go and Python also ship `StatefulReader` and
-`StatefulWriter`, mutable wrappers that hold a next-index pointer and advance it after each
-successful operation; a caller who wants that can hold a `MessageBoxIndex` and call
-`nextIndex` themselves.
+The API is stateless: a caller holds its own index and moves it with `nextIndex` or
+`advanceIndexTo`. To keep a cap and an index from different streams apart, use the positions in
+`Position.lean`, as Go and Python do. There is no counterpart to Go's deprecated
+`StatefulReader` and `StatefulWriter`, which katzenpost no longer uses.
 
 Passing a `WriteCap` rather than a separate scalar and public key is not only tidier: the two
 are derived from one seed, so the `pk = publicKey sk` side condition that `BACAPSpec` carries

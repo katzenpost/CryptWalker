@@ -35,8 +35,10 @@ TESTS := \
 	CryptWalker.KEM.mlkem768_x25519_combiner_test \
 	CryptWalker.KEM.MLKEMHedged.mlkemhedged768_test \
 	CryptWalker.KEM.mlkem768_hedged_test \
+	CryptWalker.MultiRecipientHybrid.multirecipient_hybrid_test \
 	CryptWalker.Sphinx.kem_hybrid_vectors_test \
 	CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test \
+	CryptWalker.BACAP.primitive_vectors_test \
 	CryptWalker.GroupChat.ack_codec_test \
 	CryptWalker.GroupChat.replay
 
@@ -45,15 +47,15 @@ TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 # Bare `lake build` builds only defaultTargets, which is the library. The
 # executables have to be named or the test targets run whatever binary was left
 # in .lake/build/bin by an earlier build.
-EXES := $(TESTS) CryptWalker.Bench.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors CryptWalker.KEM.gen_mlkem768_hedged_vectors
+EXES := $(TESTS) CryptWalker.BACAP.gen_vectors CryptWalker.Bench.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors CryptWalker.KEM.gen_mlkem768_hedged_vectors CryptWalker.MultiRecipientHybrid.gen_multirecipient_hybrid_vectors
 
 .DEFAULT_GOAL := help
 
 .PHONY: all build test bench bench-nike bench-kem bench-sphinx sorries clean help
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
-.PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
-.PHONY: verify-vectors axioms tla
+.PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors gen-mrhybrid-vectors test-mrhybrid test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
+.PHONY: verify-vectors check-bacap-vectors axioms tla
 
 all: build ## build everything, library and executables
 
@@ -126,11 +128,18 @@ gen-hybrid-vectors: build ## build X25519+ML-KEM-768 combiner vectors, for cross
 gen-hedged-vectors: build ## build hedged ML-KEM-768 vectors, for cross-checking against hpqc
 	@$(BIN)/CryptWalker-KEM-gen_mlkem768_hedged_vectors
 
+gen-mrhybrid-vectors: build ## build multi-recipient hybrid vectors, for cross-checking against hpqc
+	@$(BIN)/CryptWalker-MultiRecipientHybrid-gen_multirecipient_hybrid_vectors
+
 # Override with `make verify-vectors HPQC_DIR=... KATZENPOST_DIR=...` if the sibling repos aren't
 # checked out at ../hpqc, ../katzenpost.
 HPQC_DIR ?= ../hpqc
 KATZENPOST_DIR ?= ../katzenpost
 KATZENQT_DIR ?= ../katzenqt
+
+check-bacap-vectors: build ## generate hpqc's BACAP vectors with the Lean implementation and compare
+	@$(BIN)/CryptWalker-BACAP-gen_vectors --check
+	@$(BIN)/CryptWalker-BACAP-test
 
 verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc/katzenpost/katzenqt source copies
 	@./scripts/verify-vectors.sh "$(HPQC_DIR)" "$(KATZENPOST_DIR)" "$(KATZENQT_DIR)"
@@ -151,6 +160,9 @@ test-mlkem-kat: build ## ML-KEM-768: NIST ACVP known-answer vectors only
 test-mlkem-hedged: build ## hedged ML-KEM-768: NIST ACVP vectors + hpqc cross-check vectors
 	@$(BIN)/CryptWalker-KEM-MLKEMHedged-mlkemhedged768_test
 	@$(BIN)/CryptWalker-KEM-mlkem768_hedged_test
+
+test-mrhybrid: build ## multi-recipient hybrid: hpqc cross-check vectors
+	@$(BIN)/CryptWalker-MultiRecipientHybrid-multirecipient_hybrid_test
 
 test-hybrid-sphinx: build ## KEM-Sphinx round-trip self-test for the X25519+ML-KEM-768 hybrid only
 	@$(BIN)/CryptWalker-Sphinx-kem_selftest mlkem768-x25519-kem
