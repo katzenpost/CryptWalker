@@ -6,7 +6,9 @@ import CryptWalker.KEM.KEM
 import CryptWalker.KEM.Adapter
 import CryptWalker.KEM.Combiner
 import CryptWalker.KEM.MLKEM.MLKEM768
+import CryptWalker.KEM.MLKEMHedged.MLKEMHedged512
 import CryptWalker.KEM.MLKEMHedged.MLKEMHedged768
+import CryptWalker.KEM.MLKEMHedged.MLKEMHedged1024
 import CryptWalker.Hash.Sha2
 import CryptWalker.Hash.Blake2b
 import CryptWalker.MAC.HMAC
@@ -184,12 +186,29 @@ def kemMLKEMHedged768X25519 : KEM :=
   Combiner.combineKEM blake2b256CombinerPRF kemX25519
     [CryptWalker.KEM.MLKEMHedged.kemMLKEMHedged768Seed]
 
+/-- `kemMLKEMHedged768X25519` at ML-KEM-512. -/
+def kemMLKEMHedged512X25519 : KEM :=
+  Combiner.combineKEM blake2b256CombinerPRF kemX25519
+    [CryptWalker.KEM.MLKEMHedged.kemMLKEMHedged512Seed]
+
+/-- `kemMLKEMHedged768X25519` at ML-KEM-1024. -/
+def kemMLKEMHedged1024X25519 : KEM :=
+  Combiner.combineKEM blake2b256CombinerPRF kemX25519
+    [CryptWalker.KEM.MLKEMHedged.kemMLKEMHedged1024Seed]
+
 def mlkem768HedgedX25519Entry : RegistryEntry :=
   { hpqcName := "mlkem768-hedged-x25519-kem", scheme := kemMLKEMHedged768X25519 }
 
+def mlkem512HedgedX25519Entry : RegistryEntry :=
+  { hpqcName := "mlkem512-hedged-x25519-kem", scheme := kemMLKEMHedged512X25519 }
+
+def mlkem1024HedgedX25519Entry : RegistryEntry :=
+  { hpqcName := "mlkem1024-hedged-x25519-kem", scheme := kemMLKEMHedged1024X25519 }
+
 def registry : List RegistryEntry :=
   [x25519LadderEntry, x25519GroupEntry, mlkem768Entry, mlkem768X25519Entry,
-    mlkem768HedgedEntry, mlkem768HedgedX25519Entry]
+    mlkem768HedgedEntry, mlkem768HedgedX25519Entry, mlkem512HedgedX25519Entry,
+    mlkem1024HedgedX25519Entry]
 
 /-- `hpqc/kem/schemes.ByName`, ported: case-insensitive lookup, `none` for any name not in
 `registry` — which, unlike `hpqc`'s own registry, is most of `hpqc/kem/schemes.All()`: this
