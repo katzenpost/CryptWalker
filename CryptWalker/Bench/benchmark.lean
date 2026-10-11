@@ -8,8 +8,9 @@ import CryptWalker.Bench.KEM
 import CryptWalker.Bench.Sphinx
 import CryptWalker.Bench.MLKEMSteps
 import CryptWalker.Bench.Field25519
+import CryptWalker.Bench.Cipher
 
-/-! # The benchmark driver: every registered NIKE, KEM and Sphinx scheme, via LeanBench -/
+/-! # The benchmark driver: every registered NIKE, KEM and Sphinx scheme, plus the ML-KEM step, field and cipher suites, via LeanBench -/
 
 def main (args : List String) : IO UInt32 := do
   for e in CryptWalker.NIKE.registry do
@@ -19,4 +20,5 @@ def main (args : List String) : IO UInt32 := do
   (← CryptWalker.Bench.Sphinx.benches).forM LeanBench.register
   (← CryptWalker.Bench.MLKEMSteps.benches).forM LeanBench.register
   (← CryptWalker.Bench.Field25519.benches).forM LeanBench.register
+  (← CryptWalker.Bench.Cipher.benches).forM LeanBench.register
   LeanBench.runMain args
