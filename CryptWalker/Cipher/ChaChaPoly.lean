@@ -32,7 +32,9 @@ private def keystream (key : Key) (n : Nonce) (len : Nat) : ByteArray :=
     (fun out i => out ++ block key n (UInt32.ofNat (i + 1))) #[]).extract 0 len⟩
 
 private def xorKeystream (ks d : ByteArray) : ByteArray :=
-  ⟨d.data.mapIdx fun i b => b ^^^ ks.data.getD i 0⟩
+  -- `ByteArray.data` copies, so convert once rather than per byte
+  let k := ks.data
+  ⟨d.data.mapIdx fun i b => b ^^^ k.getD i 0⟩
 
 /-- RFC 8439 §2.4: encryption starts at counter 1, block 0 being reserved for the Poly1305 key. -/
 def chacha20 (key : Key) (n : Nonce) (d : ByteArray) : ByteArray :=
