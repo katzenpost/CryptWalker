@@ -268,4 +268,60 @@ def LadderScheme : NIKE where
   publicKeySize_eq_sharedSecretSize := rfl
   encodePublicKey_reinterpret := fun _ => rfl
 
+/-! ## The ladder on `Field25519` limbs, as a NIKE
+
+`FeScheme` is `LadderScheme` with `curve25519_fe` in place of `curve25519`. Its four axioms are
+the ladder's four, restated for `curve25519_fe`. They are temporary: proving
+`curve25519_fe = curve25519` would derive them from the ones above. -/
+
+def derivePubFe (sk : PrivateKey) : PublicKey := ⟨curve25519_fe sk.data basepointBytes⟩
+
+axiom derivePubFe_safe : ∀ sk : PrivateKey, SafePub (derivePubFe sk)
+
+axiom curve25519_fe_commutes : ∀ sk₁ sk₂ : PrivateKey,
+  curve25519_fe sk₁.data (derivePubFe sk₂).data = curve25519_fe sk₂.data (derivePubFe sk₁).data
+
+axiom curve25519_fe_safe : ∀ (sk : PrivateKey) (pk : PublicKey),
+  SafePub (⟨curve25519_fe sk.data pk.data⟩ : PublicKey)
+
+axiom curve25519_fe_comm_gen : ∀ (sk₁ sk₂ : PrivateKey) (pk : Vector UInt8 keySize),
+  curve25519_fe sk₁.data (curve25519_fe sk₂.data pk) = curve25519_fe sk₂.data (curve25519_fe sk₁.data pk)
+
+def FeSchemeName := "X25519"
+
+def FeScheme : NIKE where
+  PrivateKey   := PrivateKey
+  PublicKey    := PublicKey
+  SharedSecret := SharedSecret
+
+  name := FeSchemeName
+  privateKeySize   := keySize
+  publicKeySize    := keySize
+  sharedSecretSize := keySize
+
+  Safe    := SafePub
+  decSafe := inferInstance
+
+  privateKeyFromSeed := fun seed => ⟨clampScalar seed⟩
+  derivePublicKey    := derivePubFe
+  groupAction        := fun sk spk => ⟨curve25519_fe sk.data spk.1.data⟩
+
+  encodePrivateKey   := fun sk => sk.data
+  decodePrivateKey   := fun v => some ⟨v⟩
+  encodePublicKey    := fun pk => pk.data
+  decodePublicKey    := fun v => some ⟨v⟩
+  encodeSharedSecret := fun ss => ss.data
+
+  derive_safe        := derivePubFe_safe
+  decode_encode_priv := fun _ => rfl
+  decodePrivateKey_total := fun v => ⟨⟨v⟩, rfl⟩
+  decode_encode_pub  := fun _ => rfl
+  encode_decode_pub  := fun _ _ h => congrArg PublicKey.data (Option.some.inj h) ▸ rfl
+  commutes           := fun sk₁ sk₂ => congrArg SharedSecret.mk (curve25519_fe_commutes sk₁ sk₂)
+  reinterpret        := fun ss => ⟨ss.data⟩
+  reinterpret_safe   := fun sk spk => curve25519_fe_safe sk spk.1
+  groupAction_comm   := fun sk₁ sk₂ spk => congrArg SharedSecret.mk (curve25519_fe_comm_gen sk₁ sk₂ spk.1.data)
+  publicKeySize_eq_sharedSecretSize := rfl
+  encodePublicKey_reinterpret := fun _ => rfl
+
 end CryptWalker.NIKE.X25519_montgomery_ladder

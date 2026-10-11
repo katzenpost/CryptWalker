@@ -26,23 +26,26 @@ def X25519Scheme : NIKE := X25519.Scheme
 
 def X25519LadderScheme : NIKE := X25519_montgomery_ladder.LadderScheme
 
+/-- The Montgomery ladder on `Field25519` limbs; its NIKE fields rest on axioms for now. -/
+def X25519FeScheme : NIKE := X25519_montgomery_ladder.FeScheme
+
 def implementations : List NIKE :=
   [
     X25519Scheme,
-    X25519LadderScheme
+    X25519LadderScheme,
+    X25519FeScheme
   ]
 
 /-! ## The `hpqc/nike/schemes` registry, ported
 
-`NIKE.name` above (`"X25519-group"`/`"X25519-ladder"`) disambiguates *this project's own* two
-X25519 implementations; it is not the identity `hpqc/nike/schemes.ByName` keys on, which names
+`NIKE.name` above (`"X25519"`/`"X25519-group"`/`"X25519-ladder"`) disambiguates *this project's
+own* three X25519 implementations; it is not the identity `hpqc/nike/schemes.ByName` keys on, which names
 the *cryptographic scheme* independent of which of this project's implementations computes it.
 `hpqc/nike/schemes.All()` lists ~12 schemes (`x25519`, `x448`, `ctidh511/512/1024/2048`, and
 several CTIDH×X25519/X448 hybrids — see `hpqc/nike/schemes/schemes.go`); this project ports
-exactly one *cryptographic scheme*, X25519, but registers both of its implementations here under
-their own names — `"x25519-ladder"` for `X25519LadderScheme`, `"x25519"` for `X25519Scheme` —
-rather than picking one to squat on `hpqc`'s own name (`hpqc/nike/x25519/ecdh.go`'s
-`Name() string { return "x25519" }`) and hiding the other. -/
+exactly one *cryptographic scheme*, X25519, and registers each of its implementations under its
+own name: `hpqc`'s own `"x25519"` (`hpqc/nike/x25519/ecdh.go`'s `Name()`) for the limb ladder
+`X25519FeScheme`, `"x25519-ladder"` for `X25519LadderScheme`, `"x25519-group"` for `X25519Scheme`. -/
 
 /-- One entry in the scheme registry: a scheme's canonical `hpqc` name paired with the actual
 implementation `byName` should return for it. -/
@@ -59,9 +62,12 @@ def x25519LadderEntry : RegistryEntry := { hpqcName := "x25519-ladder", scheme :
 assumed — but whose connection to the actual RFC 7748 byte encoding runs through
 `curve25519_commutes`, an axiom, not a checked fact. Not verified against `sphinx_vectors.json`;
 callers building an actual Sphinx packet almost certainly want `x25519LadderEntry` instead. -/
-def x25519GroupEntry : RegistryEntry := { hpqcName := "x25519", scheme := X25519Scheme }
+def x25519GroupEntry : RegistryEntry := { hpqcName := "x25519-group", scheme := X25519Scheme }
 
-def registry : List RegistryEntry := [x25519LadderEntry, x25519GroupEntry]
+/-- The fast limb ladder, registered under `hpqc`'s own name `"x25519"`. -/
+def x25519FeEntry : RegistryEntry := { hpqcName := "x25519", scheme := X25519FeScheme }
+
+def registry : List RegistryEntry := [x25519FeEntry, x25519LadderEntry, x25519GroupEntry]
 
 /-- `hpqc/nike/schemes.ByName`, ported: case-insensitive lookup (Go's own `ByName` lower-cases
 both sides), `none` for any name not in `registry` — which, unlike `hpqc`'s own registry, is most

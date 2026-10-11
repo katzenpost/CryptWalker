@@ -24,7 +24,7 @@ way `sphinx.go` does.
 Runs the full round set (several hop counts, all equal to the geometry's `nrHops` so no filler
 padding is needed, one round with `nrHops < geom.nrHops` to exercise the filler path, plus the
 abstract-interface/completeness/SURB rounds below) once per registered NIKE-Sphinx scheme —
-`"x25519-ladder"` (`NIKE.X25519LadderScheme`) and `"x25519"` (`NIKE.X25519Scheme`) — since
+`"x25519-ladder"` (`NIKE.X25519LadderScheme`) and `"x25519-group"` (`NIKE.X25519Scheme`) — since
 `createHeader`/`unwrapNIKE` are generic over any `NIKE`, not just the ladder implementation
 `nike_vectors_test`'s Go-cross-checked vectors happen to use. -/
 
@@ -406,7 +406,7 @@ def runSuite (schemeName : String) (nike : NIKE) : IO Bool := do
 def main : IO UInt32 := do
   let okLadder ← runSuite "x25519-ladder" x25519Ladder
   IO.println ""
-  let okGroup ← runSuite "x25519" x25519Group
+  let okGroup ← runSuite "x25519-group" x25519Group
   IO.println ""
   if okLadder && okGroup then
     IO.println "all NIKE-Sphinx round-trip self-tests passed (both schemes)"
