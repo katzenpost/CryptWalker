@@ -26,10 +26,14 @@ def X25519Scheme : NIKE := X25519.Scheme
 
 def X25519LadderScheme : NIKE := X25519_montgomery_ladder.LadderScheme
 
+/-- The Montgomery ladder on `Field25519` limbs; its NIKE fields rest on axioms for now. -/
+def X25519FeScheme : NIKE := X25519_montgomery_ladder.FeScheme
+
 def implementations : List NIKE :=
   [
     X25519Scheme,
-    X25519LadderScheme
+    X25519LadderScheme,
+    X25519FeScheme
   ]
 
 /-! ## The `hpqc/nike/schemes` registry, ported
@@ -61,7 +65,10 @@ assumed — but whose connection to the actual RFC 7748 byte encoding runs throu
 callers building an actual Sphinx packet almost certainly want `x25519LadderEntry` instead. -/
 def x25519GroupEntry : RegistryEntry := { hpqcName := "x25519", scheme := X25519Scheme }
 
-def registry : List RegistryEntry := [x25519LadderEntry, x25519GroupEntry]
+/-- The fast limb ladder, registered as `"x25519"` and listed first so `byName` returns it. -/
+def x25519FeEntry : RegistryEntry := { hpqcName := "x25519", scheme := X25519FeScheme }
+
+def registry : List RegistryEntry := [x25519FeEntry, x25519LadderEntry, x25519GroupEntry]
 
 /-- `hpqc/nike/schemes.ByName`, ported: case-insensitive lookup (Go's own `ByName` lower-cases
 both sides), `none` for any name not in `registry` — which, unlike `hpqc`'s own registry, is most
