@@ -48,3 +48,18 @@ jobs:
         env:
           FAST: "1"
         run: ./CryptWalker/GroupChat/tla/check.sh
+
+  veil:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Prove and model-check the Veil Backfill model
+        working-directory: CryptWalker/GroupChat/veil
+        run: lake build

@@ -1,0 +1,10 @@
+name = "GroupChatVeil"
+defaultTargets = ["GroupChatVeil"]
+
+[[require]]
+name = "veil"
+git = "https://github.com/verse-lab/veil"
+rev = "529eb3bde3ea9b84b39a90a32ed8e56c5d8741f1"
+
+[[lean_lib]]
+name = "GroupChatVeil"
