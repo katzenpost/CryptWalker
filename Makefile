@@ -42,7 +42,8 @@ TESTS := \
 	CryptWalker.Sphinx.kem_hybrid_vectors_test \
 	CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test \
 	CryptWalker.BACAP.primitive_vectors_test \
-	CryptWalker.GroupChat.ack_codec_test
+	CryptWalker.GroupChat.ack_codec_test \
+	CryptWalker.GroupChat.replay
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 

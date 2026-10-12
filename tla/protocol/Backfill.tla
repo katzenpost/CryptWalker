@@ -1,18 +1,22 @@
 ------------------------------ MODULE Backfill ------------------------------
 (***************************************************************************)
 (* One member's stream: backfill, retention, acknowledgements and the      *)
-(* reader's scan. See "Opportunistic acknowledgements and backfill" and    *)
+(* readers' scans. See "Opportunistic acknowledgements and backfill" and   *)
 (* "Rewrite and scan" in the group chat spec.                              *)
+(*                                                                         *)
+(* A reader stuck where another reader has acknowledged further jumps to   *)
+(* the box that reader acknowledged, keeping the positions it skipped for  *)
+(* rechecking. A scan with no such acknowledgement to go on reads on from  *)
+(* where the reader stands.                                                *)
 (*                                                                         *)
 (* StoredOp is how a replica handles a write: Replica.tla's SpecStored for *)
 (* the protocol, impl/KatzenpostReplica.tla's DeployedStored for the       *)
-(* replica as deployed.                                                    *)
+(* replica as deployed. AckFurthest and PollHoles choose between the spec  *)
+(* as written and the changes these models propose.                        *)
 (*                                                                         *)
-(* NaiveAdopt, AckFurthest and KeepHoles choose between the spec as        *)
-(* written and the changes these models propose.                           *)
-(*                                                                         *)
-(* Acknowledgements travel on the reader's own messages, which the owner   *)
-(* reads at some later time or never: LearnAck abstracts that whole path.  *)
+(* Acknowledgements travel on the readers' own messages, which the owner   *)
+(* and the other readers read at some later time or never: Publish         *)
+(* abstracts that whole path.                                              *)
 (***************************************************************************)
 EXTENDS Replica, FiniteSets, TLC
 
@@ -22,10 +26,11 @@ CONSTANTS
     MaxEpoch,       \* the last replica epoch explored
     Retention,      \* epochs a Sent-box record is kept after its write
     StoredOp(_, _, _), \* a replica's handling of a write: StoredOp(entries, epoch, kind)
-    NaiveAdopt,     \* a scan adopts its first empty probe, even right after the stuck position
     AckFurthest,    \* an ack names the furthest box read, as the spec says, not the end of the unbroken run
+    AutoScan,       \* a stuck reader jumps on another reader's acknowledgement without being asked
     AllowScan,      \* the user may ask for a scan
-    KeepHoles       \* a reader keeps polling a position a scan skipped, until it reads it
+    PollHoles,      \* a reader polls the positions it skipped until it reads them, not only when it scans
+    Window          \* how many positions behind the one it jumped to a reader keeps for rechecking
 
 VARIABLES
     epoch,   \* current replica epoch
@@ -35,35 +40,33 @@ VARIABLES
     record,  \* record[p]: the owner's Sent-box record: "none", "plain", "held" (position only) or "gone"
     lastRw,  \* lastRw[p]: last epoch the owner wrote or rewrote p
     online,  \* the owner's client is running
-    cursor,  \* cursor[r]: next position r expects
-    mode,    \* mode[r]: "reading" or "scanning"
-    probe,   \* probe[r]: position a scan looks at next
+    cursor,  \* cursor[r]: next position r reads
     seen,    \* seen[r]: positions r has read, data or tombstone
     got,     \* got[r]: positions whose message r has ingested
-    acked,   \* acked[r]: how far the owner knows r has read, -1 for nothing
-    holes    \* holes[r]: positions a scan skipped that r still polls
+    acked,   \* acked[r]: how far r's published acknowledgements reach, -1 for nothing
+    holes    \* holes[r]: positions r skipped and keeps for rechecking
 
-vars == <<epoch, store, written, wEpoch, record, lastRw, online,
-          cursor, mode, probe, seen, got, acked, holes>>
+vars == <<epoch, store, written, wEpoch, record, lastRw, online, cursor, seen, got, acked, holes>>
 
 Pos == 0..(N - 1)
 Epochs == 0..MaxEpoch
 None == -1
 
-\* What a read of p returns: the newest kept entry, or "none" (BoxIDNotFound).
 Look(p) == LookIn(store[p], epoch)
 
-\* The store after a write of kind k ("data" or "tomb") to p.
 Stored(p, k) == [store EXCEPT ![p] = StoredOp(store[p], epoch, k)]
 
 Max(S) == CHOOSE m \in S : \A x \in S : x <= m
 
-\* How far r's next ack reaches.
+\* How far r's next acknowledgement reaches.
 Front(r) ==
     IF seen[r] = {} THEN None
     ELSE IF AckFurthest THEN Max(seen[r])
     ELSE LET run == {p \in seen[r] : \A q \in 0..p : q \in seen[r]}
          IN IF run = {} THEN None ELSE Max(run)
+
+\* The furthest box another reader has acknowledged: what r has heard.
+Heard(r) == Max({acked[o] : o \in Readers \ {r}} \cup {None})
 
 AllAcked(p) == \A r \in Readers : acked[r] >= p
 
@@ -76,8 +79,6 @@ TypeOK ==
     /\ lastRw \in [Pos -> Epochs \cup {None}]
     /\ online \in BOOLEAN
     /\ cursor \in [Readers -> 0..N]
-    /\ mode \in [Readers -> {"reading", "scanning"}]
-    /\ probe \in [Readers -> 0..N]
     /\ seen \in [Readers -> SUBSET Pos]
     /\ got \in [Readers -> SUBSET Pos]
     /\ acked \in [Readers -> Pos \cup {None}]
@@ -92,24 +93,23 @@ Init ==
     /\ lastRw = [p \in Pos |-> None]
     /\ online = TRUE
     /\ cursor = [r \in Readers |-> 0]
-    /\ mode = [r \in Readers |-> "reading"]
-    /\ probe = [r \in Readers |-> 0]
     /\ seen = [r \in Readers |-> {}]
     /\ got = [r \in Readers |-> {}]
     /\ acked = [r \in Readers |-> None]
     /\ holes = [r \in Readers |-> {}]
 
-ReaderVars == <<cursor, mode, probe, seen, got, holes>>
+ReaderVars == <<cursor, seen, got, holes>>
+OwnerVars == <<written, wEpoch, record, lastRw, online>>
 
 (* Time and the replica *)
 
 Tick ==
     /\ epoch < MaxEpoch
     /\ epoch' = epoch + 1
-    \* GC: drop what no longer falls in the kept window. Reads and writes
-    \* ignore it already; dropping it only keeps the state small.
+    \* Drop what no longer falls in the kept window. Reads and writes ignore
+    \* it already; dropping it only keeps the state small.
     /\ store' = [p \in Pos |-> {x \in store[p] : x[1] \in Kept(epoch + 1)}]
-    /\ UNCHANGED <<written, wEpoch, record, lastRw, online, acked, ReaderVars>>
+    /\ UNCHANGED <<OwnerVars, acked, ReaderVars>>
 
 (* The stream owner *)
 
@@ -126,7 +126,8 @@ Send ==
     /\ written' = written + 1
     /\ UNCHANGED <<epoch, online, acked, ReaderVars>>
 
-\* The periodic rewrite, at most once per epoch per box.
+\* The periodic rewrite, at most once per epoch per box. A box every reader
+\* has acknowledged is rewritten as a tombstone.
 Rewrite(p) ==
     /\ online
     /\ record[p] \in {"plain", "held"}
@@ -146,79 +147,85 @@ Discard(p) ==
     /\ record' = [record EXCEPT ![p] = "gone"]
     /\ UNCHANGED <<epoch, store, written, wEpoch, lastRw, online, acked, ReaderVars>>
 
-\* r's ack reaches the owner, carried by some later message of r's.
-LearnAck(r) ==
+(* A reader *)
+
+\* r publishes how far it has read, on some later message of its own.
+Publish(r) ==
     /\ Front(r) > acked[r]
     /\ acked' = [acked EXCEPT ![r] = Front(r)]
-    /\ UNCHANGED <<epoch, store, written, wEpoch, record, lastRw, online, ReaderVars>>
-
-(* A reader: the two-state machine of "Rewrite and scan" *)
+    /\ UNCHANGED <<epoch, store, OwnerVars, ReaderVars>>
 
 Ingest(r, p) ==
     /\ seen' = [seen EXCEPT ![r] = @ \cup {p}]
     /\ got' = [got EXCEPT ![r] = IF Look(p) = "data" THEN @ \cup {p} ELSE @]
 
 Read(r) ==
-    /\ mode[r] = "reading"
     /\ cursor[r] < N
     /\ Look(cursor[r]) # "none"
     /\ Ingest(r, cursor[r])
     /\ cursor' = [cursor EXCEPT ![r] = @ + 1]
-    /\ UNCHANGED <<mode, probe, holes, epoch, store, written, wEpoch, record, lastRw, online, acked>>
+    /\ UNCHANGED <<holes, epoch, store, OwnerVars, acked>>
 
-RequestScan(r) ==
-    /\ AllowScan
-    /\ mode[r] = "reading"
-    /\ cursor[r] < N
-    /\ mode' = [mode EXCEPT ![r] = "scanning"]
-    /\ probe' = [probe EXCEPT ![r] = cursor[r] + 1]
-    /\ UNCHANGED <<cursor, seen, got, holes, epoch, store, written, wEpoch, record, lastRw, online, acked>>
+\* Stuck where another reader has acknowledged further: jump to the box it
+\* acknowledged, keeping the last Window positions skipped.
+JumpTo(r) ==
+    LET t == Heard(r)
+    IN /\ cursor[r] < N
+       /\ Look(cursor[r]) = "none"
+       /\ t > cursor[r]
+       /\ holes' = [holes EXCEPT ![r] = @ \cup {p \in cursor[r]..(t - 1) : p >= t - Window}]
+       /\ cursor' = [cursor EXCEPT ![r] = t]
 
-ScanFound(r) ==
-    /\ mode[r] = "scanning"
-    /\ probe[r] < N
-    /\ Look(probe[r]) # "none"
-    /\ Ingest(r, probe[r])
-    /\ probe' = [probe EXCEPT ![r] = @ + 1]
-    /\ UNCHANGED <<cursor, mode, holes, epoch, store, written, wEpoch, record, lastRw, online, acked>>
+Jump(r) ==
+    /\ AutoScan
+    /\ JumpTo(r)
+    /\ UNCHANGED <<seen, got, epoch, store, OwnerVars, acked>>
 
-\* BoxIDNotFound at the probe (or the end of the modelled stream): the
-\* scan ends. Unless NaiveAdopt, a scan that found nothing past the stuck
-\* position leaves the reader where it was.
-ScanEnd(r) ==
-    /\ mode[r] = "scanning"
-    /\ IF probe[r] >= N THEN TRUE ELSE Look(probe[r]) = "none"
-    /\ mode' = [mode EXCEPT ![r] = "reading"]
-    /\ LET adopt == NaiveAdopt \/ probe[r] > cursor[r] + 1
-       IN /\ cursor' = [cursor EXCEPT ![r] = IF adopt THEN probe[r] ELSE @]
-          /\ holes' = IF adopt /\ KeepHoles THEN [holes EXCEPT ![r] = @ \cup {cursor[r]}] ELSE holes
-    /\ UNCHANGED <<probe, seen, got, epoch, store, written, wEpoch, record, lastRw, online, acked>>
-
-\* A skipped position turns up, restored by the owner's rewrite or written late.
-ReadHole(r, p) ==
+Recheck(r, p) ==
     /\ p \in holes[r]
     /\ Look(p) # "none"
     /\ Ingest(r, p)
     /\ holes' = [holes EXCEPT ![r] = @ \ {p}]
-    /\ UNCHANGED <<cursor, mode, probe, epoch, store, written, wEpoch, record, lastRw, online, acked>>
+
+\* A skipped position turns up and is polled, when readers poll them.
+Poll(r, p) ==
+    /\ PollHoles
+    /\ Recheck(r, p)
+    /\ UNCHANGED <<cursor, epoch, store, OwnerVars, acked>>
+
+\* The user asks for a scan: everything kept is rechecked, then the reader
+\* jumps if it can, and otherwise reads on from where it stands.
+Scan(r) ==
+    /\ AllowScan
+    /\ LET back == {p \in holes[r] : Look(p) # "none"}
+           kept == holes[r] \ back
+       IN /\ seen' = [seen EXCEPT ![r] = @ \cup back]
+          /\ got' = [got EXCEPT ![r] = @ \cup {p \in back : Look(p) = "data"}]
+          /\ IF cursor[r] < N /\ Look(cursor[r]) = "none" /\ Heard(r) > cursor[r]
+             THEN /\ holes' = [holes EXCEPT ![r] = kept \cup
+                        {p \in cursor[r]..(Heard(r) - 1) : p >= Heard(r) - Window}]
+                  /\ cursor' = [cursor EXCEPT ![r] = Heard(r)]
+             ELSE /\ holes' = [holes EXCEPT ![r] = kept]
+                  /\ UNCHANGED cursor
+    /\ UNCHANGED <<epoch, store, OwnerVars, acked>>
 
 Next ==
     \/ Tick \/ GoOffline \/ GoOnline \/ Send
     \/ \E p \in Pos : Rewrite(p) \/ Discard(p)
-    \/ \E r \in Readers : LearnAck(r) \/ Read(r) \/ RequestScan(r) \/ ScanFound(r) \/ ScanEnd(r)
-    \/ \E r \in Readers : \E p \in Pos : ReadHole(r, p)
+    \/ \E r \in Readers : Publish(r) \/ Read(r) \/ Jump(r) \/ Scan(r)
+    \/ \E r \in Readers : \E p \in Pos : Poll(r, p)
 
 Spec == Init /\ [][Next]_vars
 
-\* Readers keep reading, acks keep flowing and time moves on. The owner may
-\* go offline as often as it likes, but comes back, and a client online
-\* again and again gets round to its periodic rewrite (strong fairness).
-\* Nothing forces the owner to write or a user to scan.
+\* Readers keep reading and publishing, and time moves on. The owner may go
+\* offline as often as it likes, but comes back, and a client online again
+\* and again gets round to its periodic rewrite (strong fairness). Nothing
+\* forces the owner to write or a user to scan.
 Fairness ==
     /\ WF_vars(Tick) /\ WF_vars(GoOnline)
     /\ \A p \in Pos : SF_vars(Rewrite(p))
-    /\ \A r \in Readers : WF_vars(Read(r)) /\ WF_vars(LearnAck(r)) /\ WF_vars(ScanFound(r)) /\ WF_vars(ScanEnd(r))
-    /\ \A r \in Readers : \A p \in Pos : WF_vars(ReadHole(r, p))
+    /\ \A r \in Readers : WF_vars(Read(r)) /\ WF_vars(Publish(r)) /\ WF_vars(Jump(r))
+    /\ \A r \in Readers : \A p \in Pos : WF_vars(Poll(r, p))
 
 FairSpec == Spec /\ Fairness
 
@@ -231,7 +238,7 @@ Populated ==
                    => Look(p) # "none"
 
 \* "Acknowledging a stream's Nth box implies every earlier one has been
-\* read": what the owner counts as acknowledged, the reader has.
+\* read": what a reader acknowledges, it has.
 NoSilentLoss ==
     \A r \in Readers : \A p \in Pos : p <= acked[r] => p \in got[r]
 
@@ -249,7 +256,7 @@ EventualDelivery ==
         [](p < written => <>(p \in got[r] \/ record[p] = "gone"))
 
 \* A user asks for scans only finitely often.
-ScansStop == <>[][\A r \in Readers : ~RequestScan(r)]_vars
+ScansStop == <>[][\A r \in Readers : ~Scan(r)]_vars
 
 DeliveryOnceScansStop == ScansStop => EventualDelivery
 

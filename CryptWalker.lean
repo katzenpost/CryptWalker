@@ -83,3 +83,9 @@ import CryptWalker.GroupChat.AckCodec
 import CryptWalker.GroupChat.Roster
 import CryptWalker.GroupChat.Backfill
 import CryptWalker.GroupChat.ReaderScan
+import CryptWalker.GroupChat.Member.Group
+import CryptWalker.GroupChat.Member.Json
+import CryptWalker.GroupChat.Member.WireProofs
+import CryptWalker.GroupChat.Member.DictProofs
+import CryptWalker.GroupChat.Member.ReaderProofs
+import CryptWalker.GroupChat.Member.GroupProofs

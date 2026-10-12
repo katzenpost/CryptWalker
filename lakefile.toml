@@ -144,3 +144,6 @@ name = "CryptWalker.BACAP.gen_vectors"
 
 [[lean_exe]]
 name = "CryptWalker.GroupChat.ack_codec_test"
+
+[[lean_exe]]
+name = "CryptWalker.GroupChat.replay"

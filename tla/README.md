@@ -19,8 +19,8 @@ The models are kept at two levels, because they answer different questions:
 ```
 make tla                                      # every config, checked against its EXPECT line
 FAST=1 tla/check.sh                           # what CI runs: skips configs marked SLOW
-tla/check.sh protocol/MC_GroupChat_SpecReply.cfg
-tla/run.sh protocol/MC_GroupChat_SpecReply.cfg  # TLC's full output, with the counterexample
+tla/check.sh protocol/MC_GroupChat_Explicit.cfg
+tla/run.sh protocol/MC_GroupChat_Explicit.cfg  # TLC's full output, with the counterexample
 ```
 
 You need Java 11 or later, and `tla2tools.jar` in `tla/` or named by `TLA2TOOLS`. `JAVA` selects
@@ -28,81 +28,109 @@ the java binary. For long runs, set `TLC_METADIR` to a directory on disk, becaus
 files soon outgrow a RAM-backed `/tmp`.
 
 Each `MC_*.cfg` starts with `\* EXPECT pass` or `\* EXPECT violated <Property>`. Many configs
-exist to show that something is needed: take it away, and TLC must find the failure. The full
-set runs in about three minutes.
+exist to show that something is needed: take it away, and TLC must find the failure. With
+`FAST=1` the set runs in about two minutes; `MC_GroupChat_RostersOnly` adds about thirty more.
 
 ## Protocol models
 
 | Module | What it covers |
 |---|---|
 | `Replica.tla` | One box at one replica, keyed by the epoch it was stored in; `SpecStored`, the storage the spec assumes, where every write stores the box at the current epoch |
-| `Backfill.tla` | One member's stream: periodic rewrite, Sent-box retention, acknowledgements and the reader's scan. The replica's write rule is the constant `StoredOp` |
-| `GroupChat.tla` | Rosters across a group: acknowledgements by roster index, introductions, the reply to a new member, and every watcher following every roster |
+| `Backfill.tla` | One member's stream: periodic rewrite, Sent-box retention, acknowledgements and the readers' jumps and rechecks. The replica's write rule is the constant `StoredOp` |
+| `GroupChat.tla` | Rosters across a group with explicit numbering: Numbers naming members by key prefix, Introductions, IntroducedAt, the reply to a new member, and every watcher following every roster |
 
 Where the spec can be read more than one way, or these models propose a change, a constant
-chooses between them: `NaiveAdopt`, `AckFurthest` and `KeepHoles` in `Backfill.tla`, and
-`HandIntroductions` in `GroupChat.tla`.
+chooses between them: `AckFurthest` and `PollHoles` in `Backfill.tla`, and `HandIntroductions`
+and `UseIntroducedAt` in `GroupChat.tla`.
 
 | Config | Expect | What it shows |
 |---|---|---|
-| `MC_Backfill_SpecScanTable` | violated `NoOvershoot` | The scan table, read literally, skips the end of a quiet stream |
-| `MC_Backfill_SpecAckRule` | violated `NoSilentLoss` | Acknowledging the furthest box read counts a box a scan skipped as read |
-| `MC_Backfill_LiveScan` | violated `DeliveryOnceScansStop` | One scan that races a write loses that box for good |
-| `MC_Backfill_Proposed` | pass | The proposed scan rule (stay put if nothing was found past the stuck position) and ack rule (up to the unbroken run) |
-| `MC_Backfill_LiveHoles` | pass | Polling the positions a scan skipped delivers every box |
-| `MC_GroupChat_SpecReply` | violated `RosterPrefix` | Given only `Rosters`, a new member misplaces a member |
-| `MC_GroupChat_HandIntroductions` | pass | A reply that also hands over the Introductions and acknowledgements read |
+| `MC_Backfill_SpecAckRule` | violated `NoSilentLoss` | Acknowledging the furthest box read counts a box a jump skipped as read |
+| `MC_Backfill_SpecRecheck` | violated `DeliveryOnceScansStop` | Rechecking skipped boxes only during a scan can lose one for good |
+| `MC_Backfill_Proposed` | pass | Acknowledging up to the unbroken run: boxes stay populated, nothing is tombstoned early, no reader overshoots |
+| `MC_Backfill_LiveHoles` | pass | Polling the boxes a jump skipped until they are read delivers every box |
+| `MC_GroupChat_Explicit` | pass | With explicit numbering, the Introductions in the reply and IntroducedAt, every name a watcher gives is right, and a quiet group converges |
+| `MC_GroupChat_Skip` | pass | A watcher that skips boxes leaves indexes unresolved, never misplaced |
+| `MC_GroupChat_NoIntroducedAt` | violated `RosterAgree` | Without IntroducedAt, a member introduced twice is followed from the wrong introducer's roster |
+| `MC_GroupChat_RostersOnly` | violated `Converged` | Handed rosters but not the Introductions, a new member can never name some members; it names nobody wrongly |
 
 ## Implementation models
 
 | Module | What it covers |
 |---|---|
 | `KatzenpostReplica.tla` | `Backfill.tla` over `replica/state.go`'s write rule: a matching data write succeeds and stores nothing; a tombstone is always stored |
-| `Katzenqt.tla` | katzenqt's send path over `GroupChat.tla`: acknowledgements taken when a message is queued, rosters grown when it is written, inductions, and cancel. Each `Bug` constant undoes one fix from katzenqt#108 |
+| `Katzenqt.tla` | katzenqt's group state machine and its adapter over `GroupChat.tla`: control messages composed then written, indexes reserved while pending, and inductions that hold, wait for what is pending, then hand over the reply and compose the Introduction |
 
 | Config | Expect | What it shows |
 |---|---|---|
 | `MC_KatzenpostReplica_Refines` | violated `ProtocolSpec` | A matching rewrite stores nothing, where the protocol stores the box again |
 | `MC_KatzenpostReplica_Populated` | violated `Populated` | The consequence: a box rewritten every epoch is still collected |
 | `MC_KatzenpostReplica_LiveNoScan` | pass | Without scans, every box still reaches the reader; the collected box returns at the next rewrite |
-| `MC_KatzenpostReplica_LiveHoles` | pass | With the proposed scan, delivery holds on the deployed replica too |
-| `MC_Katzenqt_Fixed` | pass | After #108, katzenqt only takes steps the protocol allows, and owes no ack it never sends |
-| `MC_Katzenqt_NoWaitAcks` | violated `ProtocolSpec` | 6f06a4b undone: a queued message numbers someone ahead of the Introduction |
-| `MC_Katzenqt_NoWaitIntro` | violated `ProtocolSpec` | b88abff undone: two inductions promise the same roster index |
-| `MC_Katzenqt_CancelKeepsAcks` | violated `NoLostAck` | f2e4c01 undone. Every step is still one the protocol allows; only katzenqt's own invariant catches this bug |
+| `MC_KatzenpostReplica_LiveHoles` | pass | With polled holes, delivery holds on the deployed replica too |
+| `MC_Katzenqt_Fixed` | pass | katzenqt writes every roster index in order, gives a new member the index its Introduction gives it, and a quiet group converges |
+| `MC_Katzenqt_NoWait` | violated `InductionIndex` | A reply built while a control message is pending promises an index that message takes |
+| `MC_Katzenqt_AbandonControl` | violated `NoGap` | Were a pending Introduction or control message abandoned, a message composed after it would write past the end of the roster. katzenqt abandons only content |
 
-Both implementations use BACAP's stateless API. katzenqt keeps its own read and write positions
-and hands kpclientd a capability and an index with each request; kpclientd keeps no reader or
-writer state (katzenpost#1200). The models have the same shape: a member's `read` and a reader's
-`cursor`, `probe` and `holes` are client state, and a scan's probe is a read at a position of the
-client's choosing, which the old stateful reader, able only to read its next box, could not make.
-kpclientd also refuses an index that is not on its capability's stream (katzenpost#1202), so, as
-here, a box is named by its stream and position alone.
+## Boxes
 
-katzenqt builds the whole reply to a new member when an induction begins. `Katzenqt.tla` fixes
-only the promised roster at that point, and reads the rest off when the Introduction is written,
-as the protocol does. An earlier view of read positions is still a valid reply, and the promised
-roster is what #108's bugs got wrong.
+A box is named by its `MessageBoxIndex`, an opaque BACAP value. The protocol compares two
+indexes only for equality, and learns order only by stepping a stream forward. In
+`GroupChat.tla` a box is `<<owner, q>>`, unique to one box of one stream; Introductions and
+IntroducedAt name boxes by it, and only a reader stepping through a stream uses `q`. In
+`Backfill.tla` a box is a position on its one stream, which stands for the order its owner wrote
+it and its readers step through it: a jump to an acknowledged box is a walk forward to it.
+
+Both implementations use BACAP's stateless API: the client keeps its own read and write state
+and hands kpclientd a capability and an index with each request.
 
 ## Lean
 
-The Lean files split the same way. `AckCodec` and `ReaderScan` port katzenqt's code and prove
-properties of it. `Roster.watch_prefix` is a protocol claim: a watcher that has every message up
-to where it is reading follows any roster correctly. `Backfill` compares the spec's storage with
-`state.go`'s, for every epoch.
+`Member/` is one member of a group as a whole, executable: katzenqt's `groupchat` state machine
+written in Lean (`Group`, with its `Reader`, `Rosters`, `SentBox` and `Ledger`), taking the same
+events and producing the same effects. What is proved about it:
+
+- `ReaderProofs`: what a reader acknowledges it has read, with every box before it, however its
+  reads, rechecks, walks and forgets interleave (`run_safe`), and reading never undoes that
+  (`Safe.mono`).
+- `GroupProofs`: every acknowledgement a member sends is such a run (`acksOf_safe`); one of our
+  own stream counts only for a box the Sent-box check finds (`takeAcks_credit`); a control
+  message numbers members at consecutive indexes from the next free one (`controlOf_consecutive`);
+  an `Introduction` gives the new member the index the reply promised when nothing composed is
+  still unwritten, and a later one otherwise (`introduction_index`, `introduction_index_pending`);
+  retention drops plaintext only once it is acknowledged or expired (`retain_spec`); a box is
+  rewritten at most once an epoch (`backfill_once`); and whoever a member names is right whenever
+  what it holds is true (`resolve_sound`, through `Roster.lean`).
+- `WireProofs`: the `Numbers` and `IntroducedAt` encodings round trip.
+
+`replay` checks katzenqt against this model. katzenqt's `groupchat/trace.py` records, for every
+call made on a simulated member, its arguments, its result and the member's whole state after
+it; the replay makes the same calls on the Lean member and requires the same results and state,
+and checks every index the trace says BACAP produced against CryptWalker's own BACAP.
+`testdata/groupchat_traces/` holds the traces of katzenqt's scenarios
+(`python tools/groupchat_traces.py DIR 0` in katzenqt regenerates them); katzenqt's nightly job
+replays fresh random runs (`tests/test_groupchat_trace.py`, with `CRYPTWALKER` set).
+
+`AckCodec` proves the `Acks` encoding. `ReaderScan` proves the walk to an acknowledged box comes
+after where it began, by stepping forward to it. `Roster` is a protocol claim for any group size:
+whoever a watcher names at an index of a roster is whoever its owner put there, and reading
+truthful messages, learning Introductions and following `IntroducedAt` keep that so, however many
+boxes it skipped. Without `IntroducedAt`, it misplaces a member introduced twice. `Backfill`
+compares the spec's storage with `state.go`'s, for every epoch.
 
 ## What is not modelled
 
-- Cryptography: unlinkability and unforgeability are the paper's and BACAP's. Boxes are
-  positions, and a forged box is not considered.
+- Cryptography: unlinkability and unforgeability are the paper's and BACAP's. A forged box is
+  not considered.
 - Byzantine members: every member follows the protocol. A member sending forged or misnumbered
   `Acks` would test the Sent-box check, and is the natural next step.
-- Disappearing messages, and Introductions that carry acknowledgements (`AcksOnIntro`).
+- Disappearing messages, member removal, and acknowledgements in `GroupChat.tla` and
+  `Katzenqt.tla`: `Backfill.tla` covers acknowledgements on one stream.
 - Couriers, replication between replicas, and the mixnet: the stream store behaves as one
   replica that always answers.
 - Sizes are small, so a pass is a bounded result.
   - Backfill: 2 readers, 3 boxes and 3 replica epochs (1 reader for liveness).
   - Group chat: 2 founders and 2 joiners, at most 2 messages per stream and 4 across the group
-    (`MCMaxTotal`). `MC_GroupChat_HandIntroductions` also passes at 5 (841,045 states).
+    (`MCMaxTotal`); 3 when boxes may be skipped (`MC_GroupChat_Skip`), and 6 for
+    `MC_GroupChat_RostersOnly`.
 
   The Lean proofs carry the main roster and backfill claims to any size.
