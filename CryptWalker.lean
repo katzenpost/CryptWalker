@@ -89,3 +89,4 @@ import CryptWalker.GroupChat.Member.WireProofs
 import CryptWalker.GroupChat.Member.DictProofs
 import CryptWalker.GroupChat.Member.ReaderProofs
 import CryptWalker.GroupChat.Member.GroupProofs
+import CryptWalker.GroupChat.Member.MemberProofs
