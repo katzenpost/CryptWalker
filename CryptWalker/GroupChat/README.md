@@ -6,13 +6,16 @@ Formal models of the katzenpost group chat protocol: the website's group chat sp
 "Opportunistic acknowledgements and backfill" (acknowledgements, rosters, Sent-box records,
 joining), "Rewrite and scan", and the wire formats of `Acks`, `Numbers` and `IntroducedAt`.
 
-There are two tools:
+There are three tools:
 
 - **Lean** (`*.lean`, `Member/`): proofs for every group size and every run, and an executable
   model of katzenqt's group member that katzenqt's own traces are replayed through.
 - **TLA+** (`tla/`): models checked exhaustively with TLC, at small sizes. They cover whole
   groups over time, including liveness, and many configs exist to show that a rule is needed:
   take it away and TLC finds the failure.
+- **Veil** (`veil/`): the safety half of `Backfill.tla` as a Veil transition system, whose
+  invariants Veil proves inductive with cvc5 for any number of readers and boxes, and which it
+  also model-checks.
 
 ## Protocol models and implementation models
 
@@ -39,6 +42,7 @@ one reader, or one replica's storage rule.
 | `tla/protocol/Backfill.tla` | Protocol section | One member's stream: periodic rewrite, Sent-box retention, acknowledgements, and readers' jumps, rechecks and scans |
 | `tla/protocol/GroupChat.tla` | Protocol | Rosters across a whole group: explicit numbering, Introductions, `IntroducedAt`, the reply to a new member, and every member following every roster |
 | `tla/impl/KatzenpostReplica.tla` | Implementation section | `Backfill.tla` over the katzenpost replica's write rule (`DeployedStored`) |
+| `veil/GroupChatVeil/Backfill.lean` | Protocol section | `Backfill.tla`'s safety properties, for every number of readers and boxes |
 | `tla/impl/Katzenqt.tla` | Implementation section | katzenqt's send path over `GroupChat.tla`: control messages composed then written, indexes reserved while pending, and inductions that hold, wait, then reply |
 
 ## What is proved (Lean)
@@ -209,6 +213,34 @@ directory on disk, because TLC's state files soon outgrow a RAM-backed `/tmp`.
 Each `MC_*.cfg` starts with `\* EXPECT pass` or `\* EXPECT violated <Property>`. With `FAST=1`
 the set runs in about two minutes; `MC_GroupChat_RostersOnly` adds about thirty more.
 
+## What is proved (Veil)
+
+`veil/GroupChatVeil/Backfill.lean` restates `Backfill.tla` in [Veil](https://github.com/verse-lab/veil),
+with readers and positions as uninterpreted types. `#check_invariants` proves that `Populated`,
+`NoSilentLoss`, `NoOvershoot` and `NoPrematureTombstone`, with nine auxiliary invariants, hold
+in every reachable state, for any number of readers and any length of stream, under the proposed
+acknowledgement rule. cvc5 finds each proof, and Lean checks it (`veil.smt.trust false`); the
+file then checks that every theorem rests on Lean's own axioms only.
+
+The model differs from `Backfill.tla` only by allowing more: epochs are unbounded, a box is the
+slot for the current epoch and the slot for the last, `Discard` may come at any time, polling and
+scans are always enabled, a reader keeps every position it skips, and a scan's jump is a separate
+`Jump` step. A safety property that holds of it holds of `Backfill.tla`. The file's header lists
+the differences. One assumption is made of positions: any position below another has a next one,
+as in any finite order.
+
+The same file model-checks 2 readers and 3 positions (`#model_check`), and finds, with the
+solver, the run that `MC_Backfill_SpecAckRule` finds: under the spec's rule, a reader that jumped
+over a box acknowledges it (`sat trace [spec_ack_rule_loses]`). Liveness, and the deployed
+replica's write rule, stay with TLC.
+
+```
+make veil      # or: cd veil && lake build
+```
+
+`veil/` is its own Lake project, on Veil's toolchain (Lean 4.32.0, no Mathlib), so it does not
+import CryptWalker. A first build fetches and compiles Veil, lean-smt and cvc5, and needs `npm`.
+
 ## What is not shown
 
 - **Cryptography.** Unlinkability and unforgeability belong to the Echomix paper and BACAP. No
@@ -225,7 +257,7 @@ the set runs in about two minutes; `MC_GroupChat_RostersOnly` adds about thirty 
   replica epochs (1 reader for liveness). Group chat uses 2 founders and 2 joiners, at most 2
   messages per stream and 4 across the group (`MCMaxTotal`), 3 when boxes may be skipped, and 6
   for `MC_GroupChat_RostersOnly`. The Lean proofs carry the main roster, acknowledgement and
-  backfill claims to any size.
+  backfill claims to any size, and the Veil model carries `Backfill`'s safety properties.
 - **Python against the TLA+ models.** `Katzenqt.tla` is written from katzenqt's code by hand; only
   `Member/` is checked against katzenqt mechanically, by the trace replay.
 - **The app's trace is one scenario.** It covers each call the app makes, once. Random runs of
