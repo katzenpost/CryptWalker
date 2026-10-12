@@ -3,10 +3,11 @@
 (* Rosters across a group, with explicit numbering. See "Rosters" in the   *)
 (* group chat spec.                                                        *)
 (*                                                                         *)
-(* A box's MessageBoxIndex is opaque: here it is <<owner, q>>, unique to   *)
-(* one box of one stream, and the protocol only compares two for           *)
-(* equality. Only a reader stepping through a stream uses q, to find the  *)
-(* next box, as BACAP steps an index forward.                              *)
+(* A box's MessageBoxIndex is here <<owner, q>>, unique to one box of one *)
+(* stream; q is its Idx64, which BACAP adds one to at each step forward.   *)
+(* Introductions and IntroducedAt name a box by its whole index. An        *)
+(* acknowledgement names a box by a roster index and its Idx64 alone, so   *)
+(* the stream it is read on is whichever the roster index resolves to.    *)
 (*                                                                         *)
 (* A member numbers another by announcing it in the Numbers of a control   *)
 (* message: the index assigned and a prefix of the member's key. Prefixes  *)
@@ -31,6 +32,8 @@
 (* UseIntroducedAt chooses whether a watcher waits for IntroducedAt to     *)
 (* know where a member's roster began, or takes the first Introduction of  *)
 (* it that it reads.                                                       *)
+(* AckByIdx64 chooses whether an acknowledgement names a box by its Idx64, *)
+(* as katzenqt#166 does, or by its whole index, as katzenqt#108 does.      *)
 (***************************************************************************)
 EXTENDS Integers, Sequences, FiniteSets, TLC
 
@@ -41,7 +44,8 @@ CONSTANTS
     MaxLen,            \* the most messages a stream holds
     HandIntroductions, \* the reply to a new member carries the Introductions read
     UseIntroducedAt,   \* a member's roster begins where its IntroducedAt says
-    AllowSkip          \* a reader may pass a box without reading it
+    AllowSkip,         \* a reader may pass a box without reading it
+    AckByIdx64         \* an acknowledgement names a box by its Idx64, not its whole index
 
 Founders == {FounderSeq[i] : i \in DOMAIN FounderSeq}
 Members == Founders \cup Joiners
@@ -277,6 +281,23 @@ Quiet ==
 Converged ==
     Quiet => \A m, x \in joined : m # x =>
         \A i \in 0..(Len(roster[x]) - 1) : At(View(m, x), i) = roster[x][i + 1]
+
+\* The stream m reads an acknowledgement from x of roster index k on. By
+\* Idx64 it is whichever stream m resolves k to. By whole index it is the
+\* acknowledged box's own stream, and m meets the box only if it looks for
+\* it there; elsewhere the walk and the Sent-box check find nothing.
+AckTaken(m, x, k) ==
+    LET y == Res(ent[m], intros[m], started[m], keys[m], x, k, Depth)
+    IN IF y = NoOne THEN NoOne
+       ELSE IF AckByIdx64 THEN y
+       ELSE IF y = roster[x][k + 1] THEN y ELSE NoOne
+
+\* A watcher takes an acknowledgement as naming the box its sender
+\* acknowledged, or as naming nothing. A roster only grows, so an index
+\* its sender gave it once names the same member whenever it is read.
+AckTrue ==
+    \A m, x \in joined : m # x =>
+        \A k \in 0..(Len(roster[x]) - 1) : AckTaken(m, x, k) \in {NoOne, roster[x][k + 1]}
 
 \* Messages written across the group, for bounding a model run.
 RECURSIVE SumLen(_, _)

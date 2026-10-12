@@ -6,6 +6,10 @@ Formal models of the katzenpost group chat protocol: the website's group chat sp
 "Opportunistic acknowledgements and backfill" (acknowledgements, rosters, Sent-box records,
 joining), "Rewrite and scan", and the wire formats of `Acks`, `Numbers` and `IntroducedAt`.
 
+These models follow katzenqt#166, where an acknowledgement names a box by its 8-byte BACAP
+`Idx64` rather than its whole 104-byte `MessageBoxIndex`. Every member holds every member's read
+cap, and so the stream's starting index, from which BACAP derives the box at any later `Idx64`.
+
 There are three tools:
 
 - **Lean** (`*.lean`, `Member/`): proofs for every group size and every run, and an executable
@@ -33,8 +37,8 @@ one reader, or one replica's storage rule.
 | Model | Kind | What it models |
 |---|---|---|
 | `Roster.lean` | Protocol section | Rosters: a watcher following other members' numbering through `Numbers`, `Introduction` and `IntroducedAt`, against a world that holds each roster as its owner keeps it |
-| `AckCodec.lean` | Protocol section | The `Acks` wire format, following katzenqt's `ack_codec.py` |
-| `ReaderScan.lean` | Protocol section | A reader's walk forward to a box another member acknowledged, over opaque indexes |
+| `AckCodec.lean` | Protocol section | The `Acks` wire format, following katzenqt's `ack_codec.py`: a count, the members, and an `Idx64` for each |
+| `ReaderScan.lean` | Protocol section | A reader's advance to a box another member acknowledged by its `Idx64` |
 | `Backfill.lean` | Protocol section vs implementation section | One box at one replica: the storage the spec assumes, against `katzenpost/replica/state.go`'s write rule |
 | `Member/` | Implementation | katzenqt's group member (`groupchat/group.py`, with `reader.py`, `numbering.py`, `sentbox.py`, `ledger.py`, `wire.py`, `events.py`), executable and replayed against katzenqt |
 | `Member/Wire.lean` | Protocol section, as katzenqt implements it | The `Numbers` and `IntroducedAt` wire formats |
@@ -59,15 +63,25 @@ on Lean's own axioms (no `sorry`, no `native_decide`).
   `begin_sound`). So a skipped box leaves an index unresolved, never misplaced.
 - **`IntroducedAt` is needed.** A watcher that instead takes the first Introduction of a member
   it reads misplaces a member introduced twice (`first_introduction_misplaces`).
-- **The `Acks` encoding is right only for long values.** Decoding undoes encoding exactly when
-  each value is longer than 32 bytes (`decode_encode`, `decode_encode_iff`); the 104-byte
-  `MessageBoxIndex` qualifies. With the strict parser each set of acknowledgements has exactly one
-  field (`encode_decode`). The spec's parser also accepts a list where the bitmap is shorter, so
-  one set has two fields (`spec_decode_malleable`).
-- **The walk to an acknowledged box is sound.** A walk that finds its target says how many steps
-  it took, which proves the target comes after where it began; it keeps the last boxes it stepped
-  past, in order; and no target lies further within its limit (`walk_target`, `walk_skipped`,
-  `walk_furthest`).
+- **The `Acks` field needs its count.** Without one, a reader would split the field by its
+  length, and decoding undoes encoding exactly when each value is longer than 32 bytes
+  (`decodeUncounted_encodeUncounted_iff`), so an 8-byte `Idx64` would be misread. With the count
+  byte, decoding undoes encoding for values of every size (`decode_encode`), and for the field
+  katzenqt sends, of little-endian `Idx64` values (`decodeIdx64_encodeIdx64`). The count less one
+  fits a byte (`count_lt`). With the strict parser each set of acknowledgements has exactly one
+  field (`encode_decode`, `encodeIdx64_decodeIdx64`). The spec's parser also accepts a list where
+  the bitmap is shorter, so one set has two fields (`spec_decode_malleable`).
+- **The advance to an acknowledged box is sound.** A walk that finds its target says how many
+  steps ahead it is, which proves the target comes after where it began; it keeps the last boxes
+  before it, in order; no target lies further within its limit; and a walk that finds none has
+  none within its limit (`walk_target`, `walk_skipped`, `walk_furthest`, `walk_none`). These rest
+  on one property of BACAP: each step forward adds one to the `Idx64`.
+- **Naming a box by its `Idx64` finds the box its whole index names.** On one stream, two boxes
+  with the same `Idx64` are the same box (`eq_of_counter_eq`). So for boxes of the reader's own
+  stream, the walk by `Idx64` finds the same box, keeps the same boxes and reports the same
+  distance as stepping forward and comparing whole indexes, as katzenqt#108 does
+  (`walk_eq_walkBoxes`). An acknowledgement read on the wrong stream is a different matter: see
+  `AckTrue` below.
 - **Rewrites keep boxes only if the replica refreshes them.** If a matching write is stored
   again at the current epoch, a box rewritten in epoch `e` can be read through `e + 1`
   (`refresh_rewrite_kept`). A tombstone is stored at the current epoch either way
@@ -80,13 +94,13 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
 - **A member acknowledges only what it has read.** What a reader acknowledges names a box it read,
   along with every box before it, however its reads, rechecks, walks and forgets interleave
   (`ReaderProofs.run_safe`). Reading never undoes this (`Safe.mono`). Every acknowledgement a
-  member sends is that run (`GroupProofs.acksOf_safe`). For every member reachable from founding
+  member sends carries the `Idx64` of that run's end (`GroupProofs.acksOf_safe`). For every member reachable from founding
   or joining by any sequence of calls, every acknowledgement it sends is safe
   (`MemberProofs.acks_sent_safe`). The calls include the client changing its retention policy
   between them, as a user's disappearing messages setting does. The one assumption is that a walk the client reports kept no
   more boxes than it stepped past (`Event.WF`).
 - **Acknowledgements of our own stream are checked.** One counts only for a box the Sent-box
-  check finds (`takeAcks_credit`).
+  check finds by its `Idx64` (`takeAcks_credit`, `checkAt_some`).
 - **Numbering has no gaps.** A control message numbers members at consecutive indexes from the
   next free one, counting what is composed and not yet written (`controlOf_consecutive`).
 - **A new member gets the index it was promised.** An `Introduction` gives the new member the
@@ -114,7 +128,8 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
 katzenqt's `groupchat/trace.py` records every call made on a member: its arguments, its result and
 the member's whole state afterwards. The replay makes the same calls on the Lean member and
 requires the same results and state. It also checks every index the trace says BACAP produced
-against CryptWalker's own BACAP.
+against CryptWalker's own BACAP, including each walk, which advances to the acknowledged
+`Idx64` with `advanceIndexTo`.
 
 There are two kinds of trace. A simulated member's (`scenario-*.jsonl`) is driven by katzenqt's
 simulator, which runs the member against a simulated Pigeonhole. The app's
@@ -131,7 +146,10 @@ writes the same bytes, even for a box that points to a large message's own strea
 `testdata/groupchat_traces/` holds the traces of katzenqt's scenarios and the app's. Run
 `python tools/groupchat_traces.py DIR 0` in katzenqt to regenerate them. katzenqt's nightly job
 replays fresh random runs (`tests/test_groupchat_trace.py`, with `CRYPTWALKER` set).
-`ack_codec_test.lean` checks the `Acks` codec against vectors from the Go, Python and Rust codecs.
+`ack_codec_test.lean` checks the `Acks` codec against vectors from katzenqt's Python codec, the
+only one that implements the counted `Idx64` layout: fields it writes, fields its parser accepts
+though it never writes them, and fields it refuses. `scripts/gen_acks_vectors.py` generates them,
+and `make verify-vectors` regenerates them and compares.
 
 ```
 lake exe CryptWalker.GroupChat.replay        # every trace in testdata/groupchat_traces/
@@ -154,13 +172,15 @@ make axioms
 | `RosterAgree` | `GroupChat` | Whoever a watcher can name at an index of a roster is whoever its owner put there |
 | `InductionIndex` | `GroupChat` | The index a new member takes is the one its introducer gives it |
 | `Converged` | `GroupChat` | Once everyone has read everything and owes nothing, every watcher can name every index of every roster |
+| `AckTrue` | `GroupChat` | A watcher takes an acknowledgement as naming the box its sender acknowledged, or as naming nothing |
 | `ProtocolSpec` | `KatzenpostReplica` | Refinement: every step the deployed replica takes is a step the protocol allows |
 | `NoGap` | `Katzenqt` | Every index a member writes is the next of its roster |
 | `CConverged` | `Katzenqt` | `Converged`, once nothing is pending and no induction holds |
 
 Where the spec can be read more than one way, or these models propose a change, a constant
 chooses between the readings: `AckFurthest` and `PollHoles` in `Backfill.tla`, and
-`HandIntroductions` and `UseIntroducedAt` in `GroupChat.tla`. In `Katzenqt.tla`, `BugNoWait`
+`HandIntroductions` and `UseIntroducedAt` in `GroupChat.tla`. `AckByIdx64` in `GroupChat.tla`
+chooses between this variant's acknowledgements and katzenqt#108's. In `Katzenqt.tla`, `BugNoWait`
 and `AbandonControl` each remove one guard.
 
 ### Protocol configs (`tla/protocol/`)
@@ -171,9 +191,11 @@ and `AbandonControl` each remove one guard.
 | `MC_Backfill_SpecRecheck` | violated `DeliveryOnceScansStop` | Rechecking skipped boxes only during a scan can lose one for good |
 | `MC_Backfill_Proposed` | pass | Acknowledging up to the unbroken run: `Populated`, `NoSilentLoss`, `NoOvershoot` and `NoPrematureTombstone` all hold |
 | `MC_Backfill_LiveHoles` | pass | Polling the boxes a jump skipped until they are read delivers every box |
-| `MC_GroupChat_Explicit` | pass | With explicit numbering, the Introductions in the reply and `IntroducedAt`: `RosterNoDup`, `RosterAgree`, `InductionIndex` and `Converged` all hold |
-| `MC_GroupChat_Skip` | pass | A watcher that skips boxes leaves indexes unresolved, never misplaced |
+| `MC_GroupChat_Explicit` | pass | With explicit numbering, the Introductions in the reply and `IntroducedAt`: `RosterNoDup`, `RosterAgree`, `InductionIndex`, `Converged` and `AckTrue` all hold |
+| `MC_GroupChat_Skip` | pass | A watcher that skips boxes leaves indexes unresolved, never misplaced, so acknowledgements by `Idx64` stay true |
 | `MC_GroupChat_NoIntroducedAt` | violated `RosterAgree` | Without `IntroducedAt`, a member introduced twice is followed from the wrong introducer's roster |
+| `MC_GroupChat_AckIdx64Misresolved` | violated `AckTrue` | The consequence for acknowledgements by `Idx64`: read on the wrong member's stream, one names a box its sender never meant |
+| `MC_GroupChat_AckIndexMisresolved` | pass | The same, with katzenqt#108's acknowledgements by whole index: the box is never met on the wrong stream, so the acknowledgement names nothing |
 | `MC_GroupChat_RostersOnly` | violated `Converged` | Handed rosters but not the Introductions, a new member can never name some members, though it names nobody wrongly |
 
 ### Implementation configs (`tla/impl/`)
@@ -184,18 +206,20 @@ and `AbandonControl` each remove one guard.
 | `MC_KatzenpostReplica_Populated` | violated `Populated` | The consequence: a box rewritten every epoch is still collected |
 | `MC_KatzenpostReplica_LiveNoScan` | pass | Without scans, every box still reaches the reader; the collected box returns at the next rewrite |
 | `MC_KatzenpostReplica_LiveHoles` | pass | With polled holes, delivery holds on the deployed replica too |
-| `MC_Katzenqt_Fixed` | pass | katzenqt writes every roster index in order, gives a new member the index its Introduction gives it, and a quiet group converges |
+| `MC_Katzenqt_Fixed` | pass | katzenqt writes every roster index in order, gives a new member the index its Introduction gives it, a quiet group converges, and its acknowledgements by `Idx64` are true |
 | `MC_Katzenqt_NoWait` | violated `InductionIndex` | A reply built while a control message is pending promises an index that message takes |
 | `MC_Katzenqt_AbandonControl` | violated `NoGap` | Were a pending Introduction or control message abandoned, a message composed after it would write past the end of the roster. katzenqt abandons only content |
 
 ### Boxes
 
-A box is named by its `MessageBoxIndex`, an opaque BACAP value. The protocol compares two indexes
-only for equality, and learns order only by stepping a stream forward. In `GroupChat.tla` a box
-is `<<owner, q>>`, unique to one box of one stream; Introductions and `IntroducedAt` name boxes by
-it, and only a reader stepping through a stream uses `q`. In `Backfill.tla` a box is a position on
-its one stream, standing for the order its owner wrote it and its readers step through it: a jump
-to an acknowledged box is a walk forward to it.
+A box is named by its `MessageBoxIndex`, a BACAP value whose `Idx64` grows by one at each step
+forward. Introductions and `IntroducedAt` name a box by its whole index; an acknowledgement names
+it by a roster index and its `Idx64`, which mean a box only once the roster index has been
+resolved to a stream. In `GroupChat.tla` a box is `<<owner, q>>`, unique to one box of one stream,
+with `q` its `Idx64`. In `Backfill.tla` a box is a position on its one stream, which is its
+`Idx64` counted from where the stream starts: a jump to an acknowledged box advances straight to
+it. `ReaderScan.lean` proves that this lands where katzenqt#108's walk, comparing whole indexes,
+would.
 
 ### Running
 
@@ -248,9 +272,9 @@ import CryptWalker. A first build fetches and compiles Veil, lean-smt and cvc5, 
 - **Byzantine members.** Every member follows the protocol. A member sending forged or misnumbered
   `Acks` would test the Sent-box check, and is the natural next step.
 - **Liveness in Lean.** Delivery and convergence are checked only by TLC, at small sizes.
-- **Some features in the group-wide models.** Disappearing messages, member removal and
-  acknowledgements are not in `GroupChat.tla` or `Katzenqt.tla`; `Backfill.tla` covers
-  acknowledgements on one stream.
+- **Some features in the group-wide models.** Disappearing messages and member removal are not
+  in `GroupChat.tla` or `Katzenqt.tla`. Of acknowledgements, those models check only which stream
+  one is read on (`AckTrue`); `Backfill.tla` covers acknowledgements on one stream.
 - **The network.** Couriers, replication between replicas and the mixnet are not modelled: the
   stream store behaves as one replica that always answers.
 - **Large sizes in TLA+.** A TLC pass is a bounded result. Backfill uses 2 readers, 3 boxes and 3
