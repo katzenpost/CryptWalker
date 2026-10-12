@@ -150,8 +150,8 @@ verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc
 axioms: build ## fail if a group chat theorem rests on sorry, native_decide or a declared axiom
 	@./scripts/check-axioms.sh
 
-tla: ## model-check every tla/protocol and tla/impl config against its EXPECT line (needs java and tla2tools.jar)
-	@./tla/check.sh
+tla: ## model-check every GroupChat/tla protocol and impl config against its EXPECT line (needs java and tla2tools.jar)
+	@./CryptWalker/GroupChat/tla/check.sh
 
 test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer vectors
 	@$(BIN)/CryptWalker-Sphinx-kem_selftest

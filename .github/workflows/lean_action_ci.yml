@@ -43,8 +43,8 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Fetch TLC
-        run: curl -sSL -o tla/tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+        run: curl -sSL -o CryptWalker/GroupChat/tla/tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
       - name: Model-check the group chat specs
         env:
           FAST: "1"
-        run: ./tla/check.sh
+        run: ./CryptWalker/GroupChat/tla/check.sh
