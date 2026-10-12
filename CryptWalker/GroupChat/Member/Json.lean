@@ -40,7 +40,7 @@ def message (m : Message) : Json := Json.mkObj [
     m.introduction),
   ("numbers", arr (m.numbers.map fun (k, p) => arr [nat k, opt hex p])),
   ("introduced_at", opt introRef m.introducedAt),
-  ("acks", arr (m.acks.map fun (i, v) => arr [nat i, hex v]))]
+  ("acks", arr (m.acks.map fun (i, v) => arr [nat i, nat v]))]
 
 /-- A message decoded, or bytes the member never looks into, as `{"bytes": hex}`. -/
 def payload : Payload → Json
@@ -63,7 +63,7 @@ def effect : Effect → Json
   | .deriveIndexes s st c => Json.mkObj [("type", "DeriveIndexes"), ("stream", hex s),
       ("start", hex st), ("count", nat c)]
   | .walk s st ts k => Json.mkObj [("type", "Walk"), ("stream", hex s), ("start", hex st),
-      ("targets", arr (ts.map hex)), ("keep", nat k)]
+      ("targets", arr (ts.map nat)), ("keep", nat k)]
   | .deliver s i c => Json.mkObj [("type", "Deliver"), ("sender", hex s), ("index", hex i),
       ("content", hex c)]
   | .expire s i => Json.mkObj [("type", "Expire"), ("sender", hex s), ("index", hex i)]
@@ -89,7 +89,7 @@ def reader (r : Reader) : Json := Json.mkObj [
   ("last", opt hex r.last), ("passed", nat r.passed),
   ("kept", arr (r.kept.map fun (i, a, b) => arr [hex i, nat a, opt hex b])),
   ("lost", opt (fun (a, b) => arr [nat a, opt hex b]) r.lost),
-  ("mode", mode r.mode), ("tried", arr (r.tried.map hex))]
+  ("mode", mode r.mode), ("tried", arr (r.tried.map nat))]
 
 def rosters (r : Rosters) : Json := Json.mkObj [
   ("entries", pairs hex (pairs nat fun e => Json.mkObj [("key", opt hex e.key),
@@ -112,7 +112,7 @@ def sentBox (s : SentBox) : Json := Json.mkObj [
 
 def ledger (l : Ledger) : Json := Json.mkObj [
   ("published", pairs hex hex l.published), ("acked_by", pairs hex nat l.ackedBy),
-  ("heard", pairs hex (pairs hex hex) l.heard), ("induction", induction l.induction),
+  ("heard", pairs hex (pairs hex nat) l.heard), ("induction", induction l.induction),
   ("invitee", opt (fun (n, rc) => arr [.str n, hex rc]) l.invitee), ("commit", toJson l.commit),
   ("starts", pairs hex hex l.starts)]
 
@@ -177,7 +177,7 @@ def readMessage (j : Json) : Parse Message := do
       pure ⟨← (← field i "name").getStr?, ← bytes (← field i "read_cap")⟩) (← field j "introduction")
     numbers := ← list (pair num (optional bytes)) (← field j "numbers")
     introducedAt := ← optional readIntroRef (← field j "introduced_at")
-    acks := ← list (pair num bytes) (← field j "acks") }
+    acks := ← list (pair num num) (← field j "acks") }
 
 def readPayload (j : Json) : Parse Payload :=
   match j.getObjVal? "bytes" with

@@ -17,10 +17,11 @@ member of `Member/Group.lean`.
 * `resolve_sound`: whoever a member names at an index of a roster is whoever the owner put there,
   whenever what it holds is true of the world and no two members share a key prefix:
   `Roster.lean`'s theorem, carried over to the member's rosters by `Rosters.toWatcher`.
-* `acksOf_runs`, `acksOf_safe`: every acknowledgement a member sends names the end of the unbroken
-  run its reader of that stream has read, so a box it read along with every box before it.
+* `acksOf_runs`, `acksOf_safe`: every acknowledgement a member sends carries the `Idx64` of the end
+  of the unbroken run its reader of that stream has read, so of a box it read along with every box
+  before it.
 * `takeAcks_credit`: an acknowledgement of our own stream counts only for a box the Sent-box check
-  finds.
+  finds by its `Idx64`.
 * `controlOf_consecutive`: a control message numbers members at consecutive indexes from the next
   one free, counting what is composed and not yet written.
 * `introduction_index`: an `Introduction` gives the new member the index the reply promised it,
@@ -115,21 +116,21 @@ theorem resolve_sound {pre : Key → ByteArray} (hpre : Function.Injective pre) 
 /-! ## Acknowledgements sent -/
 
 /-- What `acksOf` keeps true as it goes. -/
-def AcksTrue (g : Group) (acks : List (Nat × Index)) : Prop :=
-  ∀ x ∈ acks, ∃ m r, (x.1, some m) ∈ g.rosters.known g.me ∧ g.readers.get? m = some r ∧
-    r.run = some x.2
+def AcksTrue (g : Group) (acks : List (Nat × Nat)) : Prop :=
+  ∀ x ∈ acks, ∃ m r b, (x.1, some m) ∈ g.rosters.known g.me ∧ g.readers.get? m = some r ∧
+    r.run = some b ∧ counter b = x.2
 
 theorem acksOf_fold (g : Group) :
-    ∀ (es : List (Nat × Option Key)) (acc : List (Nat × Index) × Pending × Ledger),
+    ∀ (es : List (Nat × Option Key)) (acc : List (Nat × Nat) × Pending × Ledger),
       (∀ e ∈ es, e ∈ g.rosters.known g.me) → AcksTrue g acc.1 →
-      AcksTrue g (es.foldl (fun (acc : List (Nat × Index) × Pending × Ledger) (e : Nat × Option Key) =>
+      AcksTrue g (es.foldl (fun (acc : List (Nat × Nat) × Pending × Ledger) (e : Nat × Option Key) =>
         match e.2.bind g.readers.get? with
         | none => acc
         | some r =>
           match acc.2.2.owed r.stream r.run with
           | none => acc
           | some owed =>
-            (acc.1 ++ [(e.1, owed)],
+            (acc.1 ++ [(e.1, counter owed)],
               { acc.2.1 with acks := acc.2.1.acks.set r.stream (acc.2.2.published.get? r.stream, owed) },
               acc.2.2.publish r.stream owed)) acc).1
   | [], _, _, h => h
@@ -152,7 +153,7 @@ theorem acksOf_fold (g : Group) :
           cases v with
           | none => simp at hr
           | some m =>
-            refine ⟨m, r, he, by simpa using hr, ?_⟩
+            refine ⟨m, r, owed, he, by simpa using hr, ?_, rfl⟩
             unfold Ledger.owed at ho
             split at ho
             · simp at ho
@@ -166,28 +167,29 @@ theorem acksOf_runs (g : Group) (p : Pending) : AcksTrue g (g.acksOf p).1 :=
 history. -/
 theorem acksOf_safe (g : Group) (p : Pending) (hist : Key → History)
     (inv : ∀ m r, g.readers.get? m = some r → Inv r (hist m)) :
-    ∀ x ∈ (g.acksOf p).1, ∃ m, (x.1, some m) ∈ g.rosters.known g.me ∧ Safe (hist m) (some x.2) := by
+    ∀ x ∈ (g.acksOf p).1, ∃ m b, (x.1, some m) ∈ g.rosters.known g.me ∧ counter b = x.2 ∧
+      Safe (hist m) (some b) := by
   intro x hx
-  obtain ⟨m, r, hk, hr, hrun⟩ := acksOf_runs g p x hx
-  exact ⟨m, hk, hrun ▸ run_safe (inv m r hr)⟩
+  obtain ⟨m, r, b, hk, hr, hrun, hb⟩ := acksOf_runs g p x hx
+  exact ⟨m, b, hk, hb, hrun ▸ run_safe (inv m r hr)⟩
 
 /-! ## Acknowledgements taken -/
 
-@[simp] theorem takeAck_sent (sender : Key) (g : Group) (a : Nat × Index) :
+@[simp] theorem takeAck_sent (sender : Key) (g : Group) (a : Nat × Nat) :
     (g.takeAck sender a).sent = g.sent := by
   unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
 
-@[simp] theorem takeAck_rosters (sender : Key) (g : Group) (a : Nat × Index) :
+@[simp] theorem takeAck_rosters (sender : Key) (g : Group) (a : Nat × Nat) :
     (g.takeAck sender a).rosters = g.rosters := by
   unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
 
-@[simp] theorem takeAck_readCap (sender : Key) (g : Group) (a : Nat × Index) :
+@[simp] theorem takeAck_readCap (sender : Key) (g : Group) (a : Nat × Nat) :
     (g.takeAck sender a).readCap = g.readCap := by
   unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
 
-theorem takeAck_credit (sender : Key) (g : Group) (a : Nat × Index) (m : Key) :
+theorem takeAck_credit (sender : Key) (g : Group) (a : Nat × Nat) (m : Key) :
     (g.takeAck sender a).ledger.ackedBy.get? m = g.ledger.ackedBy.get? m ∨
-      (m = sender ∧ g.rosters.resolve sender a.1 = some g.me ∧ (g.sent.check a.2).isSome) := by
+      (m = sender ∧ g.rosters.resolve sender a.1 = some g.me ∧ (g.sent.checkAt a.2).isSome) := by
   unfold Group.takeAck
   split
   · next acked hacked =>
@@ -205,9 +207,9 @@ theorem takeAck_credit (sender : Key) (g : Group) (a : Nat × Index) (m : Key) :
 counted as having read changes only for the sender, and only by an acknowledgement the Sent-box
 check finds. -/
 theorem takeAcks_credit (sender : Key) :
-    ∀ (acks : List (Nat × Index)) (g : Group) (m : Key),
+    ∀ (acks : List (Nat × Nat)) (g : Group) (m : Key),
       (acks.foldl (Group.takeAck sender) g).ledger.ackedBy.get? m = g.ledger.ackedBy.get? m ∨
-        (m = sender ∧ ∃ a ∈ acks, g.rosters.resolve sender a.1 = some g.me ∧ (g.sent.check a.2).isSome)
+        (m = sender ∧ ∃ a ∈ acks, g.rosters.resolve sender a.1 = some g.me ∧ (g.sent.checkAt a.2).isSome)
   | [], _, _ => Or.inl rfl
   | a :: as, g, m => by
     simp only [List.foldl_cons]
@@ -227,6 +229,13 @@ theorem check_some {s : SentBox} {i : Index} {seq : Nat} (h : s.check i = some s
   unfold SentBox.check at h
   obtain ⟨r, hr, rfl⟩ := Option.map_eq_some_iff.1 h
   exact ⟨r, Dict.get?_eq_some hr, rfl⟩
+
+/-- The Sent-box check by `Idx64` finds a box the member wrote, at that `Idx64`. -/
+theorem checkAt_some {s : SentBox} {idx64 seq : Nat} (h : s.checkAt idx64 = some seq) :
+    ∃ i r, (i, r) ∈ s.records.pairs ∧ counter i = idx64 ∧ r.seq = seq := by
+  unfold SentBox.checkAt at h
+  obtain ⟨⟨i, r⟩, hf, rfl⟩ := Option.map_eq_some_iff.1 h
+  exact ⟨i, r, List.mem_of_find?_eq_some hf, by simpa using List.find?_some hf, rfl⟩
 
 /-! ## Numbering -/
 

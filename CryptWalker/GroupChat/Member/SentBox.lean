@@ -51,6 +51,10 @@ def record (s : SentBox) (index : Index) (plaintext : Option Payload) (control :
 never wrote it. -/
 def check (s : SentBox) (index : Index) : Option Nat := (s.records.get? index).map (·.seq)
 
+/-- The Sent-box check for an acknowledgement, which names the box by its `Idx64`. -/
+def checkAt (s : SentBox) (idx64 : Nat) : Option Nat :=
+  (s.records.pairs.find? (counter ·.1 = idx64)).map (·.2.seq)
+
 def retain (s : SentBox) (epoch : Nat) (policy : Retention) (everyoneAcked : Nat → Bool) : SentBox :=
   let records := s.records.filter fun _ r => epoch ≤ r.written + policy.window
   let records := records.mapValues fun r =>
