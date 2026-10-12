@@ -88,6 +88,11 @@ def follow (readCap : ByteArray) (start : Index) : GM Unit :=
   modify fun g => { g with readers := g.readers.set (keyOf readCap) ⟨keyOf readCap, readCap, start,
     none, 0, [], none, .idle, []⟩ }
 
+/-- Read the stream of `readCap` from its start, unless we read it already. -/
+def followIfNew (readCap : ByteArray) : GM Unit := do
+  let g ← get
+  if !g.readers.contains (keyOf readCap) then follow readCap (startOf readCap)
+
 /-- Start a group with `founders`' read caps, ours among them. -/
 def found (readCap : ByteArray) (founders : List ByteArray) (policy : Retention := {})
     (recheck : Nat := 256) : Group :=
@@ -159,24 +164,38 @@ def started (member : Key) (index : Index) : GM Unit := do
   | some ((introducer, _), _) => beginRoster member introducer
   | none => set { g with awaitingStart := g.awaitingStart.set member index }
 
-def introduced (introducer : Key) (index : Index) (intro : Introduction) : GM Unit := do
-  let new := keyOf intro.readCap
-  modify fun g => { g with rosters := ({ g.rosters with
-    introductions := g.rosters.introductions.set (introducer, index) new } : Rosters).learn new }
+/-- Our own `Introduction` by the introducer we joined through: say where, in `IntroducedAt`. -/
+def noteOwn (introducer : Key) (index : Index) (new : Key) : GM Unit := do
   let g ← get
   if new = g.me && g.joinedThrough = some introducer then
     match g.rosters.indexOf g.me introducer with
     | some place => set { g with introducedAt := some ⟨place, index⟩, joinedThrough := none }
     | none => pure ()
+
+/-- An `IntroducedAt` read earlier named this `Introduction`. -/
+def noteAwaited (introducer : Key) (index : Index) (new : Key) : GM Unit := do
   let g ← get
   if g.awaitingStart.get? new = some index then
     set { g with awaitingStart := g.awaitingStart.erase new }
     beginRoster new introducer
+
+/-- Read the new member's stream, and owe it a number. -/
+def noteNew (introducer : Key) (index : Index) (intro : Introduction) : GM Unit := do
+  let new := keyOf intro.readCap
   let g ← get
-  if new = g.me || g.numbered new then return
-  if !g.readers.contains new then follow intro.readCap (startOf intro.readCap)
-  modify fun g => if g.unnumbered.contains (introducer, index) then g
-    else { g with unnumbered := g.unnumbered ++ [(introducer, index)] }
+  if new = g.me || g.numbered new then pure ()
+  else
+    followIfNew intro.readCap
+    modify fun g => if g.unnumbered.contains (introducer, index) then g
+      else { g with unnumbered := g.unnumbered ++ [(introducer, index)] }
+
+def introduced (introducer : Key) (index : Index) (intro : Introduction) : GM Unit := do
+  let new := keyOf intro.readCap
+  modify fun g => { g with rosters := ({ g.rosters with
+    introductions := g.rosters.introductions.set (introducer, index) new } : Rosters).learn new }
+  noteOwn introducer index new
+  noteAwaited introducer index new
+  noteNew introducer index intro
 
 /-- Take one acknowledgement `sender` sent: of our own stream, it counts only for a box the
 Sent-box check finds; of another's, it is heard. -/
@@ -190,22 +209,34 @@ def takeAck (sender : Key) (g : Group) (a : Nat × Index) : Group :=
     else { g with ledger := g.ledger.hear acked a.2 sender }
   | none => g
 
-def ingest (sender : Key) (index : Index) (message : Message) : GM (List Effect) := do
-  for (number, p) in message.numbers do
-    modify fun g =>
-      let entry : Entry := match p, message.introduction with
-        | some p, _ => { prefix_ := some p }
-        | none, some i => { key := some (keyOf i.readCap) }
-        | none, none => {}
-      { g with rosters := g.rosters.number sender number entry }
-  if let some intro := message.introduction then introduced sender index intro
-  if let some at_ := message.introducedAt then started sender at_.index
-  modify fun g => message.acks.foldl (takeAck sender) g
+def deliver (sender : Key) (index : Index) (message : Message) : GM (List Effect) := do
   match message.content with
   | none => pure []
   | some content =>
     modify fun g => { g with received := g.received.set (sender, index) g.epoch }
     pure [.deliver sender index content]
+
+def ingestIntroduction (sender : Key) (index : Index) (message : Message) : GM Unit :=
+  match message.introduction with
+  | some intro => introduced sender index intro
+  | none => pure ()
+
+def ingestIntroducedAt (sender : Key) (message : Message) : GM Unit :=
+  match message.introducedAt with
+  | some at_ => started sender at_.index
+  | none => pure ()
+
+def ingest (sender : Key) (index : Index) (message : Message) : GM (List Effect) := do
+  modify fun g => message.numbers.foldl (fun g (number, p) =>
+    let entry : Entry := match p, message.introduction with
+      | some p, _ => { prefix_ := some p }
+      | none, some i => { key := some (keyOf i.readCap) }
+      | none, none => {}
+    { g with rosters := g.rosters.number sender number entry }) g
+  ingestIntroduction sender index message
+  ingestIntroducedAt sender message
+  modify fun g => message.acks.foldl (takeAck sender) g
+  deliver sender index message
 
 def boxRead (stream : Key) (index : Index) (result : ReadResult) (next : Option Index) :
     GM (List Effect) := do
@@ -266,8 +297,7 @@ def introductionOf (g : Group) (name : String) (readCap : ByteArray) : Message �
 
 def introduction (name : String) (readCap : ByteArray) : GM (Message × Pending) := do
   let g ← get
-  let new := keyOf readCap
-  if !g.readers.contains new then follow readCap (startOf readCap)
+  followIfNew readCap
   release
   pure (g.introductionOf name readCap)
 
@@ -323,21 +353,33 @@ def write (o : Outgoing) : GM (List Effect) := do
     written o.token index (some o.message)
     pure [.writeBox index o.message]
 
-def flush : GM (List Effect) := do
-  let mut effects : List Effect := []
-  for _ in [0:(← get).pool.length] do
+/-- The message to send next: control if owed, else the oldest content. -/
+def next : GM (Message × Pending) := do
+  let g ← get
+  if g.owesControl then control
+  else
+    set { g with outbox := g.outbox.drop 1 }
+    pure ({ content := g.outbox.head? }, {})
+
+/-- Write what is owed, at most `n` messages. -/
+def flushSome : Nat → GM (List Effect)
+  | 0 => pure []
+  | n + 1 => do
     let g ← get
-    if g.pool.isEmpty || !(g.owesControl || !g.outbox.isEmpty) then break
-    let (m, p) ← if g.owesControl then control else do
-      set { g with outbox := g.outbox.drop 1 }
-      pure ({ content := g.outbox.head? }, ({} : Pending))
-    let (m, p) ← withAcks m p
-    effects := effects ++ (← write (← stage m p))
+    if g.pool.isEmpty || !(g.owesControl || !g.outbox.isEmpty) then pure []
+    else
+      let (m, p) ← next
+      let (m, p) ← withAcks m p
+      let es ← write (← stage m p)
+      pure (es ++ (← flushSome n))
+
+def flush : GM (List Effect) := do
+  let effects ← flushSome (← get).pool.length
   let g ← get
   if g.pool.length < 2 && !g.deriving_ then
     set { g with deriving_ := true }
-    effects := effects ++ [.deriveIndexes g.me g.tip poolSize]
-  pure effects
+    pure (effects ++ [.deriveIndexes g.me g.tip poolSize])
+  else pure effects
 
 def settled (g : Group) : Bool :=
   g.unnumbered.isEmpty && g.outbox.isEmpty && g.readers.values.all (·.mode = .idle)
@@ -384,13 +426,19 @@ def commitInduction : GM (List Effect) := do
 
 /-- Do whatever has become possible: write what is owed, finish catching up, commit an
 induction. -/
+def holdIfSettled : GM Unit := do
+  let g ← get
+  if g.ledger.induction = .catchingUp && g.settled then hold
+
+def commitIfReady : GM (List Effect) := do
+  let g ← get
+  if g.ledger.induction = .inducting && g.ledger.commit && !g.pool.isEmpty then commitInduction
+  else pure []
+
 def progress : GM (List Effect) := do
   let effects ← flush
-  if (← get).ledger.induction = .catchingUp && (← get).settled then hold
-  let g ← get
-  if g.ledger.induction = .inducting && g.ledger.commit && !g.pool.isEmpty then
-    pure (effects ++ (← commitInduction))
-  else pure effects
+  holdIfSettled
+  pure (effects ++ (← commitIfReady))
 
 def derived (indexes : List Index) : GM (List Effect) := do
   modify fun g =>
@@ -400,12 +448,9 @@ def derived (indexes : List Index) : GM (List Effect) := do
 def invite (name : String) (readCap : ByteArray) (commit : Bool) : GM (List Effect) := do
   modify fun g => { g with
     ledger := { g.ledger with induction := .catchingUp, invitee := some (name, readCap), commit := commit } }
-  let mut effects : List Effect := []
-  for r in (← get).readers.values do
-    let (r, es) := r.read
-    setReader r
-    effects := effects ++ es
-  pure (effects ++ (← progress))
+  let g ← get
+  set { g with readers := g.readers.mapValues (·.read.1) }
+  pure ((g.readers.values.flatMap (·.read.2)) ++ (← progress))
 
 /-! ## Membership and time -/
 
@@ -427,12 +472,11 @@ def onEpoch (epoch : Nat) : GM (List Effect) := do
   modify fun g => { g with epoch := epoch }
   modify fun g => { g with sent := g.sent.retain epoch g.policy g.everyoneAcked }
   let g ← get
-  let mut effects : List Effect := []
-  if let some keep := g.policy.keepReceived then
-    for ((sender, index), at_) in g.received.pairs do
-      if at_ + keep ≤ epoch then
-        modify fun g => { g with received := g.received.erase (sender, index) }
-        effects := effects ++ [.expire sender index]
+  let expired : List (Key × Index) := match g.policy.keepReceived with
+    | some keep => (g.received.pairs.filter fun (_, at_) => at_ + keep ≤ epoch).map (·.1)
+    | none => []
+  set { g with received := g.received.filter fun k _ => !expired.contains k }
+  let effects := expired.map fun (sender, index) => Effect.expire sender index
   let g ← get
   let (sent, backfill) := g.sent.backfill epoch
   set { g with sent := sent }
@@ -490,17 +534,18 @@ def observe (stream : Key) (index : Index) (message : Option Message) (next : In
       | .deliver .. | .expire .. => true
       | _ => false)
 
+def stageAll : List (Message × Pending) → GM (List Outgoing)
+  | [] => pure []
+  | (m, p) :: rest => do
+    let (m, p) ← withAcks m p
+    let o ← stage m p
+    pure (o :: (← stageAll rest))
+
 /-- The messages to send now, in order: a control message if one is owed, then `content`. Each
 takes effect when `written`. -/
 def compose (content : Option ByteArray := none) : GM (List Outgoing) := do
-  let mut staged : List (Message × Pending) := []
-  if (← get).owesControl then staged := [← control]
-  if let some c := content then staged := staged ++ [({ content := some c }, {})]
-  let mut out : List Outgoing := []
-  for (m, p) in staged do
-    let (m, p) ← withAcks m p
-    out := out ++ [← stage m p]
-  pure out
+  let owed : List (Message × Pending) ← if (← get).owesControl then (fun x => [x]) <$> control else pure []
+  stageAll (owed ++ content.toList.map fun c => ({ content := some c }, Pending.mk [] none {} false))
 
 /-- The message `token` will never be written: whatever it acknowledged is owed again, and whoever
 it numbered still needs numbering. -/
