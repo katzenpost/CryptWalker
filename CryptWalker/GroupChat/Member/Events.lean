@@ -51,8 +51,16 @@ inductive Event
   | epochChanged (epoch : Nat)
   deriving DecidableEq, Inhabited
 
+/-- What a box of the member's own stream holds, as its Sent box keeps it: a message the member
+composed, which its client encodes, or the bytes a client that writes for itself handed over,
+which the member never looks into. -/
+inductive Payload
+  | message (message : Message)
+  | bytes (bytes : ByteArray)
+  deriving DecidableEq, Inhabited
+
 inductive Effect
-  | writeBox (index : Index) (message : Message)
+  | writeBox (index : Index) (payload : Payload)
   | writeTombstone (index : Index)
   | readBox (stream : Key) (readCap : ByteArray) (index : Index) (recheck : Bool)
   | deriveIndexes (stream : Key) (start : Index) (count : Nat)
