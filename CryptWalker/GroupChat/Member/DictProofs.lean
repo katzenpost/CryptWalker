@@ -136,4 +136,35 @@ theorem get?_setDefault_ne (d : Dict K V) {k k' : K} (v : V) (h : k ≠ k') :
   unfold setDefault
   split_ifs <;> simp [h]
 
+theorem get?_erase (d : Dict K V) (k k' : K) :
+    (d.erase k).get? k' = if k = k' then none else d.get? k' := by
+  obtain ⟨ps⟩ := d
+  unfold erase
+  induction ps with
+  | nil => split_ifs <;> rfl
+  | cons p ps ih =>
+    obtain ⟨k1, v1⟩ := p
+    simp only [List.filter_cons]
+    by_cases h1 : k1 = k
+    · subst h1
+      simp only [ne_eq, not_true_eq_false, decide_false, Bool.false_eq_true, if_false]
+      rw [ih, get?_mk_cons]
+      by_cases h2 : k1 = k' <;> simp [h2]
+    · simp only [ne_eq, h1, not_false_eq_true, decide_true, if_true]
+      rw [get?_mk_cons, ih, get?_mk_cons]
+      by_cases h2 : k = k'
+      · subst h2; simp [h1]
+      · simp [h2]
+
+theorem get?_modify (d : Dict K V) (k k' : K) (f : V → V) :
+    (d.modify k f).get? k' = if k = k' then (d.get? k).map f else d.get? k' := by
+  unfold modify
+  cases h : d.get? k with
+  | none => split_ifs with hk <;> simp_all
+  | some v =>
+    simp only
+    by_cases hk : k = k'
+    · subst hk; simp
+    · simp [hk]
+
 end CryptWalker.GroupChat.Member.Dict
