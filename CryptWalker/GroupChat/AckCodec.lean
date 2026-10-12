@@ -83,11 +83,11 @@ def chunks (v : ℕ) : List ℕ → ℕ → List (List ℕ)
   | l, n + 1 => l.take v :: chunks v (l.drop v) n
 
 /-- The field for `acks`, pairs of roster index and value in ascending order of index. -/
-def encode (acks : List (ℕ × List ℕ)) : List ℕ :=
+def encodeUncounted (acks : List (ℕ × List ℕ)) : List ℕ :=
   nameMembers (acks.map Prod.fst) ++ (acks.map Prod.snd).flatten
 
 /-- The acknowledgements a field carries, or `none` when it is malformed. -/
-def decode (strict : Bool) (v : ℕ) (field : List ℕ) : Option (List (ℕ × List ℕ)) :=
+def decodeUncounted (strict : Bool) (v : ℕ) (field : List ℕ) : Option (List (ℕ × List ℕ)) :=
   if v = 0 then none
   else
     let count := field.length / v
@@ -191,8 +191,8 @@ theorem width_le {i : ℕ} (h : i < rosterMax) : width i ≤ maxNaming := by
 
 /-- **Decoding undoes encoding**, under either parser, whenever a value is longer than the
 longest naming. -/
-theorem decode_encode (strict : Bool) {v : ℕ} (hv : maxNaming < v) {acks : List (ℕ × List ℕ)}
-    (h : WF v acks) : decode strict v (encode acks) = some acks := by
+theorem decodeUncounted_encodeUncounted (strict : Bool) {v : ℕ} (hv : maxNaming < v) {acks : List (ℕ × List ℕ)}
+    (h : WF v acks) : decodeUncounted strict v (encodeUncounted acks) = some acks := by
   obtain ⟨hs, hlt, hsz⟩ := h
   set idx := acks.map Prod.fst with hidx
   set vals := acks.map Prod.snd with hvals
@@ -210,7 +210,7 @@ theorem decode_encode (strict : Bool) {v : ℕ} (hv : maxNaming < v) {acks : Lis
   have hv0 : v ≠ 0 := by unfold maxNaming at hv; omega
   -- the naming is shorter than a value, so length arithmetic recovers the parts
   have split : ∀ naming : List ℕ, naming.length < v →
-      decode strict v (naming ++ vals.flatten) =
+      decodeUncounted strict v (naming ++ vals.flatten) =
         (readMembers strict naming acks.length).map (fun ix => ix.zip vals) := by
     intro naming hn
     have hlen : (naming ++ vals.flatten).length = naming.length + acks.length * v := by simp [hflat]
@@ -218,14 +218,14 @@ theorem decode_encode (strict : Bool) {v : ℕ} (hv : maxNaming < v) {acks : Lis
       rw [Nat.add_mul_div_right _ _ (Nat.pos_of_ne_zero hv0), Nat.div_eq_of_lt hn, zero_add]
     have hmod : (naming.length + acks.length * v) % v = naming.length := by
       rw [Nat.add_mul_mod_self_right, Nat.mod_eq_of_lt hn]
-    simp only [decode, hv0, if_false, hlen, hdiv, hmod, List.take_left, List.drop_left]
+    simp only [decodeUncounted, hv0, if_false, hlen, hdiv, hmod, List.take_left, List.drop_left]
     have : vals.length = acks.length := by simp [hvals]
     rw [← this, chunks_flatten hvals_sz]
   cases hlast : idx.getLast? with
   | none =>
     have hnil : acks = [] := by simpa [hidx] using hlast
     subst hnil
-    simp [decode, encode, nameMembers, hv0, readMembers, chunks, listShortest]
+    simp [decodeUncounted, encodeUncounted, nameMembers, hv0, readMembers, chunks, listShortest]
   | some last =>
     have hmem : last ∈ idx := List.mem_of_getLast? hlast
     have hw : width last ≤ maxNaming := width_le (hidx_lt last hmem)
@@ -233,15 +233,15 @@ theorem decode_encode (strict : Bool) {v : ℕ} (hv : maxNaming < v) {acks : Lis
     by_cases hshort : idx.length ≤ width last
     · -- named by a list
       have hname : nameMembers idx = idx := by simp [nameMembers, hlast, hshort]
-      have : encode acks = idx ++ vals.flatten := by simp [encode, ← hidx, ← hvals, hname]
+      have : encodeUncounted acks = idx ++ vals.flatten := by simp [encodeUncounted, ← hidx, ← hvals, hname]
       rw [this, split idx (by omega)]
       have hchain : idx.IsChain (· < ·) := List.isChain_iff_pairwise.2 hs
       simp [readMembers, hnlen, hchain, listShortest, hlast, hzip]
       intro _; omega
     · -- named by a bitmap of `width last` bytes
       have hname : nameMembers idx = bitmap idx (width last) := by simp [nameMembers, hlast, hshort]
-      have : encode acks = bitmap idx (width last) ++ vals.flatten := by
-        simp [encode, ← hidx, ← hvals, hname]
+      have : encodeUncounted acks = bitmap idx (width last) ++ vals.flatten := by
+        simp [encodeUncounted, ← hidx, ← hvals, hname]
       have hblen : (bitmap idx (width last)).length = width last := by simp [bitmap]
       rw [this, split _ (by omega)]
       -- every index sits below the last, so inside the bitmap
@@ -278,14 +278,14 @@ theorem decode_encode (strict : Bool) {v : ℕ} (hv : maxNaming < v) {acks : Lis
 
 /-- **The layout needs values longer than 32 bytes.** Decoding undoes encoding for every set of
 acknowledgements exactly when it does. -/
-theorem decode_encode_iff (strict : Bool) (v : ℕ) :
-    (∀ acks, WF v acks → decode strict v (encode acks) = some acks) ↔ maxNaming < v := by
-  refine ⟨fun h => ?_, fun hv acks hw => decode_encode strict hv hw⟩
+theorem decodeUncounted_encodeUncounted_iff (strict : Bool) (v : ℕ) :
+    (∀ acks, WF v acks → decodeUncounted strict v (encodeUncounted acks) = some acks) ↔ maxNaming < v := by
+  refine ⟨fun h => ?_, fun hv acks hw => decodeUncounted_encodeUncounted strict hv hw⟩
   by_contra hle
   push Not at hle
   rcases Nat.eq_zero_or_pos v with rfl | hpos
   · have := h [] ⟨by simp, by simp, by simp⟩
-    simp [decode] at this
+    simp [decodeUncounted] at this
   · -- every roster index below 8v: a bitmap of v bytes, then 8v values
     set acks := (List.range (8 * v)).map fun i => (i, List.replicate v 0) with hacks
     have hwf : WF v acks := by
@@ -305,14 +305,14 @@ theorem decode_encode_iff (strict : Bool) (v : ℕ) :
       rw [length_flatten_uniform (v := v)]
       · simp [hacks]
       · intro a ha; simp [hacks] at ha; obtain ⟨_, _, rfl⟩ := ha; simp
-    have hlen : (encode acks).length = 0 + (8 * v + 1) * v := by
-      simp [encode, hname, bitmap, hflat]; ring
+    have hlen : (encodeUncounted acks).length = 0 + (8 * v + 1) * v := by
+      simp [encodeUncounted, hname, bitmap, hflat]; ring
     have hdec := h acks hwf
     have hv0 : v ≠ 0 := by omega
-    have hcount : (encode acks).length / v = 8 * v + 1 := by
+    have hcount : (encodeUncounted acks).length / v = 8 * v + 1 := by
       rw [hlen, zero_add, Nat.mul_div_cancel _ hpos]
-    have hrem : (encode acks).length % v = 0 := by rw [hlen, zero_add, Nat.mul_mod_left]
-    simp [decode, hv0, hcount, hrem, readMembers] at hdec
+    have hrem : (encodeUncounted acks).length % v = 0 := by rw [hlen, zero_add, Nat.mul_mod_left]
+    simp [decodeUncounted, hv0, hcount, hrem, readMembers] at hdec
 
 
 /-- A strictly ascending list's last element is at least every element. -/
@@ -394,10 +394,10 @@ theorem nameMembers_setBits {naming : List ℕ} (hbytes : ∀ b ∈ naming, b < 
 
 /-- **One field per set of acknowledgements.** Under the strict parser, a field that decodes is
 exactly the encoding of what it decodes to, and what it decodes to is well formed. -/
-theorem encode_decode {v : ℕ} {field : List ℕ} {acks : List (ℕ × List ℕ)}
-    (hbytes : ∀ b ∈ field, b < 256) (h : decode true v field = some acks) :
-    WF v acks ∧ encode acks = field := by
-  unfold decode at h
+theorem encodeUncounted_decodeUncounted {v : ℕ} {field : List ℕ} {acks : List (ℕ × List ℕ)}
+    (hbytes : ∀ b ∈ field, b < 256) (h : decodeUncounted true v field = some acks) :
+    WF v acks ∧ encodeUncounted acks = field := by
+  unfold decodeUncounted at h
   split_ifs at h with hv0
   set count := field.length / v with hcount
   set w := field.length % v with hw
@@ -443,19 +443,297 @@ theorem encode_decode {v : ℕ} {field : List ℕ} {acks : List (ℕ × List ℕ
   · intro a ha; exact hlt a.1 (hzip_fst ▸ List.mem_map_of_mem ha)
   · intro a ha
     exact chunks_length_mem hdrop a.2 (hzip_snd ▸ List.mem_map_of_mem ha)
-  · rw [encode, hzip_fst, hzip_snd, hname, flatten_chunks hdrop, List.take_append_drop]
+  · rw [encodeUncounted, hzip_fst, hzip_snd, hname, flatten_chunks hdrop, List.take_append_drop]
 
 /-! ## The spec's parser is malleable; a strict one is not -/
 
 /-- The members 0, 1 and 2, named by a list where the bitmap `0xe0` is shorter, with three
-33-byte values: the spec's parser accepts it, and it is not what `encode` writes. -/
-theorem spec_decode_malleable :
+33-byte values: the spec's parser accepts it, and it is not what `encodeUncounted` writes. -/
+theorem spec_decodeUncounted_malleable :
     let field := [0, 1, 2] ++ List.replicate 99 0
-    ∃ acks, decode false 33 field = some acks ∧ encode acks ≠ field ∧
-      decode false 33 (encode acks) = some acks := by
+    ∃ acks, decodeUncounted false 33 field = some acks ∧ encodeUncounted acks ≠ field ∧
+      decodeUncounted false 33 (encodeUncounted acks) = some acks := by
   refine ⟨[(0, List.replicate 33 0), (1, List.replicate 33 0), (2, List.replicate 33 0)], ?_, ?_, ?_⟩
   · decide
   · decide
   · decide
+
+/-! ## The field katzenqt sends: a count, the naming, and 8-byte values
+
+A value is a BACAP `Idx64`, 8 bytes, shorter than the longest naming, so by
+`decodeUncounted_encodeUncounted_iff` the field's length no longer says how many values it holds.
+The field begins with that count, less one; an empty field acknowledges no one. -/
+
+/-- The field for `acks`: the count less one, the naming, then the values. -/
+def encode (acks : List (ℕ × List ℕ)) : List ℕ :=
+  if acks = [] then [] else (acks.length - 1) :: encodeUncounted acks
+
+/-- The acknowledgements a field carries, or `none` when it is malformed. -/
+def decode (strict : Bool) (v : ℕ) : List ℕ → Option (List (ℕ × List ℕ))
+  | [] => some []
+  | c :: rest =>
+    if rest.length < (c + 1) * v then none
+    else
+      let w := rest.length - (c + 1) * v
+      (readMembers strict (rest.take w) (c + 1)).map fun idx =>
+        idx.zip (chunks v (rest.drop w) (c + 1))
+
+/-- Ascending roster indexes, named by `nameMembers`, read back as themselves. -/
+theorem readMembers_nameMembers (strict : Bool) {idx : List ℕ} (hs : idx.Pairwise (· < ·))
+    (hlt : ∀ x ∈ idx, x < rosterMax) :
+    readMembers strict (nameMembers idx) idx.length = some idx := by
+  cases hlast : idx.getLast? with
+  | none =>
+    have : idx = [] := by simpa using hlast
+    subst this; simp [nameMembers, readMembers, listShortest]
+  | some last =>
+    have hmem : last ∈ idx := List.mem_of_getLast? hlast
+    have hw : width last ≤ maxNaming := width_le (hlt last hmem)
+    by_cases hshort : idx.length ≤ width last
+    · have hname : nameMembers idx = idx := by simp [nameMembers, hlast, hshort]
+      have hchain : idx.IsChain (· < ·) := List.isChain_iff_pairwise.2 hs
+      rw [hname]
+      simp [readMembers, hchain, listShortest, hlast, hshort]
+    · have hname : nameMembers idx = bitmap idx (width last) := by
+        simp [nameMembers, hlast, hshort]
+      have hblen : (bitmap idx (width last)).length = width last := by simp [bitmap]
+      have hbelow : ∀ x ∈ idx, x < width last * 8 := by
+        intro x hx
+        have := le_of_getLast? hs hlast hx
+        simp only [width]; omega
+      have hne : bitmap idx (width last) ≠ [] := by
+        intro h0; rw [h0] at hblen; simp [width] at hblen
+      have hlastb : (bitmap idx (width last)).getLast? ≠ some 0 := by
+        rw [List.getLast?_eq_getElem?, hblen]
+        have : width last - 1 < width last := by simp [width]
+        simp only [bitmap, List.getElem?_map, List.getElem?_range this, Option.map_some, ne_eq,
+          Option.some.injEq]
+        have : width last - 1 = last / 8 := by simp [width]
+        rw [this]; exact bitmapByte_ne_zero hmem
+      rw [hname]
+      simp only [readMembers, hblen]
+      rw [if_neg (by omega), if_neg (by omega), if_neg (by omega), if_neg (by simp [hne, hlastb]),
+        setBits_bitmap hs hbelow, if_pos rfl]
+
+/-- What the strict parser reads before `count` values: `count` ascending roster indexes, named
+exactly as `nameMembers` names them. -/
+theorem readMembers_strict_some {naming : List ℕ} {count : ℕ} {idx : List ℕ}
+    (hbytes : ∀ b ∈ naming, b < 256) (h : readMembers true naming count = some idx) :
+    idx.length = count ∧ idx.Pairwise (· < ·) ∧ (∀ i ∈ idx, i < rosterMax) ∧
+      nameMembers idx = naming := by
+  simp only [readMembers] at h
+  split_ifs at h with h1 h2 h3 h4 h5 h6 <;> simp at h
+  · subst h
+    obtain ⟨hchain, hshort⟩ := h2
+    refine ⟨h1, List.isChain_iff_pairwise.1 hchain, hbytes, ?_⟩
+    cases hl : naming.getLast? with
+    | none => rw [List.getLast?_eq_none_iff] at hl; simp [nameMembers, hl]
+    | some last =>
+      have := hshort trivial
+      simp only [listShortest, hl, decide_eq_true_eq] at this
+      simp only [nameMembers, hl]; rw [if_pos this]
+  · subst h
+    push Not at h5
+    refine ⟨h6, setBits_pairwise _, ?_, ?_⟩
+    · intro i hi
+      have := (mem_setBits.1 hi).1
+      simp only [maxNaming, rosterMax] at *; omega
+    · exact nameMembers_setBits hbytes h5.1 h5.2 (by omega)
+
+/-- A sender acknowledges at most `rosterMax` members, so the count less one fits in a byte. -/
+theorem count_lt {v : ℕ} {acks : List (ℕ × List ℕ)} (h : WF v acks) :
+    acks.length - 1 < rosterMax := by
+  have hsub : (acks.map Prod.fst).toFinset ⊆ Finset.range rosterMax := by
+    intro x hx
+    obtain ⟨a, ha, rfl⟩ := List.mem_map.1 (List.mem_toFinset.1 hx)
+    exact Finset.mem_range.2 (h.lt a ha)
+  have hcard := Finset.card_le_card hsub
+  rw [List.toFinset_card_of_nodup (h.sorted.imp ne_of_lt), List.length_map,
+    Finset.card_range] at hcard
+  have : 0 < rosterMax := by decide
+  omega
+
+/-- **Decoding undoes encoding**, under either parser, for values of every size. -/
+theorem decode_encode (strict : Bool) (v : ℕ) {acks : List (ℕ × List ℕ)} (h : WF v acks) :
+    decode strict v (encode acks) = some acks := by
+  by_cases hne : acks = []
+  · subst hne; simp [encode, decode]
+  obtain ⟨hs, hlt, hsz⟩ := h
+  set idx := acks.map Prod.fst with hidx
+  set vals := acks.map Prod.snd with hvals
+  have hvals_sz : ∀ a ∈ vals, a.length = v := by
+    intro a ha; obtain ⟨b, hb, rfl⟩ := List.mem_map.1 ha; exact hsz b hb
+  have hflat : vals.flatten.length = acks.length * v := by
+    rw [length_flatten_uniform hvals_sz]; simp [hvals]
+  have hidx_lt : ∀ x ∈ idx, x < rosterMax := by
+    intro x hx; obtain ⟨b, hb, rfl⟩ := List.mem_map.1 hx; exact hlt b hb
+  have hzip : idx.zip vals = acks := by
+    rw [hidx, hvals]; clear hs hidx hvals hvals_sz hflat hidx_lt hlt hsz hne
+    induction acks with
+    | nil => rfl
+    | cons a t ih => simp [ih]
+  have hpos : 0 < acks.length := List.length_pos_iff.2 hne
+  have hc : acks.length - 1 + 1 = acks.length := by omega
+  have hnlen : idx.length = acks.length := by simp [hidx]
+  have hvlen : vals.length = acks.length := by simp [hvals]
+  have henc : encode acks = (acks.length - 1) :: (nameMembers idx ++ vals.flatten) := by
+    simp [encode, hne, encodeUncounted, hidx, hvals]
+  rw [henc]
+  simp only [decode, hc, List.length_append, hflat]
+  rw [if_neg (by omega), Nat.add_sub_cancel, List.take_left, List.drop_left, ← hnlen,
+    readMembers_nameMembers strict hs hidx_lt, hnlen, ← hvlen, chunks_flatten hvals_sz]
+  simp [hzip]
+
+/-- **One field per set of acknowledgements.** Under the strict parser, a field that decodes is
+exactly the encoding of what it decodes to, and what it decodes to is well formed. -/
+theorem encode_decode {v : ℕ} {field : List ℕ} {acks : List (ℕ × List ℕ)}
+    (hbytes : ∀ b ∈ field, b < 256) (h : decode true v field = some acks) :
+    WF v acks ∧ encode acks = field := by
+  cases field with
+  | nil =>
+    simp only [decode, Option.some.injEq] at h; subst h
+    exact ⟨⟨by simp, by simp, by simp⟩, rfl⟩
+  | cons c rest =>
+    simp only [decode] at h
+    split_ifs at h with hshort
+    set count := c + 1 with hcount
+    set w := rest.length - count * v with hw
+    have hdrop : (rest.drop w).length = count * v := by simp only [List.length_drop]; omega
+    obtain ⟨idx, hread, rfl⟩ := Option.map_eq_some_iff.1 h
+    obtain ⟨hlen, hp, hlt, hname⟩ := readMembers_strict_some
+      (fun b hb => hbytes b (List.mem_cons_of_mem _ (List.mem_of_mem_take hb))) hread
+    have hch := length_chunks (v := v) (n := count) (l := rest.drop w)
+    have hzip_fst : (idx.zip (chunks v (rest.drop w) count)).map Prod.fst = idx := by
+      rw [List.map_fst_zip]; omega
+    have hzip_snd : (idx.zip (chunks v (rest.drop w) count)).map Prod.snd =
+        chunks v (rest.drop w) count := by
+      rw [List.map_snd_zip]; omega
+    have hzlen : (idx.zip (chunks v (rest.drop w) count)).length = count := by
+      simp [List.length_zip, hlen, hch]
+    refine ⟨⟨by rw [hzip_fst]; exact hp, ?_, ?_⟩, ?_⟩
+    · intro a ha; exact hlt a.1 (hzip_fst ▸ List.mem_map_of_mem ha)
+    · intro a ha
+      exact chunks_length_mem hdrop a.2 (hzip_snd ▸ List.mem_map_of_mem ha)
+    · have hne : idx.zip (chunks v (rest.drop w) count) ≠ [] := by
+        intro h0; rw [h0] at hzlen; simp [hcount] at hzlen
+      rw [encode, if_neg hne, hzlen, encodeUncounted, hzip_fst, hzip_snd, hname,
+        flatten_chunks hdrop, List.take_append_drop]
+      simp [hcount]
+
+/-- The members 0, 1 and 2, named by a list where the bitmap `0xe0` is shorter, with three 8-byte
+values: the spec's parser accepts it, and it is not what `encode` writes. -/
+theorem spec_decode_malleable :
+    let field := [2, 0, 1, 2] ++ List.replicate 24 0
+    ∃ acks, decode false 8 field = some acks ∧ encode acks ≠ field ∧
+      decode false 8 (encode acks) = some acks := by
+  refine ⟨[(0, List.replicate 8 0), (1, List.replicate 8 0), (2, List.replicate 8 0)], ?_, ?_, ?_⟩
+  · decide
+  · decide
+  · decide
+
+/-! ## Values: `Idx64`, little-endian -/
+
+/-- The `k` bytes of `n`, least significant first. -/
+def le : ℕ → ℕ → List ℕ
+  | 0, _ => []
+  | k + 1, n => n % 256 :: le k (n / 256)
+
+/-- The number little-endian bytes spell. -/
+def fromLE (l : List ℕ) : ℕ := l.foldr (fun b n => b + 256 * n) 0
+
+theorem fromLE_le : ∀ (k n : ℕ), n < 256 ^ k → fromLE (le k n) = n
+  | 0, n, h => by simp at h; simp [le, fromLE, h]
+  | k + 1, n, h => by
+    have : n / 256 < 256 ^ k := by rw [pow_succ] at h; omega
+    have ih := fromLE_le k (n / 256) this
+    simp only [fromLE, le, List.foldr_cons] at ih ⊢
+    rw [ih]; omega
+
+theorem le_fromLE : ∀ (l : List ℕ), (∀ b ∈ l, b < 256) → le l.length (fromLE l) = l
+  | [], _ => rfl
+  | b :: l, h => by
+    have hb := h b List.mem_cons_self
+    have ih := le_fromLE l (fun x hx => h x (List.mem_cons_of_mem _ hx))
+    simp only [fromLE, List.foldr_cons, List.length_cons, le] at ih ⊢
+    rw [show (b + 256 * List.foldr (fun b n => b + 256 * n) 0 l) % 256 = b by omega,
+      show (b + 256 * List.foldr (fun b n => b + 256 * n) 0 l) / 256 =
+        List.foldr (fun b n => b + 256 * n) 0 l by omega, ih]
+
+theorem fromLE_lt : ∀ (l : List ℕ), (∀ b ∈ l, b < 256) → fromLE l < 256 ^ l.length
+  | [], _ => by simp [fromLE]
+  | b :: l, h => by
+    have hb := h b List.mem_cons_self
+    have ih := fromLE_lt l (fun x hx => h x (List.mem_cons_of_mem _ hx))
+    simp only [fromLE, List.foldr_cons, List.length_cons, pow_succ] at ih ⊢
+    nlinarith
+
+theorem length_le : ∀ (k n : ℕ), (le k n).length = k
+  | 0, _ => rfl
+  | k + 1, n => by simp [le, length_le k]
+
+/-- Bytes in a value: an `Idx64`. -/
+def idxSize : ℕ := 8
+
+/-- The field katzenqt sends for `acks`, pairs of roster index and `Idx64`. -/
+def encodeIdx64 (acks : List (ℕ × ℕ)) : List ℕ := encode (acks.map fun a => (a.1, le idxSize a.2))
+
+def decodeIdx64 (strict : Bool) (field : List ℕ) : Option (List (ℕ × ℕ)) :=
+  (decode strict idxSize field).map (·.map fun a => (a.1, fromLE a.2))
+
+/-- What a sender may encode: ascending roster indexes, each one byte, each value an `Idx64`. -/
+structure WFIdx64 (acks : List (ℕ × ℕ)) : Prop where
+  sorted : (acks.map Prod.fst).Pairwise (· < ·)
+  lt : ∀ a ∈ acks, a.1 < rosterMax
+  idx64 : ∀ a ∈ acks, a.2 < 2 ^ 64
+
+theorem map_le_fromLE {acks : List (ℕ × ℕ)} (h : ∀ a ∈ acks, a.2 < 2 ^ 64) :
+    (acks.map fun a => (a.1, le idxSize a.2)).map (fun a => (a.1, fromLE a.2)) = acks := by
+  rw [List.map_map]
+  conv => rhs; rw [← List.map_id acks]
+  apply List.map_congr_left
+  intro a ha
+  simp [fromLE_le idxSize a.2 (by simpa [idxSize] using h a ha)]
+
+/-- **Decoding undoes encoding** for the field katzenqt sends. -/
+theorem decodeIdx64_encodeIdx64 (strict : Bool) {acks : List (ℕ × ℕ)} (h : WFIdx64 acks) :
+    decodeIdx64 strict (encodeIdx64 acks) = some acks := by
+  have hwf : WF idxSize (acks.map fun a => (a.1, le idxSize a.2)) :=
+    ⟨by simpa [Function.comp_def] using h.sorted,
+     fun a ha => by obtain ⟨b, hb, rfl⟩ := List.mem_map.1 ha; exact h.lt b hb,
+     fun a ha => by obtain ⟨b, hb, rfl⟩ := List.mem_map.1 ha; exact length_le _ _⟩
+  simp [decodeIdx64, encodeIdx64, decode_encode strict idxSize hwf, map_le_fromLE h.idx64]
+
+/-- **One field per set of acknowledgements**, for the field katzenqt sends: under the strict
+parser, a field that decodes is the encoding of what it decodes to, which is well formed. -/
+theorem encodeIdx64_decodeIdx64 {field : List ℕ} {acks : List (ℕ × ℕ)}
+    (hbytes : ∀ b ∈ field, b < 256) (h : decodeIdx64 true field = some acks) :
+    WFIdx64 acks ∧ encodeIdx64 acks = field := by
+  obtain ⟨raw, hraw, rfl⟩ := Option.map_eq_some_iff.1 h
+  obtain ⟨hwf, henc⟩ := encode_decode hbytes hraw
+  -- every value's bytes come from the field, so each is a byte
+  have hvb : ∀ a ∈ raw, ∀ b ∈ a.2, b < 256 := by
+    intro a ha b hb
+    apply hbytes
+    rw [← henc]
+    have : b ∈ (raw.map Prod.snd).flatten := List.mem_flatten.2 ⟨a.2, List.mem_map_of_mem ha, hb⟩
+    have hne : raw ≠ [] := List.ne_nil_of_mem ha
+    simp only [encode, if_neg hne, encodeUncounted]
+    exact List.mem_cons_of_mem _ (List.mem_append_right _ this)
+  have hback : (raw.map fun a => (a.1, fromLE a.2)).map (fun a => (a.1, le idxSize a.2)) = raw := by
+    rw [List.map_map]
+    conv => rhs; rw [← List.map_id raw]
+    apply List.map_congr_left
+    intro a ha
+    have := le_fromLE a.2 (hvb a ha)
+    rw [hwf.size a ha] at this
+    simp [this]
+  refine ⟨⟨?_, ?_, ?_⟩, ?_⟩
+  · simpa [Function.comp_def] using hwf.sorted
+  · intro a ha; obtain ⟨b, hb, rfl⟩ := List.mem_map.1 ha; exact hwf.lt b hb
+  · simp only [List.mem_map]
+    rintro _ ⟨a, ha, rfl⟩
+    have := fromLE_lt a.2 (hvb a ha)
+    rwa [hwf.size a ha, idxSize, show (256 : ℕ) ^ 8 = 2 ^ 64 by norm_num] at this
+  · rw [encodeIdx64, hback, henc]
 
 end CryptWalker.GroupChat.AckCodec
