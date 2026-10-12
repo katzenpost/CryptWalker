@@ -29,7 +29,7 @@ structure Record where
   /-- Where the box falls in the order the member wrote its boxes. -/
   seq : Nat
   /-- `none` once the plaintext is gone, or if it was never handed over. -/
-  plaintext : Option Message
+  plaintext : Option Payload
   control : Bool
   written : Nat
   deriving DecidableEq, Inhabited
@@ -43,7 +43,7 @@ structure SentBox where
 
 namespace SentBox
 
-def record (s : SentBox) (index : Index) (plaintext : Option Message) (control : Bool) (epoch : Nat) :
+def record (s : SentBox) (index : Index) (plaintext : Option Payload) (control : Bool) (epoch : Nat) :
     SentBox :=
   { s with records := s.records.set index ⟨s.count, plaintext, control, epoch⟩, count := s.count + 1 }
 
@@ -67,7 +67,7 @@ def backfill (s : SentBox) (epoch : Nat) : SentBox × List Effect :=
     let ordered := s.records.pairs.mergeSort fun a b => a.2.seq ≤ b.2.seq
     ({ s with backfilled := some epoch },
       ordered.map fun (i, r) => match r.plaintext with
-        | some m => .writeBox i m
+        | some p => .writeBox i p
         | none => .writeTombstone i)
 
 end SentBox

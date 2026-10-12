@@ -290,7 +290,7 @@ theorem keeps_boxRead (s : Key) (b : Index) (res : ReadResult) (n : Option Index
 
 /-! ## Writing -/
 
-theorem keeps_written (t : Nat) (b : Index) (pt : Option Message) : Keeps (Group.written t b pt) := by
+theorem keeps_written (t : Nat) (b : Index) (pt : Option Payload) : Keeps (Group.written t b pt) := by
   unfold Group.written; apply Keeps.frame; intro g; split <;> rfl
 
 theorem keeps_write (o : Outgoing) : Keeps (Group.write o) := by
@@ -475,7 +475,7 @@ theorem compose_keeps (c : Option ByteArray) : Keeps (Group.compose c) := by
   · exact Keeps.bind (Keeps.map _ keeps_control) fun _ => keeps_stageAll _
   · exact Keeps.bind (Keeps.pure _) fun _ => keeps_stageAll _
 
-theorem written_keeps (t : Nat) (b : Index) (pt : Option Message) : Keeps (Group.written t b pt) :=
+theorem written_keeps (t : Nat) (b : Index) (pt : Option Payload) : Keeps (Group.written t b pt) :=
   keeps_written t b pt
 
 theorem abandoned_keeps (t : Nat) : Keeps (Group.abandoned t) := by
@@ -531,7 +531,7 @@ inductive Reachable : Group → Prop
   | observe {g : Group} (s : Key) (b : Index) (msg : Option Message) (n : Index) :
       Reachable g → Reachable ((Group.observe s b msg n).run g).2
   | compose {g : Group} (c : Option ByteArray) : Reachable g → Reachable ((Group.compose c).run g).2
-  | written {g : Group} (t : Nat) (b : Index) (pt : Option Message) :
+  | written {g : Group} (t : Nat) (b : Index) (pt : Option Payload) :
       Reachable g → Reachable ((Group.written t b pt).run g).2
   | abandoned {g : Group} (t : Nat) : Reachable g → Reachable ((Group.abandoned t).run g).2
   | beginInduction {g : Group} : Reachable g → Reachable (Group.beginInduction.run g).2
@@ -539,10 +539,12 @@ inductive Reachable : Group → Prop
       Reachable g → Reachable ((Group.introduceNow name rc).run g).2
   | cancelInduction {g : Group} : Reachable g → Reachable (Group.cancelInduction.run g).2
   | remove {g : Group} (m : Key) : Reachable g → Reachable ((Group.remove m).run g).2
+  /-- The client changes its retention policy, as a user's disappearing messages setting does. -/
+  | policy {g : Group} (p : Retention) : Reachable g → Reachable { g with policy := p }
 
 theorem Reachable.ok {g : Group} : Reachable g → ReadersOK g.readers
-  | .found rc fs policy w => found_ok rc fs policy w
-  | .joined rc reply policy w => joined_ok rc reply policy w
+  | .found rc fs p w => found_ok rc fs p w
+  | .joined rc reply p w => joined_ok rc reply p w
   | .handle _ hwf h => handle_keeps hwf _ h.ok
   | .observe s b msg n h => observe_keeps s b msg n _ h.ok
   | .compose _ h => compose_keeps _ _ h.ok
@@ -552,6 +554,7 @@ theorem Reachable.ok {g : Group} : Reachable g → ReadersOK g.readers
   | .introduceNow name rc h => introduceNow_keeps name rc _ h.ok
   | .cancelInduction h => cancelInduction_keeps _ h.ok
   | .remove _ h => remove_keeps _ _ h.ok
+  | .policy _ h => h.ok
 
 /-- **Every acknowledgement a reachable member sends names a box its reader of that stream read,
 along with every box before it.** Every message takes its acknowledgements from `acksOf`. -/

@@ -42,6 +42,11 @@ def message (m : Message) : Json := Json.mkObj [
   ("introduced_at", opt introRef m.introducedAt),
   ("acks", arr (m.acks.map fun (i, v) => arr [nat i, hex v]))]
 
+/-- A message decoded, or bytes the member never looks into, as `{"bytes": hex}`. -/
+def payload : Payload → Json
+  | .message m => message m
+  | .bytes b => Json.mkObj [("bytes", hex b)]
+
 def joinReply (r : JoinReply) : Json := Json.mkObj [
   ("type", "JoinReply"),
   ("members", arr (r.members.map (opt fun (rc, s) => arr [hex rc, hex s]))),
@@ -51,7 +56,7 @@ def joinReply (r : JoinReply) : Json := Json.mkObj [
   ("newcomer", nat r.newcomer)]
 
 def effect : Effect → Json
-  | .writeBox i m => Json.mkObj [("type", "WriteBox"), ("index", hex i), ("message", message m)]
+  | .writeBox i p => Json.mkObj [("type", "WriteBox"), ("index", hex i), ("payload", payload p)]
   | .writeTombstone i => Json.mkObj [("type", "WriteTombstone"), ("index", hex i)]
   | .readBox s rc i r => Json.mkObj [("type", "ReadBox"), ("stream", hex s), ("read_cap", hex rc),
       ("index", hex i), ("recheck", toJson r)]
@@ -98,7 +103,7 @@ def retention (p : Retention) : Json := Json.mkObj [
   ("keep_sent", opt nat p.keepSent), ("keep_received", opt nat p.keepReceived)]
 
 def sentBox (s : SentBox) : Json := Json.mkObj [
-  ("records", pairs hex (fun r => Json.mkObj [("seq", nat r.seq), ("plaintext", opt message r.plaintext),
+  ("records", pairs hex (fun r => Json.mkObj [("seq", nat r.seq), ("plaintext", opt payload r.plaintext),
     ("control", toJson r.control), ("written", nat r.written)]) s.records),
   ("count", nat s.count),
   ("backfilled", match s.backfilled with
@@ -173,6 +178,11 @@ def readMessage (j : Json) : Parse Message := do
     numbers := ← list (pair num (optional bytes)) (← field j "numbers")
     introducedAt := ← optional readIntroRef (← field j "introduced_at")
     acks := ← list (pair num bytes) (← field j "acks") }
+
+def readPayload (j : Json) : Parse Payload :=
+  match j.getObjVal? "bytes" with
+  | .ok b => .bytes <$> bytes b
+  | .error _ => .message <$> readMessage j
 
 def readJoinReply (j : Json) : Parse JoinReply := do
   pure {

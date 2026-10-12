@@ -78,7 +78,8 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
   (`ReaderProofs.run_safe`). Reading never undoes this (`Safe.mono`). Every acknowledgement a
   member sends is that run (`GroupProofs.acksOf_safe`). For every member reachable from founding
   or joining by any sequence of calls, every acknowledgement it sends is safe
-  (`MemberProofs.acks_sent_safe`). The one assumption is that a walk the client reports kept no
+  (`MemberProofs.acks_sent_safe`). The calls include the client changing its retention policy
+  between them, as a user's disappearing messages setting does. The one assumption is that a walk the client reports kept no
   more boxes than it stepped past (`Event.WF`).
 - **Acknowledgements of our own stream are checked.** One counts only for a box the Sent-box
   check finds (`takeAcks_credit`).
@@ -106,12 +107,24 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
 ## Checking katzenqt against the Lean member
 
 `replay.lean` checks that `Member/` is katzenqt's member and not just a likeness of it.
-katzenqt's `groupchat/trace.py` records every call made on a simulated member: its arguments, its
-result and the member's whole state afterwards. The replay makes the same calls on the Lean member
-and requires the same results and state. It also checks every index the trace says BACAP produced
+katzenqt's `groupchat/trace.py` records every call made on a member: its arguments, its result and
+the member's whole state afterwards. The replay makes the same calls on the Lean member and
+requires the same results and state. It also checks every index the trace says BACAP produced
 against CryptWalker's own BACAP.
 
-`testdata/groupchat_traces/` holds the traces of katzenqt's scenarios. Run
+There are two kinds of trace. A simulated member's (`scenario-*.jsonl`) is driven by katzenqt's
+simulator, which runs the member against a simulated Pigeonhole. The app's
+(`adapter-scenario.jsonl`) is recorded from katzenqt's adapter, `acks.py`, and its network code, as
+the app drives them: reads, sends, a user's scans, backfill and a change of retention policy,
+against a database and a fake thin client that derives real BACAP indexes. So the replay checks
+the member itself, and also the calls the app really makes on it.
+
+A member's Sent box keeps what each of its boxes holds as a `Payload`: a message the member
+composed, which its client encodes, or the bytes a client that writes for itself handed over,
+which the member never looks into. The app hands over the box exactly as written, so a rewrite
+writes the same bytes, even for a box that points to a large message's own stream.
+
+`testdata/groupchat_traces/` holds the traces of katzenqt's scenarios and the app's. Run
 `python tools/groupchat_traces.py DIR 0` in katzenqt to regenerate them. katzenqt's nightly job
 replays fresh random runs (`tests/test_groupchat_trace.py`, with `CRYPTWALKER` set).
 `ack_codec_test.lean` checks the `Acks` codec against vectors from the Go, Python and Rust codecs.
@@ -215,3 +228,5 @@ the set runs in about two minutes; `MC_GroupChat_RostersOnly` adds about thirty 
   backfill claims to any size.
 - **Python against the TLA+ models.** `Katzenqt.tla` is written from katzenqt's code by hand; only
   `Member/` is checked against katzenqt mechanically, by the trace replay.
+- **The app's trace is one scenario.** It covers each call the app makes, once. Random runs of
+  the app's adapter, like the simulator's nightly runs, are not recorded.

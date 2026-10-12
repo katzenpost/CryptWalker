@@ -329,7 +329,7 @@ def stage (message : Message) (pending : Pending) : GM Outgoing := do
   pure ⟨(← get).tokens, message⟩
 
 /-- The message `token` landed in the box `index` of our stream. -/
-def written (token : Nat) (index : Index) (plaintext : Option Message) : GM Unit := modify fun g =>
+def written (token : Nat) (index : Index) (plaintext : Option Payload) : GM Unit := modify fun g =>
   match g.pending.get? token with
   | none => g
   | some p =>
@@ -350,8 +350,8 @@ def write (o : Outgoing) : GM (List Effect) := do
   | [] => pure []
   | index :: rest =>
     modify fun g => { g with pool := rest }
-    written o.token index (some o.message)
-    pure [.writeBox index o.message]
+    written o.token index (some (.message o.message))
+    pure [.writeBox index (.message o.message)]
 
 /-- The message to send next: control if owed, else the oldest content. -/
 def next : GM (Message × Pending) := do

@@ -11,8 +11,9 @@ import CryptWalker.Util.Bytes
 
 /-! # Replaying katzenqt's group chat traces through the Lean member
 
-Each trace, written by katzenqt's `groupchat/trace.py` from a simulator run, is one JSON line per
-call made on a member. The replay makes the same call on the Lean `Group` of that member and
+Each trace, written by katzenqt's `groupchat/trace.py` from a simulator run or from the app's own
+adapter (`acks.py`), is one JSON line per call made on a member. Each call says the retention
+policy in force, which a client may change between calls. The replay makes the same call on the Lean `Group` of that member and
 requires the same result and the same state afterwards. The Lean member is driven only by what
 the trace says the Python member was given, so a difference means the two compute different
 things from the same inputs.
@@ -130,6 +131,8 @@ def call (g : Option Group) (line : Json) : Parse (Json × List Effect × Group)
   let policy ← readRetention (← arg "policy")
   let recheck ← num (← arg "recheck")
   let name ← (← field line "call").getStr?
+  -- A client may change its policy between calls; each call says which was in force.
+  let g := g.map fun g => { g with policy := policy }
   match name, g with
   | "found", _ =>
     pure (.null, [], Group.found (← bytes (← arg "read_cap")) (← list bytes (← arg "founders")) policy recheck)
@@ -148,7 +151,7 @@ def call (g : Option Group) (line : Json) : Parse (Json × List Effect × Group)
     pure (arr (os.map outgoing), [], g)
   | "written", some g =>
     let ((), g) := (Group.written (← num (← arg "token")) (← bytes (← arg "index"))
-      (← optional readMessage (← arg "message"))).run g
+      (← optional readPayload (← arg "payload"))).run g
     pure (.null, [], g)
   | "abandoned", some g =>
     let ((), g) := (Group.abandoned (← num (← arg "token"))).run g
