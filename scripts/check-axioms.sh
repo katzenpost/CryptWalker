@@ -18,7 +18,8 @@ for f in "${files[@]}"; do
   for n in $names; do echo "#print axioms $ns.$n" >>"$tmp.body"; done
 done
 cat "$tmp.head" "$tmp.body" >"$tmp"; rm -f "$tmp.head" "$tmp.body"
-out=$(lake env lean "$tmp" 2>&1)
+# Lean wraps a long list of axioms; join it back onto one line for the grep below.
+out=$(lake env lean "$tmp" 2>&1 | sed -e ':a' -e 'N' -e '$!ba' -e 's/,\n */, /g')
 echo "$out"
 if grep -v "depends on axioms: \[\(propext\|Classical.choice\|Quot.sound\)\(, \(propext\|Classical.choice\|Quot.sound\)\)*\]$\|does not depend on any axioms" <<<"$out" | grep -q .; then
   echo "FAIL: a theorem depends on something beyond Lean's own axioms" >&2
