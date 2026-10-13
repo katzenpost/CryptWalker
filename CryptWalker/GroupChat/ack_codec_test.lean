@@ -6,6 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Lean.Data.Json
 
 import CryptWalker.GroupChat.AckCodec
+import CryptWalker.GroupChat.Member.AckBytes
 import CryptWalker.Util.newhex
 
 /-! # `Acks` field vectors
@@ -33,12 +34,23 @@ def readAcks (j : Json) : Except String (List (ℕ × ℕ)) := do
 def caseOf (j : Json) : Except String (String × List ℕ) := do
   pure ((← (← j.getObjVal? "name").getStr?), ← hexNats (← (← j.getObjVal? "field").getStr?))
 
+/-- The executable codec reads `field` as `acks`, and writes `acks` back as the encoder would. -/
+def checkBytes (name : String) (field : List ℕ) (acks : Option (List (ℕ × ℕ))) :
+    Except String Unit := do
+  let bytes : ByteArray := ⟨(field.map Nat.toUInt8).toArray⟩
+  if CryptWalker.GroupChat.Member.AckBytes.decode bytes != acks then
+    throw s!"{name}: the byte codec misreads it"
+  if let some acks := acks then
+    if (CryptWalker.GroupChat.Member.AckBytes.encode acks).data.toList.map (·.toNat) != encodeIdx64 acks then
+      throw s!"{name}: the byte codec encodes differently"
+
 def valid (j : Json) : Except String String := do
   let (name, field) ← caseOf j
   let acks ← readAcks j
   if encodeIdx64 acks != field then throw s!"{name}: encodes differently"
   if decodeIdx64 false field != some acks then throw s!"{name}: the spec's parser misreads it"
   if decodeIdx64 true field != some acks then throw s!"{name}: the strict parser misreads it"
+  checkBytes name field (some acks)
   pure s!"{name} ({acks.length} acknowledged, {field.length} bytes)"
 
 def lenient (j : Json) : Except String String := do
@@ -46,12 +58,14 @@ def lenient (j : Json) : Except String String := do
   let acks ← readAcks j
   if decodeIdx64 false field != some acks then throw s!"{name}: the spec's parser misreads it"
   if decodeIdx64 true field != none then throw s!"{name}: the strict parser accepts it"
+  checkBytes name field (some acks)
   pure s!"{name} (lenient, refused by the strict parser)"
 
 def malformed (j : Json) : Except String String := do
   let (name, field) ← caseOf j
   if decodeIdx64 false field != none then throw s!"{name}: the spec's parser accepts it"
   if decodeIdx64 true field != none then throw s!"{name}: the strict parser accepts it"
+  checkBytes name field none
   pure s!"{name} (malformed)"
 
 def main : IO UInt32 := do

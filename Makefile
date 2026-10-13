@@ -44,6 +44,7 @@ TESTS := \
 	CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test \
 	CryptWalker.BACAP.primitive_vectors_test \
 	CryptWalker.GroupChat.ack_codec_test \
+	CryptWalker.GroupChat.wire_vectors_test \
 	CryptWalker.GroupChat.replay
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
@@ -59,7 +60,7 @@ EXES := $(TESTS) CryptWalker.BACAP.gen_vectors CryptWalker.Bench.benchmark Crypt
 .PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors gen-mrhybrid-vectors test-mrhybrid test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
-.PHONY: verify-vectors gen-acks-vectors check-bacap-vectors axioms tla veil
+.PHONY: verify-vectors gen-acks-vectors gen-groupchat-wire-vectors check-bacap-vectors axioms tla veil
 
 all: build ## build everything, library and executables
 
@@ -144,6 +145,13 @@ KATZENQT_DIR ?= ../katzenqt
 gen-acks-vectors: ## regenerate testdata/acks_vectors.json from katzenqt's Python Acks codec
 	@python3 -I scripts/gen_acks_vectors.py "$(KATZENQT_DIR)" > testdata/acks_vectors.json
 	@sha256sum testdata/acks_vectors.json > testdata/acks_vectors.json.sha256
+
+# katzenqt's models need its dependencies, so this runs with katzenqt's own Python.
+KATZENQT_PYTHON ?= $(KATZENQT_DIR)/.venv/bin/python
+
+gen-groupchat-wire-vectors: ## regenerate testdata/groupchat_wire_vectors.json from katzenqt's message codec
+	@$(KATZENQT_PYTHON) -I scripts/gen_groupchat_wire_vectors.py "$(KATZENQT_DIR)" > testdata/groupchat_wire_vectors.json
+	@sha256sum testdata/groupchat_wire_vectors.json > testdata/groupchat_wire_vectors.json.sha256
 
 check-bacap-vectors: build ## generate hpqc's BACAP vectors with the Lean implementation and compare
 	@$(BIN)/CryptWalker-BACAP-gen_vectors --check
