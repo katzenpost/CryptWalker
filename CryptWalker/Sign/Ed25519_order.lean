@@ -9,11 +9,8 @@ import CryptWalker.Sign.Ed25519_edwards
 
 /-! # The basepoint has order `ℓ`
 
-`scalarMul ell basepoint = zero` is a computation, not an assumption. `Ed25519Math.scalarMul`
-divides in `ZMod p`, whose inverse the kernel cannot evaluate, so the computation runs on a mirror
-over plain naturals whose inverse is Fermat's `x ^ (p-2)`. The mirror is proved equal to
-`Ed25519Math.add`/`scalarMul` (`cast_eAdd`, `cast_eScalar`), and `decide +kernel` — which adds no
-axiom, unlike `native_decide` — evaluates it. -/
+Computed by `decide +kernel` on a mirror of `Ed25519Math.add`/`scalarMul` over naturals, with
+Fermat inversion; `cast_eAdd` and `cast_eScalar` prove the mirror equal to the original. -/
 
 namespace CryptWalker.Sign.Ed25519Order
 
@@ -141,7 +138,7 @@ lemma eScalar_ell : eScalar 253 ell basepointNat = (0, 1) := by
   unfold basepointNat ell
   decide +kernel
 
-/-- **The basepoint has order `ℓ`.** -/
+/-- The basepoint has order `ℓ`. -/
 theorem scalarMul_ell_basepoint : scalarMul ell basepoint = zero := by
   have h := cast_eScalar 253 ell basepointNat (by unfold ell; norm_num)
   rw [eScalar_ell, toE_basepointNat] at h

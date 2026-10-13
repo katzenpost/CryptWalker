@@ -9,30 +9,18 @@ import CryptWalker.KEM.Schemes
 
 namespace CryptWalker.Sphinx.Geometry
 
--- `Geometry` repeats the namespace, as `NIKE`/`KEM`/`Sphinx` do theirs; harmless (see
--- `sphinx.lean`'s own suppression of this same linter).
+-- `Geometry` repeats the namespace name.
 set_option linter.dupNamespace false
 
 open CryptWalker.Sphinx.Constants
 
 /-! # Sphinx packet geometry
 
-Port of `katzenpost/core/sphinx/geo/geo.go` + `geo_impl.go`'s `geometryFactory`: given a hop
-count, a target payload size, and the chosen scheme, compute every fixed byte offset Sphinx's
-header/routing-info/packet layout needs.
-
-`ofNIKE`/`ofKEM` take a bare scheme name (as Go's config format does) and resolve it against
-`CryptWalker.NIKE.byName`/`CryptWalker.KEM.byName`, so a returned `Geometry`'s stored name and
-derived sizes can never disagree. `Geometry.scheme : String ⊕ String` (`Sum.inl`/`Sum.inr`)
-replaces Go's separate nullable `NIKEName`/`KEMName`, making "exactly one of NIKE or KEM" a fact
-of the type rather than a runtime invariant.
-
-Dropped relative to Go's `Geometry`: `Marshal`/`Display`/`Hash`/`String` (I/O-and-display
-conveniences, orthogonal to the packet crypto this project is porting). -/
+Every fixed byte offset of the header, routing-info, and packet layout, computed from a hop
+count, a payload size, and a NIKE or KEM. -/
 
 structure Geometry where
-  /-- Which scheme this geometry's sizes were derived for, by its canonical `hpqc` name —
-  `Sum.inl` for a NIKE, `Sum.inr` for a KEM. Replaces Go's `NIKEName`/`KEMName` pair. -/
+  /-- The scheme name: `Sum.inl` for a NIKE, `Sum.inr` for a KEM. -/
   scheme                       : String ⊕ String
   packetLength                : Nat
   nrHops                      : Nat
@@ -48,8 +36,7 @@ structure Geometry where
   sprpKeyMaterialLength        : Nat
   deriving Repr
 
-/-- `geometryFactory.deriveForwardPayloadLength`: the payload size a SURB-carrying packet needs,
-given the size the caller actually wants delivered. -/
+/-- The payload size a SURB-carrying packet needs to deliver `userForwardPayloadLength` bytes. -/
 private def deriveForwardPayloadLength (surbLen userForwardPayloadLength : Nat) : Nat :=
   userForwardPayloadLength + sphinxPlaintextHeaderLength + surbLen
 
@@ -99,9 +86,7 @@ private def buildKEM (name : String) (kemCiphertextSize userForwardPayloadLength
     nextNodeHopLength := nextNodeHopLength
     sprpKeyMaterialLength := sprpKeyMaterialLength }
 
-/-- `GeometryFromUserForwardPayloadLength`, ported with `Validate`'s scheme-name check folded in:
-`nikeSchemeName` resolves against `CryptWalker.NIKE.byName`, and the public-key size comes only
-from that lookup, never from a caller-supplied number. -/
+/-- Geometry for a NIKE named `nikeSchemeName`, with the given user payload length. -/
 def ofNIKE (nikeSchemeName : String) (userForwardPayloadLength : Nat) (withSURB : Bool)
     (nrHops : Nat) : Except String Geometry :=
   match CryptWalker.NIKE.byName nikeSchemeName with
@@ -109,7 +94,7 @@ def ofNIKE (nikeSchemeName : String) (userForwardPayloadLength : Nat) (withSURB 
   | some scheme =>
     pure (buildNIKE nikeSchemeName scheme.publicKeySize userForwardPayloadLength withSURB nrHops)
 
-/-- `KEMGeometryFromUserForwardPayloadLength`, ported the same way — see `ofNIKE`. -/
+/-- Geometry for a KEM named `kemSchemeName`, with the given user payload length. -/
 def ofKEM (kemSchemeName : String) (userForwardPayloadLength : Nat) (withSURB : Bool)
     (nrHops : Nat) : Except String Geometry :=
   match CryptWalker.KEM.byName kemSchemeName with
@@ -117,21 +102,14 @@ def ofKEM (kemSchemeName : String) (userForwardPayloadLength : Nat) (withSURB : 
   | some scheme =>
     pure (buildKEM kemSchemeName scheme.ciphertextSize userForwardPayloadLength withSURB nrHops)
 
-/-- The reverse of `ofNIKE`: given a target *total packet size* rather than a target payload
-size, solve for the `userForwardPayloadLength` that hits it exactly, then build the geometry the
-usual way. Not a katzenpost port — `geo.go`/`geo_impl.go` have no such factory, only the forward
-direction. `headerLength`/`surbLength` depend only on the scheme and hop count, never on the
-payload length (`buildNIKE`'s own definition), so `probe` (built with a throwaway `0` payload)
-reads them off safely before `overhead` is known and the real payload size is solved for. Unlike
-Go's `int`-based arithmetic, which would silently go negative for a too-small target, `Nat`
-forces an explicit check: this throws rather than truncating. -/
+/-- Geometry for a NIKE whose total packet length is `targetPacketLength`. Fails if it is smaller
+than the fixed overhead. -/
 def ofNIKETargetSize (nikeSchemeName : String) (targetPacketLength : Nat) (withSURB : Bool)
     (nrHops : Nat) : Except String Geometry :=
   match CryptWalker.NIKE.byName nikeSchemeName with
   | none => throw s!"geometry has invalid NIKE Scheme {nikeSchemeName}"
   | some scheme =>
-    -- `probe`'s own `packetLength`, at the throwaway payload `0`, is exactly the fixed overhead
-    -- (header + tag + whatever SURB reservation `withSURB` adds) — no need to re-derive that sum.
+    -- `probe`'s packet length at payload `0` is the fixed overhead.
     let probe := buildNIKE nikeSchemeName scheme.publicKeySize 0 withSURB nrHops
     if targetPacketLength < probe.packetLength then
       throw s!"geometry: target packet size {targetPacketLength} too small for \
@@ -140,7 +118,7 @@ def ofNIKETargetSize (nikeSchemeName : String) (targetPacketLength : Nat) (withS
       pure (buildNIKE nikeSchemeName scheme.publicKeySize
         (targetPacketLength - probe.packetLength) withSURB nrHops)
 
-/-- As `ofNIKETargetSize`, for the KEM side — see there. -/
+/-- As `ofNIKETargetSize`, for a KEM. -/
 def ofKEMTargetSize (kemSchemeName : String) (targetPacketLength : Nat) (withSURB : Bool)
     (nrHops : Nat) : Except String Geometry :=
   match CryptWalker.KEM.byName kemSchemeName with
@@ -157,10 +135,7 @@ def ofKEMTargetSize (kemSchemeName : String) (targetPacketLength : Nat) (withSUR
 open CryptWalker.NIKE.NIKE (NIKE)
 open CryptWalker.KEM.KEM (KEM)
 
-/-- What it means for `geom` to have actually been built for `nike` via `buildNIKE`: `buildNIKE`'s
-field equations, spelled out directly. Every `ofNIKE` result satisfies this for the `nike` it
-resolved (`ofNIKE_validForNIKE`). Needed because `createHeader`/`newNIKEPacket`/`newNIKESURB`
-accept any `(nike, geom)` pair — nothing in their types pins the two together. -/
+/-- `geom` has the field values `buildNIKE` gives for `nike`. -/
 @[reducible] def Geometry.ValidForNIKE (geom : Geometry) (nike : NIKE) : Prop :=
   geom.nextNodeHopLength = CryptWalker.Sphinx.Constants.nextNodeHopLength ∧
   geom.perHopRoutingInfoLength = geom.nextNodeHopLength + surbReplyLength ∧
@@ -169,9 +144,7 @@ accept any `(nike, geom)` pair — nothing in their types pins the two together.
   geom.packetLength = geom.headerLength + geom.payloadTagLength + geom.forwardPayloadLength ∧
   geom.surbLength = geom.headerLength + nodeIDLength + CryptWalker.Sphinx.Constants.sprpKeyMaterialLength
 
-/-- As `Geometry.ValidForNIKE`, for the KEM side (`buildKEM`): the ciphertext slot's width is
-`kem.ciphertextSize`, folded into `perHopRoutingInfoLength` too, since `createKEMHeader` embeds a
-full ciphertext at every hop, not just the header's leading element. -/
+/-- `geom` has the field values `buildKEM` gives for `kem`. -/
 @[reducible] def Geometry.ValidForKEM (geom : Geometry) (kem : KEM) : Prop :=
   geom.nextNodeHopLength = CryptWalker.Sphinx.Constants.nextNodeHopLength ∧
   geom.perHopRoutingInfoLength = geom.nextNodeHopLength + surbReplyLength + kem.ciphertextSize ∧
@@ -180,29 +153,24 @@ full ciphertext at every hop, not just the header's leading element. -/
   geom.packetLength = geom.headerLength + geom.payloadTagLength + geom.forwardPayloadLength ∧
   geom.surbLength = geom.headerLength + nodeIDLength + CryptWalker.Sphinx.Constants.sprpKeyMaterialLength
 
-/-- As `ofNIKE`, for a caller that already holds a concrete `nike` rather than a name to look up
-against `byName` — e.g. a self-test exercising a specific registered scheme's implementation
-directly. `label` only ends up in the result's `scheme` field (for display/debugging); unlike
-`ofNIKE` it plays no role in the computation, so building this needs no `byName` witness, and
-(unlike `ofNIKE`) it never fails. -/
+/-- As `ofNIKE`, for a NIKE given directly rather than by name. `label` is only stored. -/
 def ofNIKEWith (label : String) (nike : NIKE) (userForwardPayloadLength : Nat) (withSURB : Bool)
     (nrHops : Nat) : Geometry :=
   buildNIKE label nike.publicKeySize userForwardPayloadLength withSURB nrHops
 
-/-- `ofNIKEWith`'s result is `ValidForNIKE nike` unconditionally — it's built from `nike.
-publicKeySize` directly, not resolved by name, so there's nothing to prove beyond unfolding. -/
+/-- `ofNIKEWith nike` is valid for `nike`. -/
 theorem ofNIKEWith_validForNIKE (label : String) (nike : NIKE) (userForwardPayloadLength : Nat)
     (withSURB : Bool) (nrHops : Nat) :
     (ofNIKEWith label nike userForwardPayloadLength withSURB nrHops).ValidForNIKE nike :=
   ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
-/-- As `ofNIKE_payloadTagLength`, for `ofNIKEWith`. -/
+/-- `ofNIKEWith` sets `payloadTagLength`. -/
 theorem ofNIKEWith_payloadTagLength (label : String) (nike : NIKE) (userForwardPayloadLength : Nat)
     (withSURB : Bool) (nrHops : Nat) :
     (ofNIKEWith label nike userForwardPayloadLength withSURB nrHops).payloadTagLength =
       CryptWalker.Sphinx.Constants.payloadTagLength := rfl
 
-/-- As `ofNIKEWith`, for the KEM side. -/
+/-- As `ofNIKEWith`, for a KEM. -/
 def ofKEMWith (label : String) (kem : KEM) (userForwardPayloadLength : Nat) (withSURB : Bool)
     (nrHops : Nat) : Geometry :=
   buildKEM label kem.ciphertextSize userForwardPayloadLength withSURB nrHops
@@ -239,10 +207,7 @@ theorem ofKEM_validForKEM (kemSchemeName : String) (userForwardPayloadLength : N
   subst h
   exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
-/-- `payloadTagLength` (`Constants.payloadTagLength`) is a pure protocol constant — `buildKEM`
-sets it the same way regardless of which `kem` resolved, so unlike `ValidForKEM` this needs no
-`byName` witness. Lets a caller holding only `ofKEM`'s success proof discharge
-`wrapKEM_unwrapKEM_complete_valid`'s `h16` hypothesis. -/
+/-- `ofKEM` sets `payloadTagLength`. -/
 theorem ofKEM_payloadTagLength (kemSchemeName : String) (userForwardPayloadLength : Nat)
     (withSURB : Bool) (nrHops : Nat) (geom : Geometry)
     (h : ofKEM kemSchemeName userForwardPayloadLength withSURB nrHops = .ok geom) :
@@ -252,7 +217,7 @@ theorem ofKEM_payloadTagLength (kemSchemeName : String) (userForwardPayloadLengt
   · injection h
   · injection h with h; subst h; rfl
 
-/-- As `ofKEM_payloadTagLength`, for the NIKE side. -/
+/-- `ofNIKE` sets `payloadTagLength`. -/
 theorem ofNIKE_payloadTagLength (nikeSchemeName : String) (userForwardPayloadLength : Nat)
     (withSURB : Bool) (nrHops : Nat) (geom : Geometry)
     (h : ofNIKE nikeSchemeName userForwardPayloadLength withSURB nrHops = .ok geom) :
@@ -262,10 +227,7 @@ theorem ofNIKE_payloadTagLength (nikeSchemeName : String) (userForwardPayloadLen
   · injection h
   · injection h with h; subst h; rfl
 
-/-- `ofNIKETargetSize` actually hits the target it was asked for — no Go equivalent exists to
-mirror (Go's forward-only factories are never checked, internally, against their own arithmetic
-at all; see `geometry.lean`'s module doc history). Pure `Nat` arithmetic once the `Except`/`if`
-branches are resolved. -/
+/-- `ofNIKETargetSize` produces a geometry with exactly the target packet length. -/
 theorem ofNIKETargetSize_packetLength (nikeSchemeName : String) (targetPacketLength : Nat)
     (withSURB : Bool) (nrHops : Nat) (geom : Geometry)
     (h : ofNIKETargetSize nikeSchemeName targetPacketLength withSURB nrHops = .ok geom) :
@@ -283,7 +245,7 @@ theorem ofNIKETargetSize_packetLength (nikeSchemeName : String) (targetPacketLen
       dsimp only at *
       cases withSURB <;> simp_all; omega
 
-/-- As `ofNIKETargetSize_packetLength`, for the KEM side. -/
+/-- As `ofNIKETargetSize_packetLength`, for a KEM. -/
 theorem ofKEMTargetSize_packetLength (kemSchemeName : String) (targetPacketLength : Nat)
     (withSURB : Bool) (nrHops : Nat) (geom : Geometry)
     (h : ofKEMTargetSize kemSchemeName targetPacketLength withSURB nrHops = .ok geom) :

@@ -79,14 +79,8 @@ private def pad (msg : ByteArray) : ByteArray :=
 private def zeroPadTo128 (b : ByteArray) : ByteArray :=
   b ++ ⟨Array.replicate (128 - b.size) 0⟩
 
-/-- RFC 7693's keyed mode: the key, zero-padded to one full block, is prepended to the message and
-the parameter block's `key_length` field is set accordingly — everything else (padding, block
-counting, finalization) is unchanged, applied to `key ++ message` as a whole.
-
-Generalized over the full 8-word (64-byte) parameter block -- folded into the initial state the
-way BLAKE2b always does, `iv[i] ^^^ param[i]` -- rather than just the digest-length/key-length/
-fanout/depth word plain BLAKE2b needs, so `xof` below can reuse the same compress/pad/block loop
-for BLAKE2Xb's root and leaf hashes, which additionally customize words 1 and 2. -/
+/-- RFC 7693 keyed mode: the key, zero-padded to one block, is prepended to the message. Takes the
+full 8-word parameter block, XORed into the IV, so BLAKE2Xb can set words 1 and 2. -/
 private def digestArrayParam (param : Array UInt64) (key : ByteArray) (msg : ByteArray) :
     Array UInt64 :=
   let d := if key.size > 0 then zeroPadTo128 key ++ msg else msg
@@ -119,18 +113,10 @@ def hash256Keyed (key msg : ByteArray) : Vector UInt8 32 :=
 
 private def toBytes {n : Nat} (v : Vector UInt8 n) : ByteArray := ⟨v.toArray⟩
 
-/-- BLAKE2b's XOF, BLAKE2Xb (https://www.blake2.net/blake2x.pdf). `size` (the configured stream
-length, baked into the root hash's parameter block) and `readLen` (how many bytes are actually
-returned) are independent: the deployed adapter PRF configures the stream at one width and reads
-a different number of bytes from it, so they stay separate parameters here. `size = 0` models an
-unbounded/undeclared stream length; `size`s of `2^32` or more are not modelled, since none arises
-here.
-
-The construction: hash the input once into a 64-byte root `H0` (an ordinary, optionally keyed
-BLAKE2b-512 hash, except its parameter block also binds in `size`); then derive each 64-byte (or,
-on the final block of the *configured* stream, shorter) output block as its own unkeyed BLAKE2b
-leaf hash of that fixed root, parameterized by the block's index and `size` again. Folding `size`
-into both hashes means the same bytes read back at two different `size`s must not collide. -/
+/-- BLAKE2Xb (https://www.blake2.net/blake2x.pdf). `size` is the configured stream length, bound
+into every hash; `readLen` is how many bytes are returned. `size = 0` means unbounded. The input
+is hashed once into a root, and each 64-byte output block is an unkeyed leaf hash of the root,
+parameterized by its index and `size`. -/
 def xof (key : ByteArray) (size : Nat) (readLen : Nat) (msg : ByteArray) : ByteArray :=
   let boundLen := if size = 0 then 0xFFFFFFFF else size
   let h0 := digestArrayParam #[
@@ -139,11 +125,8 @@ def xof (key : ByteArray) (size : Nat) (readLen : Nat) (msg : ByteArray) : ByteA
       UInt64.ofNat boundLen <<< 32,
       0, 0, 0, 0, 0, 0] key msg
   let root : ByteArray := toBytes (extractDigest h0 64)
-  -- A block's digest-length parameter is governed by its position in the *configured* (`size`)
-  -- stream, not by how much of it `readLen` actually asks for: reading fewer bytes than a full
-  -- leaf block still hashes that leaf at digest-length 64 and just returns a prefix of it --
-  -- shrinking it whenever the caller's request is short would silently change the output whenever
-  -- the same stream is read in different-sized chunks.
+  -- Leaf digest length depends on the configured `size`, not on `readLen`, so reading a prefix
+  -- of the stream gives a prefix of the output.
   let numBlocks := (readLen + 63) / 64
   let lastSizeBlock := (boundLen + 63) / 64 - 1
   let leaf (i outLen : Nat) : ByteArray :=

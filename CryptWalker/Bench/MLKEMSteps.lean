@@ -8,9 +8,8 @@ import LeanBench
 
 /-! # ML-KEM-768 encapsulation, one step at a time
 
-Each bench is one call `FIPS203.encaps` makes, through `KPKE.encrypt`, with the same `ring`,
-`encoding` and `primitives`. Each step's input is computed once from a real key pair and read
-from a ref, so the compiler cannot hoist the work out of the timed action. -/
+Each bench is one step of `FIPS203.encaps`. Inputs are computed once from a real key pair and read
+from a ref so the compiler cannot hoist the work out of the timed action. -/
 
 namespace CryptWalker.Bench.MLKEMSteps
 

@@ -17,18 +17,9 @@ open CryptWalker.Sign.Ed25519Math
 
 /-! # Blinded Ed25519
 
-Concrete scalar-based Ed25519 operations matching hpqc's `blinded25519.go`: private keys are
-canonical scalars in `ZMod ell`, public keys are compressed Edwards points, and signing derives
-its nonce from `SHA-512(sk)[32:] || message || SHA-512(sk)[33:]`.
-
-The operations are executable, and every law is a theorem: the Edwards group law is Curve25519's,
-transported (`Ed25519_group`), so `blindPub (publicKey s) f = publicKey (f * s)` is `mul_smul` plus
-`ℓ • G = 0` (`Ed25519_order`). The only assumption is `ell_prime`, that `ℓ = 2^252 +
-27742317777372353535851937790883648493` is prime (RFC 7748 §4.1 / RFC 8032 §5.1).
-
-The laws that need more than `blind_hom` hold for *valid* keys, those of the form `publicKey s`, and
-invertible (nonzero) factors; they are false on an arbitrary decodable point, which can carry a
-small-order component (see `Blindable`).
+Scalar-based Ed25519: private keys are scalars in `ZMod ell`, public keys are compressed Edwards
+points, and the signing nonce is derived from `SHA-512(sk)[32:] || message || SHA-512(sk)[33:]`.
+The only assumption is `ell_prime`.
 -/
 
 abbrev Scalar : Type := ZMod ell
@@ -99,7 +90,7 @@ theorem blind_hom : ∀ sk factor,
   intro sk factor
   rw [blindPub_publicKey]; rfl
 
-/-- **RFC 8032 correctness of the scalar-based signer.** -/
+/-- RFC 8032 correctness of the scalar-based signer. -/
 theorem verify_signNative : ∀ sk m, verifyNative (publicKey sk) m (signNative sk m) = true := by
   intro sk m
   have hell : 0 < ell := by unfold ell; norm_num
@@ -148,7 +139,7 @@ theorem publicKey_injective : Function.Injective publicKey := by
   rw [CryptWalker.Sign.Ed25519Scalar.sm_base, CryptWalker.Sign.Ed25519Scalar.sm_base] at hpt
   exact ZMod.val_injective ell (smul_G_inj (ZMod.val_lt a) (ZMod.val_lt b) (psi_injective hpt))
 
-/-- Blinding a nonzero root key by different factors gives different box IDs. -/
+/-- Blinding a nonzero root key by different factors gives different public keys. -/
 theorem blindPub_injective (s : Scalar) (hs : s ≠ 0) :
     Function.Injective (blindPub (publicKey s)) := by
   intro f g h

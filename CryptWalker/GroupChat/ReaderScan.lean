@@ -8,21 +8,9 @@ import Mathlib.Data.List.Basic
 
 /-! # The walk to an acknowledged box
 
-See "Rewrite and scan" in the group chat spec, and katzenqt's `groupchat/walk.py`, which this
-follows. The reader itself, and the proof that what it acknowledges it has read, are in
-`Member/Reader.lean` and `Member/ReaderProofs.lean`.
-
-A box's index `I` is moved forward only by BACAP's `next`, and each step adds one to its `Idx64`
-(`counter`). An acknowledgement names a box by its `Idx64` alone, so a reader reaches it by
-advancing its own index to that `Idx64`, with no search.
-
-* `walk_target`, `walk_skipped`, `walk_furthest`, `walk_none`: a walk that finds a target says
-  how many steps ahead it is, which proves the target comes after where it started; it keeps the
-  last indexes before it, in order; no target lies further within the walk's limit; and a walk
-  that finds none has none within its limit.
-* `walk_eq_walkBoxes`: for boxes of the reader's own stream, naming them by `Idx64` finds the
-  same box, the same indexes before it and the same distance as naming them by their whole
-  index and stepping forward until meeting one. -/
+Indexes advance only by `next`, and each step adds one to the `Idx64` (`counter`), so a reader
+reaches an acknowledged box by advancing to its `Idx64`. See "Rewrite and scan" in the group chat
+spec. -/
 
 namespace CryptWalker.GroupChat.ReaderScan
 
@@ -48,8 +36,8 @@ def walk (targets : List ℕ) (start : I) (limit keep : ℕ) : Option (I × List
     let steps := t - counter start
     (next^[steps] start, keptOf next start steps keep, steps)
 
-/-- The walk of the opaque indexes katzenqt#108 acknowledged with: step forward from `start`,
-comparing whole indexes, to the furthest of `boxes` met within `limit` steps. -/
+/-- Step forward from `start`, comparing whole indexes, to the furthest of `boxes` met within
+`limit` steps. -/
 def walkBoxes [DecidableEq I] (boxes : List I) (start : I) (limit keep : ℕ) :
     Option (I × List I × ℕ) :=
   (((List.range limit).filter fun j => next^[j] start ∈ boxes).max?).map fun steps =>
@@ -57,7 +45,7 @@ def walkBoxes [DecidableEq I] (boxes : List I) (start : I) (limit keep : ℕ) :
 
 variable {next counter}
 
-/-- What BACAP guarantees of `Idx64`: each step forward adds one. -/
+/-- Each step forward adds one to `counter`. -/
 def Counts (next : I → I) (counter : I → ℕ) : Prop := ∀ i, counter (next i) = counter i + 1
 
 theorem counter_iterate (hc : Counts next counter) (i : I) :
@@ -79,8 +67,8 @@ theorem walk_some {targets : List ℕ} {start : I} {limit keep : ℕ} {b : I} {s
   obtain ⟨rfl, rfl, rfl⟩ := he
   exact ⟨t, ht, rfl, rfl, rfl⟩
 
-/-- **A walk proves order**: the box it finds carries one of the targets, and is the start
-stepped forward exactly as many times as the walk reports, within its limit. -/
+/-- The box a walk finds carries one of the targets and is the start stepped forward by the
+reported step count, within the limit. -/
 theorem walk_target (hc : Counts next counter) {targets : List ℕ} {start : I} {limit keep : ℕ}
     {b : I} {skipped : List I} {steps : ℕ}
     (h : walk next counter targets start limit keep = some (b, skipped, steps)) :
@@ -94,15 +82,14 @@ theorem walk_target (hc : Counts next counter) {targets : List ℕ} {start : I} 
   rw [counter_iterate hc]
   convert hmem using 1; omega
 
-/-- The indexes a walk keeps are the last `keep` before the box it finds, in the order a reader
-stepping forward would pass them. -/
+/-- The indexes a walk keeps are the last `keep` before the box it finds, in stream order. -/
 theorem walk_skipped {targets : List ℕ} {start : I} {limit keep : ℕ} {b : I} {skipped : List I}
     {steps : ℕ} (h : walk next counter targets start limit keep = some (b, skipped, steps)) :
     skipped = (stepsFrom next start steps).drop (if keep = 0 then 0 else steps - keep) := by
   obtain ⟨-, -, -, -, rfl⟩ := walk_some h
   rfl
 
-/-- **A walk goes to the furthest target**: none lies between it and the walk's limit. -/
+/-- No target lies between the box a walk finds and its limit. -/
 theorem walk_furthest (hc : Counts next counter) {targets : List ℕ} {start : I} {limit keep : ℕ}
     {b : I} {skipped : List I} {steps : ℕ}
     (h : walk next counter targets start limit keep = some (b, skipped, steps)) :
@@ -115,7 +102,7 @@ theorem walk_furthest (hc : Counts next counter) {targets : List ℕ} {start : I
   have := le_of_max ht (b := counter start + j) (by simp [hin]; omega)
   omega
 
-/-- **A walk that finds nothing has nothing to find** within its limit. -/
+/-- A walk that finds nothing has no target within its limit. -/
 theorem walk_none (hc : Counts next counter) {targets : List ℕ} {start : I} {limit keep : ℕ}
     (h : walk next counter targets start limit keep = none) :
     ∀ j, j < limit → counter (next^[j] start) ∉ targets := by
@@ -170,9 +157,8 @@ theorem max?_map_sub {l : List ℕ} {c : ℕ} (h : ∀ x ∈ l, c ≤ x) :
     have := h y hy
     omega
 
-/-- **The compact acknowledgement names the same box.** When every acknowledged box is on the
-reader's stream, which `start` is on, the walk by `Idx64` finds the same box, keeps the same
-indexes, and reports the same distance as the walk comparing whole indexes. -/
+/-- When `start` and every target box are on one stream, `walk` by `Idx64` returns the same
+result as `walkBoxes`. -/
 theorem walk_eq_walkBoxes [DecidableEq I] (hc : Counts next counter) {s0 start : I}
     (hstart : OnStream next s0 start) {boxes : List I} (hon : ∀ b ∈ boxes, OnStream next s0 b)
     (limit keep : ℕ) :

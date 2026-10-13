@@ -11,18 +11,12 @@ import CryptWalker.NIKE.X25519
 
 /-! # Ed25519's group law, by transport from Curve25519
 
-`Ed25519Math.add` is the raw twisted-Edwards formula; proving it associative directly would mean
-formalizing Edwards-curve group theory from scratch. Ed25519 is birationally equivalent to
-Curve25519, and `NIKE.X25519.Point` already carries a full `AddCommGroup` from Mathlib. This file
-transports across the map
+Transports Mathlib's group on `NIKE.X25519.Point` across the birational map
 
     ψ : Curve25519 → Edwards,   (u, v) ↦ (x, y) = (-c·u/v, (u-1)/(u+1)),   c² = -486664,
 
-and proves `ψ (P + Q) = Ed25519Math.add (ψ P) (ψ Q)` for **all** `P Q`. Every exceptional point is
-handled: the identity, the order-2 point `T = (0,0)` (which `ψ` sends to `(0,-1)`), and the
-sums that land on `T`. No axiom is used beyond `X25519.p_prime`: that `d` is a non-square (which
-makes the Edwards law complete and rules out any other exceptional point) is Euler's criterion
-evaluated by the kernel, see `Ed25519_facts`. -/
+and proves `ψ (P + Q) = Ed25519Math.add (ψ P) (ψ Q)` for all `P Q`, including the identity and
+the order-2 point `T = (0,0)`, which `ψ` sends to `(0,-1)`. -/
 
 namespace CryptWalker.Sign.Ed25519Group
 
@@ -55,8 +49,7 @@ lemma u_eq_zero_of_v_eq_zero {u v : F} (hv : v ^ 2 = u ^ 3 + 486662 * u ^ 2 + u)
 lemma v_ne_zero_of_u_ne_zero {u v : F} (hv : v ^ 2 = u ^ 3 + 486662 * u ^ 2 + u) (hu : u ≠ 0) :
     v ≠ 0 := fun h0 => hu (u_eq_zero_of_v_eq_zero hv h0)
 
-/-- The transport map Curve25519 → Edwards. Total: the point at infinity goes to the Edwards
-identity, and the order-2 point `(0,0)` (where the formula divides by `v = 0`) goes to `(0,-1)`. -/
+/-- The map Curve25519 → Edwards. Sends infinity to the identity and `(0,0)` to `(0,-1)`. -/
 def psi : W → Point
   | .zero => ⟨0, 1⟩
   | .some u v _ => ⟨-c * u / v, (u - 1) / (u + 1)⟩
@@ -261,7 +254,7 @@ lemma psi_add_dbl {u v : F} (h : curve.Nonsingular u v) (hv' : v ≠ 0) (hV : V3
   simp only [psi_some, add_def, Point.mk.injEq, U3d, V3d]
   exact ⟨hx.symm, hy.symm⟩
 
-/-- **The transport is a homomorphism.** `ψ (P + Q) = ψ P + ψ Q` for every pair of points. -/
+/-- `ψ` is a homomorphism. -/
 theorem psi_add (P Q : W) : psi (P + Q) = add (psi P) (psi Q) := by
   by_cases h0 : P + Q = 0
   · exact psi_add_of_sum_zero h0

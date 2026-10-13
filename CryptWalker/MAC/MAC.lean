@@ -5,15 +5,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 namespace CryptWalker.MAC
 
-/-! # Message authentication codes, generically
+/-! # Message authentication codes
 
-The same shape as `NIKE`, `KEM`, `Hash`, `HKDF`, `StreamCipher`, `WideBlockCipher`: a plain
-structure, so callers depend only on its fields, never a specific algorithm's name. `key` is a
-plain `ByteArray` (`keySize` informational only); the output stays a `Vector UInt8 tagSize`.
-
-No law fields: unforgeability is a computational, adversary-quantified claim no `Prop` field
-could state; determinism needs no stating either, since `mac` being a plain function already
-gives it for free. -/
+`keySize` is informational; `mac` accepts any key length. Unforgeability is computational, so
+there are no law fields. -/
 
 structure MAC where
   keySize : Nat
@@ -21,8 +16,7 @@ structure MAC where
 
   mac : ByteArray → ByteArray → Vector UInt8 tagSize
 
-/-- The empty MAC: a placeholder so `MAC` is demonstrably inhabited. Obviously not a MAC (constant
-output, ignores both arguments). -/
+/-- The empty MAC, to show `MAC` is inhabited. Not a MAC. -/
 instance : Inhabited MAC := ⟨{
   keySize := 0
   tagSize := 0

@@ -203,7 +203,7 @@ def hash (msg : ByteArray) : { out : ByteArray // out.size = 32 } :=
   ⟨Digest.toBytes $ List.foldr compress init_hash chunks,
    by simp [Digest.toBytes, UInt32.to_be, ByteArray.size]⟩
 
-/-- SHA-256 as a `Hash`, accumulating the message and hashing at `finalize` like `Sha512.Scheme`. -/
+/-- SHA-256 as a `Hash`: accumulate the message, hash at finalize. -/
 def Scheme : CryptWalker.Hash.Hash.Hash where
   State      := ByteArray
   name       := "SHA-256"

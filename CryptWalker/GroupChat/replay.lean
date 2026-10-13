@@ -9,19 +9,10 @@ import CryptWalker.BACAP.API
 import CryptWalker.GroupChat.Member.Json
 import CryptWalker.Util.Bytes
 
-/-! # Replaying katzenqt's group chat traces through the Lean member
+/-! # Replay katzenqt group chat traces
 
-Each trace, written by katzenqt's `groupchat/trace.py` from a simulator run or from the app's own
-adapter (`acks.py`), is one JSON line per call made on a member. Each call says the retention
-policy in force, which a client may change between calls. The replay makes the same call on the Lean `Group` of that member and
-requires the same result and the same state afterwards. The Lean member is driven only by what
-the trace says the Python member was given, so a difference means the two compute different
-things from the same inputs.
-
-The replay also checks what the trace says BACAP did, with CryptWalker's own BACAP: every index
-given as the one after a box read, every run of indexes derived for a member's own stream, and
-every walk a member asked for, which advances to the box an acknowledgement names by its
-`Idx64`.
+Each trace line is one call on a member. The replay makes the same call on the Lean `Group` and
+requires the same result and state, and checks the trace's BACAP steps against our BACAP.
 
 Usage: `lake exe CryptWalker.GroupChat.replay [trace.jsonl | dir]...`, by default every trace in
 `testdata/groupchat_traces/`. -/
@@ -37,12 +28,11 @@ def step (b : ByteArray) : Option ByteArray := do
   let n ← (unmarshalMessageBoxIndex (CryptWalker.Util.Bytes.toVecN _ b)).nextIndex
   pure (CryptWalker.Util.Bytes.ofVector (marshalMessageBoxIndex n))
 
-/-- How far ahead a walk reaches, as katzenqt's simulator and app do. -/
+/-- How far ahead a walk reaches. -/
 def walkLimit : Nat := 256
 
-/-- katzenqt's `groupchat/walk.py`: the box at the furthest of `targets` fewer than `walkLimit`
-boxes ahead of `start`, advanced to by its `Idx64`; the last `keep` indexes before it (all of
-them for `keep = 0`); and how many steps ahead it is. -/
+/-- The box at the furthest of `targets` fewer than `walkLimit` boxes ahead of `start`, the last
+`keep` indexes before it (all for `keep = 0`), and the step count. -/
 def walk (start : ByteArray) (targets : List Nat) (keep : Nat) :
     Option (Option ByteArray × List ByteArray × Nat) := do
   if start.size ≠ MessageBoxIndexSize then none
@@ -72,8 +62,8 @@ structure Asked where
   derives : List (ByteArray × Nat) := []
   walks : List (ByteArray × ByteArray × List Nat × Nat) := []
 
-/-- Check what the trace says BACAP did for this call against BACAP. Returns the number of checks
-made, and what is still asked. -/
+/-- Check the trace's BACAP steps for this call. Returns the number of checks and what is still
+asked. -/
 def checkBACAP (asked : Asked) (line : Json) (effects : List Effect) :
     Except String (Nat × Asked) := do
   let args ← field line "args"

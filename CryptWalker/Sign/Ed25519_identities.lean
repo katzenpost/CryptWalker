@@ -5,13 +5,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import CryptWalker.Sign.Ed25519_facts
 
-/-! # The field identities behind the Edwards/Montgomery transport
+/-! # Field identities behind the Edwards/Montgomery transport
 
-Each lemma is a polynomial identity over `ZMod p`, proved by `linear_combination` against the
-curve relations `v² = u³ + 486662u² + u`, `c² = -486664`. The cofactors were computed by
-reducing the cleared-denominator goal modulo those (monic) relations, so they are exact.
-
-`u, v` are Curve25519 coordinates; the Edwards point they map to is
+Polynomial identities over `ZMod p`, proved by `linear_combination` against
+`v² = u³ + 486662u² + u` and `c² = -486664`. The Edwards image of `(u, v)` is
 `(x, y) = (-c·u/v, (u-1)/(u+1))`. -/
 
 namespace CryptWalker.Sign.Ed25519Identities

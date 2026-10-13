@@ -8,38 +8,11 @@ import LatticeCrypto.MLKEM.Internal
 
 /-! # ML-KEM: fixed-width wire types
 
-VCVio's `EncapsulationKey`/`DecapsulationKey`/`Ciphertext` (all aliases into `KPKE`'s structures)
-carry their serialized polynomial data as `encoding.EncodedTHat`/`EncodedU`/`EncodedV` — literally
-`ByteArray` for the concrete encoding (`Primitives.hEncEq`/`hUEq`/`hVEq`), but not
-*syntactically* so: typeclass search (e.g. resolving `++`) won't unfold `encoding`'s definition to
-discover this on its own, so every place below that needs to treat one of these fields as a plain
-`ByteArray` casts through the relevant equality explicitly via `cast` (`tBytes`/`uBytes`/`vBytes`
-below and their inverses) — exactly how `Extern.MLKEM.Instance.concretePrimitives` itself handles
-the same three types.
-
-`CryptWalker.KEM.KEM` needs `Vector UInt8 publicKeySize` etc., so this file additionally wraps
-each VCVio type in a subtype carrying the one fact a bare `ByteArray` field doesn't: that its size
-is exactly what `byteEncode12Vec`/`byteEncodeDUVec`/`byteEncodeDV` (the only things that ever
-produce one) always give it — needed because `decode ∘ encode = id` only holds for the
-well-formed values `keygen`/`encaps` (next file) actually produce, not for an arbitrary term
-of the bare, unconstrained type.
-
-Each `decode*` function is split into a plain value-computing `decode*Val` (no subtype, no
-attached proof) plus a separate `decode*Val_wf` well-formedness theorem, combined only in
-`decode*`'s own one-line body. This split matters, not just for tidiness: proving
-`decode ∘ encode = id` by unfolding both sides *while* the goal is still wrapped in
-`Option`/`Subtype` (i.e. `rw`ing directly on a `some ⟨value, proof⟩ = some ⟨value', proof'⟩` goal)
-triggers a `maxRecDepth` blowup here — the dependent proof component makes Lean's rewriter/congruence
-machinery expensive on these terms. Splitting means `decode*Val (encode* x) = x.val` is provable by
-plain `ByteArray`-level rewriting (no dependent proof in sight), and the final
-`congrArg some (Subtype.ext ·)` step only ever needs to check definitional equality, not rewrite
-under a dependent binder.
-
-Every multi-piece encoding here is a *right-nested* concatenation (`a ++ (b ++ (c ++ ...))`) and
-every decode peels pieces off the front one at a time via `extract_append_left`/`extract_append_right`,
-each proved as its own named fact (`peelN`/`restN`) with an *explicit* left-hand side — avoiding
-`rw`'s "rewrite every occurrence" behavior from conflating two different pieces that happen to
-share the same numeric width (e.g. two `384 * k`-sized polynomials in the same secret key). -/
+VCVio's key and ciphertext types wrapped in subtypes that fix their encoded sizes, so that
+`decode ∘ encode = id` holds. The `Encoded*` fields are `ByteArray` only up to unfolding, so
+`tBytes`/`uBytes`/`vBytes` cast them explicitly. Each `decode*` is split into a plain `decode*Val`
+and a well-formedness theorem; proving the round trip under the subtype directly exceeds
+`maxRecDepth`. -/
 
 namespace CryptWalker.KEM.FIPS203
 
@@ -82,19 +55,16 @@ def bytesV (x : ByteArray) : (encoding ps).EncodedV := cast (hVEq ps).symm x
 theorem vBytes_bytesV (x : ByteArray) : (vBytes ps) ((bytesV ps) x) = x := rfl
 theorem bytesV_vBytes (x : (encoding ps).EncodedV) : (bytesV ps) ((vBytes ps) x) = x := rfl
 
-/-- A well-formed ML-KEM encapsulation key: `tHatEncoded` is exactly `384 * k = 1152` bytes,
-matching what `byteEncode12Vec` (the only thing that ever produces one) guarantees. -/
+/-- An encapsulation key whose `tHatEncoded` is `384 * k` bytes. -/
 abbrev PublicKey : Type :=
   {ek : EncapsulationKey (params ps) (encoding ps) // ((tBytes ps) ek.tHatEncoded).size = 384 * (params ps).k}
 
-/-- A well-formed decapsulation key: both 12-bit-packed polynomial vectors it carries
-(`dkPKE`'s and its bundled `ekPKE`'s) are exactly `384 * k` bytes. -/
+/-- A decapsulation key whose two encoded polynomial vectors are `384 * k` bytes each. -/
 abbrev PrivateKey : Type := {dk : DecapsulationKey (params ps) (encoding ps) //
   ((tBytes ps) dk.dkPKE.sHatEncoded).size = 384 * (params ps).k ∧
     ((tBytes ps) dk.ekPKE.tHatEncoded).size = 384 * (params ps).k}
 
-/-- A well-formed ciphertext: `uEncoded`/`vEncoded` are exactly `32 * du * k`/`32 * dv` bytes,
-matching `byteEncodeDUVec`/`byteEncodeDV`. -/
+/-- A ciphertext whose `uEncoded`/`vEncoded` are `32 * du * k`/`32 * dv` bytes. -/
 abbrev CT : Type := {c : Ciphertext (params ps) (encoding ps) //
   ((uBytes ps) c.uEncoded).size = 32 * (params ps).du * (params ps).k ∧ ((vBytes ps) c.vEncoded).size = 32 * (params ps).dv}
 
@@ -188,8 +158,7 @@ theorem decode_encode_priv (sk : (PrivateKey ps)) :
   simp only at hdkPKE hekPKE
   unfold decodePrivateKeyVal encodePrivateKey
   dsimp only
-  -- Fully opaque abbreviations for the five pieces — never letting `rw`/defeq-checking peek back
-  -- through `tBytes`/`ofVector` into `sHatEncoded`/`rho`/etc. is what keeps the peeling below cheap.
+  -- Opaque names for the five pieces keep the peeling below cheap.
   generalize ha1def : (tBytes ps) sHatEncoded = a1 at *
   generalize ha2def : (tBytes ps) tHatEncoded = a2 at *
   generalize ha3def : ofVector rho = a3 at *

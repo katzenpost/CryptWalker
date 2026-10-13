@@ -12,16 +12,10 @@ import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
 
 /-!
-# KEM-Sphinx full-packet cross-implementation vectors
+# KEM-Sphinx full-packet vectors
 
-As `nike_vectors_test`: `testdata/sphinx_kem_vectors.json` is
-`katzenpost/core/sphinx/testdata/kemsphinx_vectors.json` (vendored as-is, `.sha256` records
-which copy) — 10 real KEM-Sphinx packets built by *Go*'s `NewKEMSphinx` with `kemX25519`'s
-`sha256-v1` PRF (`withSURB ∈ {false, true} × nrHops 1..5`, geometry
-`KEMGeometryFromUserForwardPayloadLength(k, 103, withSURB, 5)`). Unlike the NIKE vectors, this
-file didn't already exist in katzenpost — `core/sphinx/testvectors/cmd/generate_kem` built it,
-structurally parallel to `sphinx_vectors_test.go`'s NIKE generator. This decodes `Packets[0]`
-and replays `unwrapKEM` hop by hop, the same way. -/
+Replays `unwrapKEM` hop by hop over externally built KEM-Sphinx packets
+(`withSURB ∈ {false, true} × nrHops 1..5`). -/
 
 open Lean
 open CryptWalker.Util.newhex
@@ -88,9 +82,8 @@ def parseVec (j : Json) : Except String TestVec := do
   let surbKeys ← field j "SurbKeys"
   pure { nodes, path, packets, payload, surb, surbKeys }
 
-/-- Replay `unwrapKEM` at every node, checking against the recorded `Packets`/`Payload`. Also,
-for the `withSurb` half: `Packets[0]` there is Go's `NewPacketFromSURB(Surb, Payload)` output
-(as `nike_vectors_test`), so `newPacketFromSURB` gets checked byte-for-byte against Go here too. -/
+/-- Replay `unwrapKEM` at every node against the recorded packets and payload; for `withSurb`,
+also check `newPacketFromSURB`. -/
 def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   let withSurb := decide (v.surb.size > 0)
   let geom := if withSurb then geomSurb else geomNoSurb

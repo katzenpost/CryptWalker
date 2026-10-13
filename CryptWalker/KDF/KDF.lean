@@ -5,15 +5,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 namespace CryptWalker.KDF
 
-/-! # Key-derivation functions, generically
+/-! # Key-derivation functions
 
-The same shape as `NIKE`, `KEM`, `Hash`, `StreamCipher`, `MAC`, `WideBlockCipher`: a plain
-structure whose one law is a field.
-
-Lighter than `Hash.HKDF`, which models the full Extract-then-Expand construction: this interface
-skips Extract, taking the raw input keying material directly — just expand it into exactly `len`
-bytes, deterministically. `HKDF.lean`'s `hkdfSha256Expand` is the one instance so far, matching
-what Sphinx's own KDF needs (see `Sphinx.KDF`). -/
+Expand-only: the input keying material is used directly, with no Extract step. -/
 
 structure KDF where
   /-- Expand `(ikm, info)` into exactly `len` bytes of output key material. -/
@@ -21,8 +15,7 @@ structure KDF where
 
   expand_size : ∀ ikm info len, (expand ikm info len).size = len
 
-/-- The empty KDF: a placeholder so `KDF` is demonstrably inhabited. Obviously not a KDF
-(all-zero output, ignores both inputs). -/
+/-- The empty KDF, to show `KDF` is inhabited. Not a KDF. -/
 instance : Inhabited KDF := ⟨{
   expand := fun _ _ len => ⟨Array.replicate len 0⟩
   expand_size := fun _ _ len => by simp [ByteArray.size]

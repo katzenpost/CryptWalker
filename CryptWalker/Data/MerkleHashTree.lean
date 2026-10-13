@@ -57,7 +57,7 @@ structure MerkleHashTrees (α : Type) [Hashable α] where
   (hashtrees : (Std.HashMap Nat (HashTree α)))
   (indices : (Std.HashMap ByteArray Nat))
 
-/-! currentHead returns the current Merkle Tree head -/
+/-! The current Merkle tree head. -/
 def currentHead (α : Type) [Hashable α] (tree : MerkleHashTrees α) : (HashTree α):=
   match tree.hashtrees[tree.size]? with
   | .none => panic! "current head not found"
@@ -81,7 +81,7 @@ def printMerkleHashTrees {α : Type} [Repr α] [Hashable α] (mht : MerkleHashTr
     acc
     IO.println s!"  Digest: {digest}, Index: {ix}") (pure ())
 
-/-! digest gets the current Merkle Tree hash value -/
+/-! The current Merkle tree hash. -/
 def digest (α : Type) [Hashable α] (treeSize : Nat) (tree : MerkleHashTrees α) : ByteArray :=
   match tree.hashtrees[treeSize]? with
   | .none => panic! "failed to find entry in hash tree"
@@ -96,17 +96,16 @@ def index (α : Type) [Hashable α] (tree : MerkleHashTrees α) (hash : ByteArra
   | some n => n
   | none => panic! "failed to find tree index"
 
-/-! info gets the root information of the Merkle Hash tree.
-    A pair of the current size and the current Merkle Tree Hash is returned. -/
+/-! The current size and Merkle tree hash. -/
 def info (α : Type) [Hashable α] (tree : MerkleHashTrees α) : (Nat × ByteArray) :=
   (tree.size, digest α tree.size tree)
 
-/-! empty creates an empty 'MerkleHashTrees'. -/
+/-! An empty tree. -/
 def empty (α : Type) [Hashable α] (settings : Settings α) : MerkleHashTrees α :=
   let hashtrees := (∅ : Std.HashMap Nat (HashTree α)).insert 0 (HashTree.empty settings.hash0)
   MerkleHashTrees.mk settings 0 hashtrees ∅
 
-/-! hashValue returns the hash value for the given HashTree. -/
+/-! The hash value of a `HashTree`. -/
 def hashValue (α : Type) [Hashable α] (tree : HashTree α) : ByteArray :=
   match tree with
   | .empty hash => hash
@@ -128,7 +127,7 @@ def lIndex (α : Type) (tree : HashTree α) : Nat :=
 def isPowerOf2 (n : Nat) : Bool :=
   (n &&& (n - 1)) == 0
 
-/-! add, adds the given input into the tree, returning the new tree.-/
+/-! Adds an input to the tree. -/
 def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : MerkleHashTrees α :=
   let hx := tree.settings.hash1 inp
   if tree.indices.contains hx then
@@ -159,7 +158,7 @@ def add (α : Type) [Hashable α] (inp : α) (tree : MerkleHashTrees α) : Merkl
         let newRootHash := settings.hash2 (hashValue α leftTree) (hashValue α newRight)
         HashTree.node newRootHash leftIdx tree.size leftTree newRight
 
-/-! fromList inserts a list of input items into the tree. -/
+/-! Adds a list of inputs to the tree. -/
 def fromList (α : Type) [Hashable α] (settings : Settings α) (xs : List α) : MerkleHashTrees α :=
   xs.foldl (fun acc x => add α x acc) (empty α settings)
 

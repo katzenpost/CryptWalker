@@ -10,14 +10,8 @@ import CryptWalker.Util.newhex
 /-!
 # SHA-512 known-answer tests
 
-Reads `testdata/sha512.json`, generated from Go's `crypto/sha512` by
-`hpqc/testvectors/cmd/generate` and vendored here (hpqc is a separate repository, so it cannot
-be symlinked). `testdata/sha512.json.sha256` records which copy this is.
-
-Two of the vectors matter more than the rest: `two_blocks_boundary_112` and `three_blocks_300`
-are the only inputs whose padding spills past a single 128-byte block, so they are what
-exercises the chaining between compression-function calls. Everything shorter would pass even
-with the block loop broken.
+Reads `testdata/sha512.json`, from hpqc. `two_blocks_boundary_112` and `three_blocks_300` are the
+vectors whose padding spans more than one block.
 -/
 
 open Lean
@@ -75,8 +69,7 @@ def main : IO UInt32 := do
     if !ok then
       IO.eprintln "SHA-512 known-answer tests FAILED"
       return 1
-    -- The interface laws are proved, not tested; exercise the incremental path anyway so a
-    -- future memory-bounded `update` cannot silently diverge from `hash`.
+    -- Also exercise the incremental path.
     let m := "the quick brown fox jumps over the lazy dog, twice, at some length".toUTF8
     let oneShot := hexOf (Scheme.hash m)
     let chunked := hexOf (Scheme.finalize

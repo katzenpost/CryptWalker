@@ -10,13 +10,10 @@ import CryptWalker.Sphinx.kem_sphinx_theorems
 import CryptWalker.Util.Bytes
 import LeanBench
 
-/-! # Sphinx packet-creation / unwrap benchmarks
+/-! # Sphinx packet creation and unwrap benchmarks
 
-Modeled on katzenpost's `core/sphinx/sphinx_benchmark_test.go` (`BenchmarkSphinxCreatePackets`/
-`BenchmarkSphinxUnwrap`): for every case in `BenchRegistry.sphinxBenchCases`, time packet creation
-(`newNIKEPacket`/`newKEMPacket`) and, separately, a single hop's `unwrapNIKE`/`unwrapKEM` against
-one pre-built packet. Node/path generation runs in LeanBench's `setup?`/`beforeEach?` hooks, outside
-the timed region, so only the primitive under test is measured. -/
+For each case in `BenchRegistry.sphinxBenchCases`, times packet creation and a single hop's unwrap.
+Node and path generation run outside the timed region. -/
 
 namespace CryptWalker.Bench.Sphinx
 
@@ -54,7 +51,7 @@ private def newNodeNIKE (nike : NIKE) : IO Node := do
   | none => throw (IO.userError "newNodeNIKE: decodePrivateKey failed")
   | some sk => pure { id, priv := ofVector priv, pub := ofVector (nike.encodePublicKey (nike.derivePublicKey sk)) }
 
-/-- Keys from `kem.generate`: padded random bytes aren't a working ML-KEM private key. -/
+/-- Keys from `kem.generate`, since random bytes are not a valid ML-KEM private key. -/
 private def newNodeKEM (kem : KEM) : IO Node := do
   let id ← randomVector 32
   match kem.generate (kem.stateFromSeed (← randomVector 32)) with
@@ -77,7 +74,7 @@ private def buildPath (nodes : Array Node) : IO (Array PathHop) := do
     path := path.push { id := node.id, publicKey := node.pub, commands := cmds }
   pure path
 
-/-- One packet's worth of inputs, plus the first hop's private key. -/
+/-- Inputs for one packet, plus the first hop's private key. -/
 private structure Inputs where
   path : Array PathHop
   clientSecret : Array (Vector UInt8 32)

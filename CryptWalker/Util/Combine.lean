@@ -5,14 +5,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 namespace CryptWalker.Util.Combine
 
-/-! # Shared machinery for combining two schemes
+/-! # Combining two schemes
 
-Both the KEM combiner and the signature combiner need the same two things: a way to split a
-concatenated encoding back into its halves, and a way to run one component's state action
-against half of a product state. They live here so the two combiners do not each define
-`splitL`/`sliftL` in their own namespace — which makes every name ambiguous at any call site
-that opens both.
--/
+Splitting a concatenated encoding, and running a state action against half of a product state. -/
 
 /-- Run a total state action against the left half of a product state. -/
 def sliftL {σ₁ σ₂ α} (x : StateM σ₁ α) : StateM (σ₁ × σ₂) α :=

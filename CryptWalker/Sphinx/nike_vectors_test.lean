@@ -12,17 +12,11 @@ import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
 
 /-!
-# NIKE-Sphinx full-packet cross-implementation vectors
+# NIKE-Sphinx full-packet vectors
 
-The payoff: `testdata/sphinx_nike_vectors.json` is
-`katzenpost/core/sphinx/testdata/sphinx_vectors.json`, vendored as-is (`.sha256` records which
-copy) — 10 real Sphinx packets `sphinx_vectors_test.go`'s `buildVectorSphinx` built with the
-*Go* implementation (`withSURB ∈ {false, true} × nrHops 1..5`, geometry
-`GeometryFromUserForwardPayloadLength(x25519, 103, withSURB, 5)`), each with every intermediate
-`Unwrap` result recorded. This decodes `Packets[0]` and replays `unwrapNIKE` hop by hop,
-checking that the forwarded packet at each step is *byte-identical* to Go's own `Packets[i+1]`,
-and that the final payload (through `SURB.decryptSURBPayload` for the `withSURB` half) matches.
-Nothing here was built by this Lean port — `unwrapNIKE` is the only thing on trial. -/
+Replays `unwrapNIKE` hop by hop over externally built Sphinx packets
+(`withSURB ∈ {false, true} × nrHops 1..5`), checking every forwarded packet and the final payload
+byte for byte. -/
 
 open Lean
 open CryptWalker.Util.newhex
@@ -65,7 +59,7 @@ structure TestVec where
 def toVec32 (b : ByteArray) : Option (Vector UInt8 32) :=
   if h : b.data.size = 32 then some ⟨b.data, h⟩ else none
 
-/-- The vectors were built by Go against `nike/x25519`, i.e. the ladder implementation. -/
+/-- The vectors use the ladder implementation. -/
 private def x25519Nike := CryptWalker.NIKE.X25519_montgomery_ladder.LadderScheme
 
 private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
@@ -91,11 +85,8 @@ def parseVec (j : Json) : Except String TestVec := do
   let surbKeys ← field j "SurbKeys"
   pure { nodes, path, packets, payload, surb, surbKeys }
 
-/-- Replay `unwrapNIKE` at every node, checking against the recorded `Packets`/`Payload`. Also,
-for the `withSurb` half: `Packets[0]` there *is* Go's `NewPacketFromSURB(Surb, Payload)` output
-(`buildVectorSphinx` builds it that way, and `Payload` is what `DecryptSURBPayload` recovers —
-exactly the plaintext `NewPacketFromSURB` was given), so `newPacketFromSURB` gets checked
-byte-for-byte against Go here too, not just self-consistency-tested. -/
+/-- Replay `unwrapNIKE` at every node against the recorded packets and payload; for `withSurb`,
+also check `newPacketFromSURB`. -/
 def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   let withSurb := decide (v.surb.size > 0)
   let geom := if withSurb then geomSurb else geomNoSurb

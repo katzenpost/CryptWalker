@@ -34,15 +34,12 @@ def getEncKey (m : MessageBoxIndex) (ctx : ByteArray) : Scheme.Key :=
   let eICtx := deriveEForContext m blake2b512_hkdf ctx
   Scheme.keyFromBytes eICtx
 
-/-- Box ID for a context: blinds the root public key by `K_i^ctx`. -/
+/-- The root public key blinded by `K_i^ctx`. -/
 def implDeriveBoxID (rootPub : PubBytes) (m : MessageBoxIndex)
     (ctx : ByteArray) : PubBytes :=
   blindPub rootPub (getBlindScalar m ctx)
 
-/-- Box ID with no context: blinds the root public key by `K_i` directly.
-
-This is the sequence a bare cap addresses, without the per-context detour that
-`implDeriveBoxID` takes. Matches `hpqc/bacap/bacap_impl.go:DeriveMessageBoxID`. -/
+/-- The root public key blinded by `K_i`, with no context. -/
 def implDeriveMessageBoxID (rootPub : PubBytes) (m : MessageBoxIndex) : PubBytes :=
   blindPub rootPub (scalarOfBytes ⟨m.curBlindingFactor.toArray⟩)
 
@@ -76,11 +73,7 @@ def implDecryptBox (boxId : PubBytes) (m : MessageBoxIndex)
     let ad := ⟨boxId.toArray⟩
     Scheme.decrypt key nonce ad ct
 
-/-- Decrypting a box produced by `implEncryptBox` returns the original plaintext.
-
-The public key must be the one derived from the private key, as it is inside a `WriteCap`.
-Stated standalone rather than only as a `BACAPSpec` field so callers can apply it without
-projecting through `bacapSpec`. -/
+/-- Decrypting a box produced by `implEncryptBox` returns the plaintext. -/
 theorem implDecrypt_implEncrypt (sk : Scalar) (pk : PubBytes) (idx : MessageBoxIndex)
     (ctx pt : ByteArray) (hpk : pk = publicKey sk) :
     implDecryptBox (implEncryptBox sk pk idx ctx pt).1 idx ctx
@@ -94,12 +87,7 @@ theorem implDecrypt_implEncrypt (sk : Scalar) (pk : PubBytes) (idx : MessageBoxI
   simp [implEncrypt_size]
   exact Scheme.decrypt_encrypt _ _ _ _
 
-/-- Only one ciphertext decrypts to a given plaintext under a given box.
-
-Follows from the AEAD's own soundness: the box ID fixes the nonce and the associated data, so
-`implEncryptBox` and `implDecryptBox` are running the same AEAD instance in both directions.
-`ct.size > 0` excludes tombstones, whose empty ciphertext bypasses the AEAD. Stated standalone
-for the same reason as `implDecrypt_implEncrypt`. -/
+/-- A non-tombstone ciphertext that decrypts to `pt` is the one `implEncryptBox` produces. -/
 theorem implDecrypt_sound (sk : Scalar) (pk boxId : PubBytes) (idx : MessageBoxIndex)
     (ctx ct : ByteArray) (sig : SigBytes) (pt : ByteArray)
     (hid : implDeriveBoxID pk idx ctx = boxId)
@@ -118,9 +106,7 @@ theorem implDecrypt_sound (sk : Scalar) (pk boxId : PubBytes) (idx : MessageBoxI
       exact absurd hct (by omega)
     · exact Scheme.decrypt_sound _ _ _ _ _ hdec
 
-/-- Sampling a blinding factor is a proof-level notion (`BACAPSpec.unlinkable`); these are
-`noncomputable` on purpose. Left computable, the compiler would build `List.finRange ℓ`, a list of
-2^252 elements, as a constant initialised at program start. -/
+/-- `noncomputable` so the compiler does not build `List.finRange ℓ` at program start. -/
 @[instance_reducible] noncomputable def scalarFintypeInst : Fintype Scalar := inferInstance
 @[instance_reducible] noncomputable def scalarSampleableInst : SampleableType Scalar := SampleableType.ofFintype Scalar
 @[instance_reducible] noncomputable def pubDecEqInst : DecidableEq PubBytes := inferInstance

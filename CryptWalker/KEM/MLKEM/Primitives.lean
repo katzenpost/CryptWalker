@@ -10,27 +10,10 @@ import LatticeCrypto.MLKEM.Concrete.CBD
 import HashSig.SLHDSA.Concrete.Keccak
 import CryptWalker.Util.Bytes
 
-/-! # ML-KEM: pure-Lean, FFI-free primitives, for every FIPS 203 parameter set
+/-! # ML-KEM primitives, for every FIPS 203 parameter set
 
-VCVio (a dependency of this project, mainly for `Sphinx.Indistinguishability`/`Integrity`'s
-oracle-computation framework) carries a full FIPS 203 ML-KEM formalization under
-`LatticeCrypto.MLKEM`. Its arithmetic core — `Concrete.NTT`/`Concrete.Encoding`/`Concrete.CBD` —
-is pure, executable Lean with no native dependency, and is reused here unchanged. Its own concrete
-`Primitives` bundle (`Extern.MLKEM.Instance.concretePrimitives`) is not: it calls SHA-3/SHAKE via
-`Extern.MLKEM.FFI`'s `@[extern]` bindings into `mlkem-native`, a git submodule that isn't checked
-out in this project's tree (confirmed: `third_party/mlkem-native` is empty), so those bindings
-would build as empty stub archives — unusable, not just slow.
-
-This file re-assembles the exact same wiring `Extern.MLKEM.Instance.lean` does, substituting
-`HashSig.SLHDSA.Concrete.Keccak`'s pure-Lean Keccak-f[1600] sponge (written for SLH-DSA, but a
-peer library's plain SHA-3/SHAKE implementation, not SLH-DSA-specific code) for the FFI calls —
-same function shapes, same domain-separation bytes (`0x06` for SHA-3, `0x1f` for SHAKE), so this
-is a drop-in substitution, not a reimplementation of the hashing itself.
-
-Deliberately *not* reusing `LatticeCrypto.MLKEM.KEM`'s or `LatticeCrypto.MLKEM.Internal`'s
-top-level `keygen`/`encaps`/`decaps` — see `MLKEM.lean`, which writes those directly against
-this file's `primitives` instead, keeping that thin hash-composition layer (where FIPS 203 differs
-from round-3 Kyber's extra `m ← H(m)` pre-hash) ours to vary later. -/
+VCVio's pure-Lean NTT, encoding and CBD, with SHA-3/SHAKE from the pure-Lean Keccak sponge in
+`HashSig.SLHDSA.Concrete.Keccak` in place of VCVio's FFI hash bindings. -/
 
 namespace CryptWalker.KEM.FIPS203
 
@@ -38,21 +21,14 @@ open MLKEM
 open MLKEM.Concrete
 open SLHDSA.Concrete.Keccak
 
-/-- As `Extern.MLKEM.Instance.vectorToByteArray` — `CryptWalker.Util.Bytes.ofVector` already does
-exactly this. -/
 abbrev vectorToByteArray {n : Nat} (v : Vector UInt8 n) : ByteArray :=
   CryptWalker.Util.Bytes.ofVector v
 
-/-- As `Extern.MLKEM.Instance.byteArrayToVector`, verbatim (kept as its own definition rather
-than routed through `CryptWalker.Util.Bytes.toVecN`, to stay byte-for-byte identical to the
-upstream helper this whole file otherwise mirrors). -/
+/-- `n` bytes of `ba` from `offset`. -/
 def byteArrayToVector (ba : ByteArray) (offset : Nat) (n : Nat) : Vector UInt8 n :=
   Vector.ofFn fun ⟨i, _⟩ => ba.get! (offset + i)
 
-/-! ## SampleNTT (FIPS 203 Algorithm 7) — rejection sampling from SHAKE-128
-
-As `Extern.MLKEM.Instance.{rejectionSample,requireFullRejectionSample,concreteSampleNTT}`,
-verbatim except `FFI.shake128` → `Keccak.shake128`. -/
+/-! ## SampleNTT (FIPS 203 Algorithm 7): rejection sampling from SHAKE-128 -/
 
 def rejectionSample (stream : ByteArray) : Array Coeff := Id.run do
   let mut acc : Array Coeff := Array.mkEmpty 256
@@ -127,10 +103,8 @@ theorem byteEncodeVecFast_eq (d : Nat) {k : Nat} (v : RqVec k) :
   · simp only [hd, dif_neg, not_false_eq_true, Vector.getElem_ofFn]
     rfl
 
-/-! ## Concrete `Primitives` instance, and the assembled bundle per parameter set -/
+/-! ## `Primitives` instance per parameter set -/
 
-/-- As `Extern.MLKEM.Instance.concretePrimitives`, verbatim except every FFI hash call routed
-through `Keccak` instead. -/
 def concretePrimitives (params : Params) (encoding : Encoding params)
     (hEnc : encoding.EncodedTHat = ByteArray)
     (hU : encoding.EncodedU = ByteArray)
@@ -166,7 +140,7 @@ theorem encoding_eq : encoding ps = concreteEncoding (params ps) := by
     funext fun u => byteEncodeVecFast_eq _ u
   simp only [encoding, h]
 
-/-- Encoding round-trip laws — VCVio's, carried over by `encoding_eq`. -/
+/-- Encoding round-trip laws, from VCVio's via `encoding_eq`. -/
 theorem encodingLaws : (encoding ps).Laws := by
   rw [encoding_eq]
   exact concreteEncodingLaws (params ps) (by cases ps <;> decide) (by cases ps <;> decide)
@@ -178,25 +152,18 @@ theorem encoding_byteEncodeDUVec_size (u : RqVec (params ps).k) :
   rw [byteEncodeVecFast_eq]
   exact byteEncodeVec_size _ u
 
-/-- The assembled, pure-Lean primitives bundle. -/
 def primitives : Primitives (params ps) (encoding ps) :=
   concretePrimitives (params ps) (encoding ps) (by rfl) (by rfl) (by rfl)
 
 
-/-- `encoding`'s associated types are all literally `ByteArray` for the concrete encoding — the
-same three facts `concretePrimitives` above takes as explicit hypotheses. Typeclass search (e.g.
-resolving `++`/`HAppend`) won't unfold `encoding`'s definition on its own to discover this (it
-uses a stricter transparency than plain elaboration), so `Encoding.lean` casts through
-these explicitly wherever it needs to treat an `EncodedTHat`/`EncodedU`/`EncodedV` value as a
-plain `ByteArray` — mirroring exactly how `Extern.MLKEM.Instance.concretePrimitives` itself
-threads the same three equalities through as parameters, for the same reason. -/
+/-- The encoded types are `ByteArray`; typeclass search does not see this without these casts. -/
 theorem hEncEq : (encoding ps).EncodedTHat = ByteArray := rfl
 theorem hUEq : (encoding ps).EncodedU = ByteArray := rfl
 theorem hVEq : (encoding ps).EncodedV = ByteArray := rfl
 
 end
 
-/-- The NTT ring operations — reused unchanged from VCVio's pure-Lean `Concrete.NTT`. -/
+/-- VCVio's NTT ring operations. -/
 abbrev ring : NTTRingOps := concreteNTTRingOps
 
 end CryptWalker.KEM.FIPS203

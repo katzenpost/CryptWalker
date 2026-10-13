@@ -7,10 +7,9 @@ import CryptWalker.GroupChat.Member.Events
 
 /-! # Reading one member's stream
 
-See "Rewrite and scan" in the group chat spec, and katzenqt's `groupchat/reader.py`. A reader reads
-in order, a box at a time. A scan, which runs only when the user asks, rechecks the boxes a
-scan stepped past and can jump ahead to a box another member has acknowledged, keeping the boxes
-it steps past. What a reader acknowledges is the end of the unbroken run it has read (`run`). -/
+A reader reads in order, one box at a time. A scan rechecks boxes previously stepped past and may
+jump ahead to a box another member acknowledged, keeping the boxes it skips. A reader acknowledges
+the end of the unbroken run it has read (`run`). See "Rewrite and scan" in the group chat spec. -/
 
 namespace CryptWalker.GroupChat.Member
 
@@ -24,14 +23,12 @@ structure Reader where
   next : Index
   /-- The last box read in order, data or tombstone. -/
   last : Option Index := none
-  /-- How many boxes this reader has passed: its own count, by which it orders the boxes it keeps
-  and measures how far behind it one is. -/
+  /-- How many boxes this reader has passed. -/
   passed : Nat := 0
   /-- Boxes a scan stepped past without reading, oldest first: each with the count it was passed
   at and the box before it. -/
   kept : List (Index × Nat × Option Index) := []
-  /-- The first box passed unread and no longer kept, as a kept box is: acknowledgements stop
-  before it for good. -/
+  /-- The first box passed unread and no longer kept; acknowledgements stop before it. -/
   lost : Option (Nat × Option Index) := none
   mode : Mode := .idle
   /-- The `Idx64` of each acknowledged box a scan has already looked for. -/

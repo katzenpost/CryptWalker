@@ -16,18 +16,10 @@ open CryptWalker.Util.Bytes (ofVector size_ofVector extract_append_left extract_
 
 /-! # Sphinx per-hop routing commands
 
-Port of `katzenpost/core/sphinx/commands/commands.go`. Every per-hop routing-info block is a
-sequence of these, tag-prefixed and read until a `null` tag (or the block runs out) — see
-`parseAll`.
+A routing-info block is a sequence of tag-prefixed commands, read until a `null` tag or the end of
+the block. Every command has a constant wire size. -/
 
-Every command's wire size here is a *constant* (`nextNodeHopLength`, `1+recipientIDLength`,
-`1+surbIDLength`, `1+4`), independent of the chosen NIKE/KEM or hop count — `Geometry.lean`
-combines these with the per-scheme header/ciphertext size, but `Commands` itself needs no
-`Geometry` parameter, unlike the Go `FromBytes(b, g)` (whose `g` argument is only there to reach
-those same constants via `g.NextNodeHopLength` etc., which is itself constant-derived). -/
-
-/-- `RoutingCommand`. `null` is the terminal marker (id `0x00`, no body) — Go represents it as
-`cmd == nil`; a sum type is the more natural way to say the same thing here. -/
+/-- A routing command. `null` is the terminal marker (tag `0x00`, no body). -/
 inductive RoutingCommand where
   | nextNodeHop (id : Vector UInt8 32) (mac : Vector UInt8 32)
   | recipient (id : Vector UInt8 32)
@@ -42,7 +34,6 @@ private def u32be (n : UInt32) : Vector UInt8 4 :=
 private def u32ofBE (b0 b1 b2 b3 : UInt8) : UInt32 :=
   (b0.toUInt32 <<< 24) ||| (b1.toUInt32 <<< 16) ||| (b2.toUInt32 <<< 8) ||| b3.toUInt32
 
-/-- `RoutingCommand.ToBytes`. -/
 def RoutingCommand.toBytes : RoutingCommand → ByteArray
   | .nextNodeHop id mac => ⟨#[0x01]⟩ ++ ofVector id ++ ofVector mac
   | .recipient id       => ⟨#[0x02]⟩ ++ ofVector id
@@ -50,17 +41,15 @@ def RoutingCommand.toBytes : RoutingCommand → ByteArray
   | .nodeDelay d        => ⟨#[0x80]⟩ ++ ofVector (u32be d)
   | .null               => ⟨#[0x00]⟩
 
-/-- The one command size `createHeader`/`createKEMHeader` need to reason about their per-hop
-routing-info budget in terms of: appending a `.nextNodeHop` costs exactly `nextNodeHopLength`. -/
+/-- A `.nextNodeHop` serializes to exactly `nextNodeHopLength` bytes. -/
 @[simp] theorem RoutingCommand.nextNodeHop_toBytes_size (id mac : Vector UInt8 32) :
     (RoutingCommand.nextNodeHop id mac).toBytes.size = nextNodeHopLength := by
   simp only [RoutingCommand.toBytes, ByteArray.size_append, CryptWalker.Util.Bytes.size_ofVector,
     nextNodeHopLength, commandTagLength, nodeIDLength, macLength]
   rfl
 
-/-- `commands.FromBytes` for one command. `none` on success with no command (an empty buffer,
-or the `null` terminal), matching Go's `cmd == nil`; `.error` on a malformed buffer. Returns the
-parsed command (if any) together with the unconsumed remainder. -/
+/-- Parse one command, returning it and the unconsumed remainder. `none` means an empty buffer or
+the `null` terminal. -/
 def fromBytesOne (b : ByteArray) : Except String (Option RoutingCommand × ByteArray) := do
   if b.size == 0 then
     pure (none, b)
@@ -98,10 +87,7 @@ def fromBytesOne (b : ByteArray) : Except String (Option RoutingCommand × ByteA
         pure (some (.nodeDelay d), rest0.extract 4 rest0.size)
     | _ => throw "sphinx: invalid per-hop command"
 
-/-- `parseAll`, bounded by an explicit fuel parameter rather than `partial` — a `partial def`
-compiles to an opaque constant with no equational lemma, so nothing about its behavior would be
-provable. Every real-command step consumes at least one byte, so `parseAll` below can always use
-`b.size` as fuel. -/
+/-- `parseAll` with explicit fuel, so its behavior is provable. -/
 def parseAllFuel : Nat → ByteArray → Except String (List RoutingCommand)
   | 0, _ => pure []
   | fuel + 1, b => do
@@ -109,16 +95,10 @@ def parseAllFuel : Nat → ByteArray → Except String (List RoutingCommand)
     | (none, _)        => pure []
     | (some cmd, rest) => pure (cmd :: (← parseAllFuel fuel rest))
 
-/-- Parse every command in a per-hop routing-info block, stopping at the terminal `null` (or an
-exhausted buffer). This is what `NIKESphinx`/`KEMSphinx`'s unwrap runs over a decrypted per-hop
-block. -/
+/-- Parse every command in a routing-info block, stopping at `null` or the end of the buffer. -/
 def parseAll (b : ByteArray) : Except String (List RoutingCommand) := parseAllFuel b.size b
 
-/-! ## `parseAll` undoes `commandsToBytes`
-
-The round trip `KEMSphinx`/`NIKESphinx`'s completeness proofs need: parsing back the bytes
-`createHeader`/`createKEMHeader` wrote (real commands, then zero padding out to the per-hop
-budget) recovers exactly the command list that was serialized. -/
+/-! ## `parseAll` undoes `commandsToBytes` -/
 
 private theorem byteArray_get!_eq (b : ByteArray) (i : Nat) : b.get! i = b[i]! := by
   show b.data[i]! = b[i]!
@@ -240,10 +220,7 @@ private theorem fromBytesOne_toBytes_append_nextNodeHop (id mac : Vector UInt8 3
         get!_extract_from _ 1 (64 + k) (by rw [hrest0sz]; omega),
         show (1 + (64 + k)) = A3.size + k from by rw [hA3sz]; omega,
         hcmd, get!_append_right A3 rest k hkr]
-  -- Everything the goal needs is now proved *about the literal expression*; abstract that
-  -- expression behind a single opaque variable before `unfold`ing `fromBytesOne`, so the
-  -- unfolded body only ever substitutes one small variable, not this whole term at each of
-  -- its many occurrences (which is what made the direct approach time out).
+  -- Generalize the expression before unfolding `fromBytesOne`, or elaboration times out.
   revert h0 h1 htag hle hidV hmacV hrestTail
   generalize (RoutingCommand.nextNodeHop id mac).toBytes ++ rest = b
   intro h0 h1 htag hle hidV hmacV hrestTail
@@ -371,8 +348,7 @@ private theorem fromBytesOne_toBytes_append_surbReply (id : Vector UInt8 16) (re
   unfold fromBytesOne
   simp only [h0, h1, Bool.false_eq_true, if_false, htag, hle, hidV, hrestTail, pure, Except.pure]
 
-/-- `u32ofBE` undoes `u32be`: reassembling the four big-endian bytes `u32be` split a `UInt32` into
-recovers it exactly. Via real `BitVec` lemmas, not `bv_decide`/`native_decide`. -/
+/-- `u32ofBE` undoes `u32be`. -/
 private theorem u32ofBE_u32be (d : UInt32) :
     u32ofBE (u32be d)[0] (u32be d)[1] (u32be d)[2] (u32be d)[3] = d := by
   have h0 : (u32be d)[0] = (d >>> 24).toUInt8 := by unfold u32be; simp
@@ -481,9 +457,6 @@ private theorem extract_all_zero (b : ByteArray) (h : b.data.all (· == 0)) (lo 
   rw [this, ByteArray.getElem_extract]
   exact hbz
 
-/-- On an all-zero buffer, `fromBytesOne` always terminates with no command, regardless of size —
-the sentinel tag `0x00` doesn't need to be literally present for parsing to stop cleanly, an
-exactly-exhausted buffer also does. -/
 private theorem byteArray_all_zero_get! (b : ByteArray) (h : b.data.all (· == 0)) (i : Nat)
     (hi : i < b.size) : b.get! i = 0 := by
   rw [byteArray_get!_eq, getElem!_pos b i hi]
@@ -493,6 +466,7 @@ private theorem byteArray_all_zero_get! (b : ByteArray) (h : b.data.all (· == 0
   rw [← hde]
   exact h'
 
+/-- On an all-zero buffer, `fromBytesOne` returns no command. -/
 private theorem fromBytesOne_zeros (b : ByteArray) (h : b.data.all (· == 0)) :
     ∃ rest, fromBytesOne b = .ok (none, rest) := by
   by_cases hsz0 : b.size = 0
@@ -512,8 +486,7 @@ private theorem fromBytesOne_zeros (b : ByteArray) (h : b.data.all (· == 0)) :
       simp only [hsz1', hb0, hrest0z, beq_self_eq_true, if_true, Bool.false_eq_true, if_false,
         pure, Except.pure]
 
-/-- `parseAllFuel` at any fuel returns `.ok []` on an all-zero buffer — `fromBytesOne` always
-terminates in one step there (`fromBytesOne_zeros`), so the fuel never actually gets spent. -/
+/-- `parseAllFuel` returns `.ok []` on an all-zero buffer. -/
 private theorem parseAllFuel_zeros (fuel : Nat) (b : ByteArray) (h : b.data.all (· == 0)) :
     parseAllFuel fuel b = .ok [] := by
   cases fuel with
@@ -523,9 +496,7 @@ private theorem parseAllFuel_zeros (fuel : Nat) (b : ByteArray) (h : b.data.all 
     unfold parseAllFuel
     simp only [hrest, pure, Except.pure, bind, Except.bind]
 
-/-- `commandsToBytes`'s accumulator, generalized: folding onto a nonempty starting buffer is the
-same as folding onto empty and prepending — the standard "cons-splitting" identity a left-fold
-needs to support induction on the list from the front. -/
+/-- Folding `commandsToBytes` onto a nonempty buffer equals prepending that buffer. -/
 private theorem foldl_toBytes_append (l : List RoutingCommand) (init : ByteArray) :
     l.foldl (fun acc c => acc ++ c.toBytes) init
       = init ++ l.foldl (fun acc c => acc ++ c.toBytes) ByteArray.empty := by
@@ -535,11 +506,8 @@ private theorem foldl_toBytes_append (l : List RoutingCommand) (init : ByteArray
     rw [List.foldl_cons, List.foldl_cons, ih (init ++ hd.toBytes),
       ih (ByteArray.empty ++ hd.toBytes), ByteArray.empty_append, ByteArray.append_assoc]
 
-/-- **`parseAll` undoes `commandsToBytes`, fuel-parameterized.** Any amount of trailing all-zero
-padding is fine (including none), and the sentinel `0x00` tag never needs to be literally present
-— `fromBytesOne`/`parseAllFuel` already stop cleanly on an exactly-exhausted buffer
-(`fromBytesOne_zeros`). The only real requirement is that no command in `cmds` is itself `.null`
-(so no real command's own tag byte could be mistaken for the terminator). -/
+/-- Parsing serialized commands followed by any all-zero padding recovers the commands, given
+enough fuel and no `.null` among them. -/
 theorem parseAllFuel_append_zeros (cmds : List RoutingCommand) (hn : ∀ c ∈ cmds, c ≠ .null)
     (zeros : ByteArray) (hzeros : zeros.data.all (· == 0)) (fuel : Nat)
     (hfuel : cmds.length ≤ fuel) :
@@ -575,9 +543,7 @@ theorem parseAllFuel_append_zeros (cmds : List RoutingCommand) (hn : ∀ c ∈ c
     unfold parseAllFuel
     simp only [hstep, pure, Except.pure, bind, Except.bind, ih hntl fuel' hfuel']
 
-/-- Every command's wire encoding is at least one byte (the tag alone, for `.null`) — enough to
-show a list of `k` commands serializes to at least `k` bytes, so `fuel := (serialized ++ zeros
-buffer).size` is always enough fuel for `parseAllFuel_append_zeros`. -/
+/-- Every command encodes to at least one byte. -/
 private theorem toBytes_size_pos (c : RoutingCommand) : 1 ≤ c.toBytes.size := by
   cases c with
   | nextNodeHop id mac =>
@@ -597,8 +563,7 @@ private theorem length_le_foldl_toBytes_size (cmds : List RoutingCommand) :
     have := toBytes_size_pos hd
     omega
 
-/-- Specialized to `parseAll` itself (`fuel := b.size`): the fuel is always sufficient, since the
-serialized commands plus padding never exceed the buffer's own size. -/
+/-- `parseAll` undoes `commandsToBytes` followed by any all-zero padding. -/
 theorem parseAll_append_zeros (cmds : List RoutingCommand) (hn : ∀ c ∈ cmds, c ≠ .null)
     (zeros : ByteArray) (hzeros : zeros.data.all (· == 0)) :
     parseAll (cmds.foldl (fun acc c => acc ++ c.toBytes) ByteArray.empty ++ zeros) = .ok cmds := by

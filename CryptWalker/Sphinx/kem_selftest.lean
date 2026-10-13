@@ -13,27 +13,8 @@ import CryptWalker.Util.Bytes
 /-!
 # KEM-Sphinx create/unwrap round-trip self-test
 
-As `NIKESphinx.nike_selftest`: `createKEMHeader`'s output can't be cross-checked against Go
-(the per-hop KEM encapsulations aren't recorded anywhere), so this builds a packet with fresh
-Lean-side keys and confirms `Unwrap` recovers exactly what was built.
-
-Node keys come from `kem.generate`, not from treating arbitrary random bytes as a private key.
-The two are equivalent for `kemX25519`/`kemX25519Ladder` (any 32 bytes is a valid X25519 scalar),
-but not in general: an ML-KEM private key is only meaningful as genuine `keygen` output, since
-its correctness relies on an actual algebraic relationship between the secret and public halves
-(`tHat = A·sHat + eHat`) that zero-padded or otherwise-arbitrary bytes don't satisfy — confirmed
-directly, the first attempt at this file's ML-KEM round using the old "random 32 bytes as a
-private key" shortcut failed with a MAC mismatch, exactly as `KEM.Reliable`'s design predicts for
-a non-`Reliable` keypair. Using `kem.generate` uniformly is also simply more representative of
-how a real Sphinx mix node actually gets its keys.
-
-Runs the full round set once per registered KEM-Sphinx scheme — `"X25519LadderKEM"`
-(`KEM.kemX25519Ladder`), `"X25519KEM"` (`KEM.kemX25519`), `"MLKEM768"`
-(`MLKEM768.kemMLKEM768`), and `"MLKEM768X25519"` (`KEM.kemMLKEM768X25519`, the classical/
-post-quantum hybrid built by `Combiner.combineKEM` — see `KEM/Schemes.lean`'s module doc), and the
-hedged `"MLKEM768Hedged"`/`"MLKEM768HedgedX25519"` pair — since
-`createKEMHeader`/`unwrapKEM` are generic over any `KEM`, not just the ladder implementation
-`kem_vectors_test`'s Go-cross-checked vectors happen to use. -/
+Builds packets with fresh keys and checks that unwrapping recovers them, for every registered
+KEM-Sphinx scheme. -/
 
 open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
@@ -50,9 +31,6 @@ private def mlkem768X25519 := CryptWalker.KEM.kemMLKEM768X25519
 private def mlkem768Hedged := CryptWalker.KEM.MLKEMHedged.kemMLKEMHedged768
 private def mlkem768HedgedX25519 := CryptWalker.KEM.kemMLKEMHedged768X25519
 
--- `kemSphinxSchemeOf` (used below) takes these four explicitly rather than wiring one concrete
--- choice up internally; the direct `createKEMHeader`/`newKEMPacket`/`unwrapKEM`/`newKEMSURB` calls
--- below (bypassing the abstract `Sphinx.Interface` scheme) need the same four threaded through.
 private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
 private def macS := CryptWalker.MAC.HMAC.hmacSha256MAC
 private def kdfS := CryptWalker.KDF.HKDF.hkdfSha256Expand
@@ -66,14 +44,12 @@ private def randomBytes (n : Nat) : IO ByteArray := IO.getRandomBytes (USize.ofN
 
 structure Node where
   id : Vector UInt8 32
-  /-- Raw `kem.privateKeySize` bytes — not fixed to 32, since that's only true for the X25519
-  entries (ML-KEM-768's is 2400). -/
+  /-- `kem.privateKeySize` bytes. -/
   priv : ByteArray
   pub : ByteArray
   deriving Inhabited
 
-/-- A fresh node keypair, via `kem.generate` — see the module doc for why this replaces the
-earlier "any random 32 bytes is a valid private key" shortcut. -/
+/-- A fresh node keypair. Lattice KEM private keys must come from `generate`, not random bytes. -/
 private def newNode (kem : KEM) : IO Node := do
   let seed ← randomVector 32
   let id ← randomVector 32
@@ -170,11 +146,8 @@ def runFillerRound (schemeName : String) (kem : KEM) : IO Bool := do
     pure false
   | .ok pkt0 => unwrapAll kem geom nodes pkt0 payload
 
-/-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`kemSphinxScheme`
-instead of calling `newKEMPacket` directly. `wrapKEM` draws one seed *per hop*, so the stream
-must actually vary with the counter — unlike `NIKESphinx`'s version of this check, which draws
-only one seed total and can get away with a constant stream. A `pathLen` below `geom.nrHops`
-exercises `wrap`'s own filler draw, which reads further seeds after the per-hop ones. -/
+/-- As `runRound`, through `Sphinx.Interface.wrap`. `wrapKEM` draws one seed per hop, so the
+stream must vary with the counter. -/
 def runAbstractWrapRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
     (pathLen : Nat := geom.nrHops) : IO Bool := do
@@ -191,8 +164,7 @@ def runAbstractWrapRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKE
     pure false
   | .ok pkt _ => unwrapAll kem geom nodes (ofVector pkt) (ofVector payload)
 
-/-- As `NIKESphinx.nike_selftest`'s: empirical check of `Sphinx.Interface.unwrap_complete` (the
-property `wrapKEM_unwrapKEM_complete_valid` proves, for real). -/
+/-- Empirical check of `Sphinx.Interface.unwrap_complete`. -/
 def runCompletenessRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
   let scheme := kemSphinxSchemeOf kem wbCipher macS kdfS streamS geom hvalid rfl h16
@@ -221,9 +193,8 @@ def runCompletenessRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKE
       else
         pure true
 
-/-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
-round-trip through `unwrapKEM`/`SURB.decryptSURBPayload`. `wrapKEMSURB` draws one seed per hop
-plus two more (`keyPayload`), so the stream needs `nodes.size + 2` distinct entries. -/
+/-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB`. The stream needs
+`nodes.size + 2` distinct entries. -/
 def runAbstractSURBRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKEM kem)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
   let scheme := kemSphinxSchemeOf kem wbCipher macS kdfS streamS geom hvalid rfl h16
@@ -280,9 +251,8 @@ def runAbstractSURBRound (kem : KEM) (geom : Geometry) (hvalid : geom.ValidForKE
                     ok := false
       pure ok
 
-/-- Full SURB round trip, as `NIKESphinx.nike_selftest`'s: build a SURB (`newKEMSURB`), use it
-to build a reply packet (`SURB.newPacketFromSURB`), unwrap that reply through every hop, and
-confirm `SURB.decryptSURBPayload` recovers the original payload. -/
+/-- SURB round trip: build a SURB, build a reply packet from it, unwrap through every hop, and
+check `decryptSURBPayload` recovers the payload. -/
 def runSURBRound (kem : KEM) (geom : Geometry) : IO Bool := do
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode kem)
   let path ← buildPath nodes true
@@ -345,12 +315,7 @@ def runSURBRound (kem : KEM) (geom : Geometry) : IO Bool := do
                     ok := false
       pure ok
 
-/-- The full round set above, run against one registered KEM-Sphinx scheme. As
-`nike_selftest.lean`'s `runSuite`: the abstract/completeness/SURB rounds build their geometry via
-`ofKEMWith` (no `byName` witness needed, since it's handed `kem` directly) to sidestep `byName`'s
-`String.toLower` comparison being unable to reduce inside a kernel proof for anything but the
-registry's first entry; the concrete `runRound`/`runFillerRound`/`runSURBRound` calls still go
-through the real string-keyed `ofKEM`, exercising that resolution path at runtime. -/
+/-- Every round, against one KEM-Sphinx scheme. -/
 def runSuite (schemeName : String) (kem : KEM) : IO Bool := do
   IO.println s!"-- {schemeName} --"
   let mut ok := true

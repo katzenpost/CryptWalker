@@ -5,10 +5,9 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import CryptWalker.GroupChat.Member.Wire
 
-/-! # What a driver tells a member, and what the member asks the driver to do
+/-! # Events a driver gives a member, and effects the member asks for
 
-katzenqt's `groupchat/events.py`. Effects map onto thin client calls: a member never derives a
-BACAP index, encrypts, or touches the network itself. -/
+A member never derives a BACAP index, encrypts, or touches the network itself. -/
 
 namespace CryptWalker.GroupChat.Member
 

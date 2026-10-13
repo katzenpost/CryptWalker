@@ -7,15 +7,7 @@ namespace CryptWalker.Util.Bytes
 
 /-! # Splitting and rejoining byte strings
 
-`Util.Combine` does this for `Vector UInt8 n`, where the widths are type-level and `splitL`/
-`splitR` need no hypotheses. Byte *strings* are the other half of the same story: an AEAD
-ciphertext is `body ‖ tag` where only the tag has a statically known width, so the split has to
-be stated with `extract` and its side conditions discharged by hand.
-
-These three lemmas are all that a length-prefixed or tag-suffixed format needs: parse the two
-halves of a concatenation, and rejoin a split. They are the reason `AESGCMSIV`'s correctness
-proofs are about cryptography rather than about `Array.extract`.
--/
+`ByteArray` counterpart of `Util.Combine`: `extract` lemmas for concatenations and splits. -/
 
 /-- A fixed-width vector as a byte string. -/
 def ofVector {n : Nat} (v : Vector UInt8 n) : ByteArray := ⟨v.toArray⟩
@@ -23,14 +15,10 @@ def ofVector {n : Nat} (v : Vector UInt8 n) : ByteArray := ⟨v.toArray⟩
 @[simp] theorem size_ofVector {n : Nat} (v : Vector UInt8 n) : (ofVector v).size = n := by
   simp [ofVector, ByteArray.size]
 
-/-- The reverse of `ofVector`: reinterpret a `ByteArray` as a fixed-width vector, total via
-`ByteArray.get!`'s default-on-out-of-range behavior (never exercised by a caller that already
-knows its input is exactly `n` bytes). -/
+/-- A `ByteArray` as a fixed-width vector; out-of-range bytes are `0`. -/
 def toVecN (n : Nat) (a : ByteArray) : Vector UInt8 n := Vector.ofFn fun i : Fin n => a.get! i.val
 
-/-- `toVecN` undoes `ofVector`: reinterpreting an already-fixed-width vector's own bytes at that
-width recovers it exactly. Bridges an encode/decode round trip stated over `Vector UInt8 n` into
-one stated over a raw `ByteArray`. -/
+/-- `toVecN` undoes `ofVector`. -/
 @[simp] theorem toVecN_ofVector {n : Nat} (v : Vector UInt8 n) : toVecN n (ofVector v) = v := by
   apply Vector.ext
   intro i hi
@@ -39,7 +27,7 @@ one stated over a raw `ByteArray`. -/
   show v.toArray[i]! = v[i]
   simp [getElem!_pos, hi]
 
-/-- `ofVector` undoes `toVecN`, the other direction from `toVecN_ofVector`. -/
+/-- `ofVector` undoes `toVecN`. -/
 theorem ofVector_toVecN {n : Nat} (X : ByteArray) (h : X.size = n) : ofVector (toVecN n X) = X := by
   apply ByteArray.ext_getElem
   · show (Array.ofFn (fun i : Fin n => X.get! i.val)).size = X.size
@@ -72,8 +60,7 @@ theorem extract_append_right (a b : ByteArray) :
     rw [ByteArray.getElem_extract, ByteArray.getElem_append_right (by omega)]
     simp
 
-/-- Extracting a range that lies entirely in the left half of a concatenation only sees that
-half. -/
+/-- Extracting a range within the left half of a concatenation. -/
 theorem extract_append_of_le (a b : ByteArray) {lo hi : Nat} (h : hi ≤ a.size) :
     (a ++ b).extract lo hi = a.extract lo hi := by
   apply ByteArray.ext_getElem
@@ -82,8 +69,7 @@ theorem extract_append_of_le (a b : ByteArray) {lo hi : Nat} (h : hi ≤ a.size)
     rw [ByteArray.getElem_extract, ByteArray.getElem_extract,
       ByteArray.getElem_append_left (by simp [ByteArray.size_extract] at h1; omega)]
 
-/-- Extracting from an inner offset all the way to the end of a concatenation splits into the
-left half's own tail, followed by all of the right half. -/
+/-- Extracting from an offset in the left half to the end of a concatenation. -/
 theorem extract_append_ge (a b : ByteArray) {lo : Nat} (h : lo ≤ a.size) :
     (a ++ b).extract lo (a.size + b.size) = a.extract lo a.size ++ b := by
   have htail : (a.extract lo a.size).size = a.size - lo := by
@@ -105,8 +91,7 @@ theorem extract_append_ge (a b : ByteArray) {lo : Nat} (h : lo ≤ a.size) :
       rw [htail]
       omega
 
-/-- Extracting a prefix that reaches past the left half of a concatenation into the right: the
-whole left half, followed by however much of the right half's own start is needed. -/
+/-- Extracting a prefix that extends past the left half of a concatenation. -/
 theorem extract_append_le (a b : ByteArray) {m : Nat} (h : a.size ≤ m) :
     (a ++ b).extract 0 m = a ++ b.extract 0 (m - a.size) := by
   have htail : (b.extract 0 (m - a.size)).size = min (m - a.size) b.size := by
@@ -124,8 +109,7 @@ theorem extract_append_le (a b : ByteArray) {m : Nat} (h : a.size ≤ m) :
       rw [ByteArray.getElem_append_right hge, ByteArray.getElem_append_right hge]
       simp only [ByteArray.getElem_extract, Nat.zero_add]
 
-/-- Extracting a range that lies entirely in the right half of a concatenation only sees that
-half, at the correspondingly shifted offsets. -/
+/-- Extracting a range within the right half of a concatenation, at shifted offsets. -/
 theorem extract_append_of_ge (a b : ByteArray) {lo hi : Nat} (h : a.size ≤ lo) :
     (a ++ b).extract lo hi = b.extract (lo - a.size) (hi - a.size) := by
   apply ByteArray.ext_getElem

@@ -7,20 +7,12 @@ import CryptWalker.Sign.Ed25519_blinded
 import CryptWalker.Hash.HKDF
 import Std.Tactic.BVDecide
 
-/-! # BACAP Types: MessageBoxIndex, ReadCap, WriteCap
+/-! # BACAP types: MessageBoxIndex, ReadCap, WriteCap (Echomix §4)
 
-Data types for the Blinded Cryptographic Capability system (§4 of the Echomix paper),
-their serialization, and the record-level plumbing that needs no key derivation.
-
-Binary layouts match `hpqc/bacap/bacap.go` for cross-implementation test vectors:
+Binary layouts:
 - MessageBoxIndex: uint64 LE ++ [32]byte ++ [32]byte ++ [32]byte = 104 bytes
 - ReadCap: [32]byte pubkey ++ MessageBoxIndex = 136 bytes
-- WriteCap: [64]byte privkey ++ MessageBoxIndex = 168 bytes
-
-A Go `ed25519.PrivateKey` is 64 bytes, `seed ++ pubkey`, so a serialized WriteCap
-carries the root public key even though it is redundant. We store only the seed and
-re-derive the scalar and the public key, which is why this file reaches for
-`scalarFromSeed` and `publicKey`; everything else here is pure byte handling. -/
+- WriteCap: [32]byte seed ++ [32]byte pubkey ++ MessageBoxIndex = 168 bytes -/
 
 namespace CryptWalker.BACAP.Types
 
@@ -30,13 +22,7 @@ abbrev MessageBoxIndexSize : Nat := 104
 abbrev ReadCapSize : Nat := 136
 abbrev WriteCapSize : Nat := 168
 
-/-- Ratchet state for one direction of a BACAP conversation.
-
-Fields correspond to `hpqc/bacap/bacap.go:MessageBoxIndex`:
-- `idx64` — the message counter (little-endian uint64).
-- `curBlindingFactor` — K_i, used to derive box IDs via Ed25519 blinding.
-- `curEncryptionKey` — E_i, used to derive per-box AEAD keys.
-- `hkdfState` — H_i, the HKDF ratchet state for advancing to the next index. -/
+/-- Ratchet state: message counter, blinding factor K_i, encryption key E_i, HKDF state H_i. -/
 structure MessageBoxIndex where
   idx64             : UInt64
   curBlindingFactor : Vector UInt8 32
@@ -77,9 +63,8 @@ structure ReadCap where
 def marshalReadCap (rc : ReadCap) : Vector UInt8 ReadCapSize :=
   (rc.rootPublicKey ++ marshalMessageBoxIndex rc.messageBoxIndex : Vector UInt8 136)
 
-/-- Deserialize `pubkey ++ index`, or `none` if the root public key is not a point on
-edwards25519. Go's `ReadCap.UnmarshalBinary` and Python's `ReadCap.from_bytes` reject the same
-blobs; like Go's `Point.SetBytes`, `decodePoint` accepts an unreduced `y`. -/
+/-- Deserialize `pubkey ++ index`; `none` if the root public key is not an edwards25519 point
+(an unreduced `y` is accepted). -/
 def unmarshalReadCap (data : Vector UInt8 ReadCapSize) : Option ReadCap :=
   let pk : Vector UInt8 32 := Vector.ofFn fun i : Fin 32 => data[i.val]!
   if (CryptWalker.Sign.Ed25519Math.decodePoint pk).isSome then
@@ -88,16 +73,13 @@ def unmarshalReadCap (data : Vector UInt8 ReadCapSize) : Option ReadCap :=
              data[i.val + 32]!) }
   else none
 
-/-- A write capability: the root Ed25519 *seed* plus the earliest index the holder can reach.
-
-We keep the seed rather than the expanded scalar because the scalar is `clamp(SHA-512(seed))`,
-which cannot be inverted; storing it would make `marshalWriteCap` unable to reproduce the
-serialization that `unmarshalWriteCap` consumes. -/
+/-- A write capability: the root Ed25519 seed plus the earliest reachable index. The seed is
+kept because the expanded scalar `clamp(SHA-512(seed))` cannot be inverted for serialization. -/
 structure WriteCap where
   rootSeed        : Vector UInt8 32
   messageBoxIndex : MessageBoxIndex
 
-/-- The root signing scalar S_R, expanded from the seed exactly as RFC 8032 key generation does. -/
+/-- The root signing scalar S_R, expanded from the seed per RFC 8032. -/
 def WriteCap.rootPrivateKey (wc : WriteCap) : Scalar :=
   scalarFromSeed wc.rootSeed
 
@@ -105,36 +87,25 @@ def WriteCap.rootPrivateKey (wc : WriteCap) : Scalar :=
 def WriteCap.rootPublicKey (wc : WriteCap) : PubBytes :=
   publicKey wc.rootPrivateKey
 
-/-- The read capability paired with this write capability, at the same index.
-
-Mirrors `WriteCap.ReadCap` in Go. Handing this out lets the bearer derive the same box IDs
-and decrypt them, but not sign new boxes. -/
+/-- The read capability at the same index: derives and decrypts the same boxes, cannot sign. -/
 def WriteCap.readCap (wc : WriteCap) : ReadCap where
   rootPublicKey   := wc.rootPublicKey
   messageBoxIndex := wc.messageBoxIndex
 
-/-- Re-base the cap to `idx`, leaving the receiver unchanged.
-
-Use it to move a cap to a chosen position (say the live edge) before handing it out, so the
-holder of the new cap learns nothing about indices before `idx`. Go and Python panic or raise
-on a nil index; here the type rules that out. -/
+/-- Re-base the cap to `idx`. The holder of the result learns nothing about earlier indices. -/
 def WriteCap.withMessageBoxIndex (wc : WriteCap) (idx : MessageBoxIndex) : WriteCap :=
   { wc with messageBoxIndex := idx }
 
-/-- Re-base the cap to `idx`, leaving the receiver unchanged.
-
-Re-basing a read cap to the current position before sharing means the recipient starts there
-and cannot iterate the one-way ratchet back to count earlier messages. -/
+/-- Re-base the cap to `idx`. The holder of the result learns nothing about earlier indices. -/
 def ReadCap.withMessageBoxIndex (rc : ReadCap) (idx : MessageBoxIndex) : ReadCap :=
   { rc with messageBoxIndex := idx }
 
-/-- Serialize as `seed ++ pubkey ++ index`, matching Go's 64-byte `ed25519.PrivateKey`. -/
+/-- Serialize as `seed ++ pubkey ++ index`. -/
 def marshalWriteCap (wc : WriteCap) : Vector UInt8 WriteCapSize :=
   (wc.rootSeed ++ wc.rootPublicKey ++ marshalMessageBoxIndex wc.messageBoxIndex : Vector UInt8 168)
 
-/-- Deserialize `seed ++ pubkey ++ index`, or `none` if the stored public key is not the one the
-seed derives. Go's `WriteCap.UnmarshalBinary` and Python's `WriteCap.from_bytes` reject the same
-blobs: a cap whose halves disagreed would derive box IDs from one key and sign with another. -/
+/-- Deserialize `seed ++ pubkey ++ index`; `none` if the stored public key is not the one the
+seed derives. -/
 def unmarshalWriteCap (data : Vector UInt8 WriteCapSize) : Option WriteCap :=
   let wc : WriteCap :=
     { rootSeed        := Vector.ofFn fun i : Fin 32 => data[i.val]!
@@ -143,9 +114,7 @@ def unmarshalWriteCap (data : Vector UInt8 WriteCapSize) : Option WriteCap :=
   let stored : Vector UInt8 32 := Vector.ofFn fun i : Fin 32 => data[i.val + 32]!
   if wc.rootPublicKey == stored then some wc else none
 
-/-! Each `unmarshal ∘ marshal` below is the identity. The two `Vector.append` indexing lemmas
-split a marshalled buffer back into its fields, one for each side of a concatenation, and
-`getU64LE_putU64LE` is the single bitvector fact, which `bv_decide` discharges. -/
+/-! ## `unmarshal ∘ marshal` is the identity -/
 
 private theorem getElem!_append_left {α} [Inhabited α] {n m : Nat}
     (a : Vector α n) (b : Vector α m) (i : Nat) (h : i < n) : (a ++ b)[i]! = a[i]! := by
@@ -239,7 +208,7 @@ theorem unmarshal_marshal_readCap (rc : ReadCap)
     ofFn_append_right _ _ rfl, unmarshal_marshal_messageBoxIndex]
   rw [if_pos h]
 
-/-- Every write cap round-trips: `marshalWriteCap` writes the public key its seed derives. -/
+/-- Every write cap round-trips. -/
 @[simp] theorem unmarshal_marshal_writeCap (wc : WriteCap) :
     unmarshalWriteCap (marshalWriteCap wc) = some wc := by
   obtain ⟨seed, idx⟩ := wc
@@ -260,8 +229,7 @@ theorem unmarshal_marshal_readCap (rc : ReadCap)
   simp only [unmarshalWriteCap, marshalWriteCap, hseed, hpub,
     ofFn_append_right _ _ rfl, unmarshal_marshal_messageBoxIndex, beq_self_eq_true, if_true]
 
-/-! The converse: every blob that parses is the serialization of what it parses to, so each
-value has exactly one encoding. Go and Python accept the same blobs (see `negative.json`). -/
+/-! ## `marshal ∘ unmarshal` is the identity on blobs that parse: encodings are canonical -/
 
 private theorem ofFn_slices {n m : Nat} (d : Vector UInt8 (n + m)) :
     ((Vector.ofFn fun i : Fin n => d[i.val]!) ++ (Vector.ofFn fun i : Fin m => d[i.val + n]!) :
@@ -296,8 +264,7 @@ theorem marshal_unmarshal_readCap {data : Vector UInt8 ReadCapSize} {rc : ReadCa
     exact ofFn_slices (n := 32) (m := 104) data
   · exact absurd h nofun
 
-/-- A write cap that parses re-serializes to the bytes it came from: the stored public key is
-the one the seed derives, which is what `marshalWriteCap` writes. -/
+/-- A write cap that parses re-serializes to the bytes it came from. -/
 theorem marshal_unmarshal_writeCap {data : Vector UInt8 WriteCapSize} {wc : WriteCap}
     (h : unmarshalWriteCap data = some wc) : marshalWriteCap wc = data := by
   unfold unmarshalWriteCap at h

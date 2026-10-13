@@ -12,9 +12,7 @@ import CryptWalker.Util.Bytes
 
 /-! # MKEM from a NIKE, an AEAD and a hash
 
-Builds an `MKEM` the way `hpqc/kem/mkem/mkem.go` does, over any `NIKE`, `AEAD` and `Hash`; no
-particular curve is assumed (`hpqc` runs it over the CTIDH1024-X25519 hybrid). The only law about
-the NIKE that is used is `NIKE.commutes`: both parties derive the same Diffie-Hellman output.
+The only NIKE law used is `NIKE.commutes`.
 
 ```
 ENCAPSULATE(keys, payload):
@@ -31,15 +29,8 @@ DECAPSULATE(sk, ct):
     return open(msgKey, ct.envelope)
 ```
 
-Randomness is drawn from `Adapter.St` (a counter over a seed stream), in `hpqc`'s order: ephemeral
-seed, message key, envelope nonce, then one nonce per recipient. The pure functions take an explicit
-`Rand` and the state functions build one from the stream. **The stream must be unpredictable, which
-nothing here can check.**
-
-`decapsulateP_encapsulateP_full` is the correctness of decapsulating the *whole* multi-DEK
-ciphertext. It needs `hcross`, that no earlier DEK opens under this recipient's key, which is AEAD
-authenticity and so cannot be a law of `MKEM` (see there); the law that is a field is stated for the
-per-recipient ciphertext. -/
+The pure functions take explicit randomness (`Rand`); the `MKEM` instance draws it from an
+`Adapter.St` seed stream, which must be unpredictable. -/
 
 namespace CryptWalker.MKEM.Adapter
 
@@ -64,7 +55,7 @@ structure Rand (S : Base) where
   envNonce : Vector UInt8 S.aead.nonceSize
   dekNonces : List (Vector UInt8 S.aead.nonceSize)
 
-/-! ### Two list lemmas the correctness proofs need -/
+/-! ### List lemmas -/
 
 theorem mapM_getElem {α β : Type} (f : α → Option β) :
     ∀ (l : List α) (r : List β), l.mapM f = some r →
@@ -110,15 +101,14 @@ variable (S : Base)
 def keyOfBytes (b : ByteArray) : Option S.aead.Key :=
   if b.size = S.aead.keySize then some (S.aead.keyFromBytes (toVecN _ b)) else none
 
-/-- The key two parties share: the hash of their Diffie-Hellman output. `none` for the degenerate
-all-zero output, which `hpqc` rejects. -/
+/-- The hash of the Diffie-Hellman output; `none` if the output is all zero. -/
 def deriveKey (sk : S.nike.PrivateKey) (pk : {pk : S.nike.PublicKey // S.nike.Safe pk}) :
     Option S.aead.Key :=
   let raw := S.nike.encodeSharedSecret (S.nike.groupAction sk pk)
   if raw.toList.all (· == 0) then none
   else some (S.aead.keyFromBytes (Vector.cast S.digest_eq_key (S.hash.hash (ofVector raw))))
 
-/-- Both parties derive the same key: `NIKE.commutes`. -/
+/-- Both parties derive the same key. -/
 theorem deriveKey_comm (sk₁ sk₂ : S.nike.PrivateKey) :
     S.deriveKey sk₁ ⟨S.nike.derivePublicKey sk₂, S.nike.derive_safe sk₂⟩
       = S.deriveKey sk₂ ⟨S.nike.derivePublicKey sk₁, S.nike.derive_safe sk₁⟩ := by
@@ -187,8 +177,7 @@ def encapsulateP (rand : Rand S) (keys : List {pk : S.nike.PublicKey // S.nike.S
         (fun p => S.sealUnder p.1 p.2 (ofVector rand.msgKey))
       envelope := S.sealUnder msgKey rand.envNonce payload })
 
-/-- Open a ciphertext with a recipient's private key: derive the shared key with the ephemeral
-public key, take the first DEK that opens, and open the envelope with the message key it holds. -/
+/-- Open the first DEK that opens under the shared key, then the envelope. -/
 def decapsulateP (sk : S.nike.PrivateKey) (ct : Ciphertext S.nike.PublicKey) : Option ByteArray :=
   if h : S.nike.Safe ct.ephPub then
     match S.deriveKey sk ⟨ct.ephPub, h⟩ with
@@ -232,8 +221,8 @@ theorem encapsulateP_spec (rand : Rand S) (keys : List {pk : S.nike.PublicKey //
     obtain ⟨rfl, rfl⟩ := h
     exact ⟨rfl, secrets, hm, rfl⟩
 
-/-- **Shape.** One DEK per recipient, each `nonce + key + tag` bytes, and an envelope `nonce + tag`
-longer than the payload. -/
+/-- One `nonce + key + tag`-byte DEK per recipient, and an envelope `nonce + tag` longer than the
+payload. -/
 theorem encapsulateP_shape (rand : Rand S) (keys : List {pk : S.nike.PublicKey // S.nike.Safe pk})
     (payload : ByteArray) (eph : S.nike.PrivateKey) (ct : Ciphertext S.nike.PublicKey)
     (hlen : rand.dekNonces.length = keys.length)
@@ -254,8 +243,7 @@ theorem encapsulateP_shape (rand : Rand S) (keys : List {pk : S.nike.PublicKey /
     rw [S.size_sealUnder]
     omega
 
-/-- **A recipient recovers the payload from the ciphertext it is handed**: the one carrying only its
-own DEK, which is how `hpqc` and Pigeonhole use MKEM. Unconditional. -/
+/-- Recipient `i` recovers the payload from the ciphertext carrying only its DEK. -/
 theorem decapsulateP_forRecipient (rand : Rand S)
     (keys : List {pk : S.nike.PublicKey // S.nike.Safe pk}) (payload : ByteArray)
     (eph : S.nike.PrivateKey) (ct : Ciphertext S.nike.PublicKey)
@@ -296,8 +284,8 @@ theorem decapsulateP_forRecipient (rand : Rand S)
     rw [if_pos (by simp), CryptWalker.Util.Bytes.toVecN_ofVector]
   simp only [hk, S.unsealUnder_sealUnder]
 
-/-- Decapsulating the *whole* multi-DEK ciphertext. Needs `hcross`: no earlier DEK opens under this
-recipient's key (AEAD authenticity, which `AEAD` cannot state). -/
+/-- Recipient `i` recovers the payload from the full ciphertext, provided no earlier DEK opens
+under its key (`hcross`). -/
 theorem decapsulateP_encapsulateP_full (rand : Rand S)
     (keys : List {pk : S.nike.PublicKey // S.nike.Safe pk}) (payload : ByteArray)
     (eph : S.nike.PrivateKey) (ct : Ciphertext S.nike.PublicKey)
@@ -367,18 +355,18 @@ theorem decryptEnvelopeP_envelopeReplyP (eph sk : S.nike.PrivateKey)
 
 end Base
 
-/-! ### The `MKEM` instance: randomness from a seed stream, errors as `Except` -/
+/-! ### The `MKEM` instance -/
 
 section Instance
 
 variable (S : Base)
 
-/-- Big-endian-free counter bytes, so each block of the seed stream is a distinct hash input. -/
+/-- `i` as 8 little-endian bytes. -/
 def counterBytes (i : Nat) : ByteArray :=
   ⟨(Array.range 8).map fun k => (i >>> (8 * k)).toUInt8⟩
 
-/-- The randomness for one encapsulation to `n` recipients, drawn from the stream at position `i`,
-in `hpqc`'s order: ephemeral seed, message key, envelope nonce, one nonce per recipient. -/
+/-- Randomness for encapsulating to `n` recipients, from stream position `i`: ephemeral seed,
+message key, envelope nonce, then one nonce per recipient. -/
 def randOf (i : Nat) (str : Nat → Bytes32) (n : Nat) : Rand S where
   seed := str i
   msgKey := toVecN _ (ofVector (str (i + 1)))
@@ -436,8 +424,7 @@ def generateM : EStateM MKEMError St (S.nike.PublicKey × S.nike.PrivateKey) :=
     let sk := S.nike.privateKeyFromSeed (str i)
     EStateM.Result.ok (S.nike.derivePublicKey sk, sk) (i + 1, str)
 
-/-- **MKEM over the given NIKE, AEAD and hash.** Every law of `MKEM` is discharged, so nothing is
-assumed beyond the laws of the three primitives. -/
+/-- MKEM over the given NIKE, AEAD and hash. -/
 def ofBase : MKEM where
   PrivateKey := S.nike.PrivateKey
   PublicKey := S.nike.PublicKey
@@ -495,8 +482,7 @@ def ofBase : MKEM where
 
 end Instance
 
-/-- `mkemOfNike nike aead hash h`: hpqc's MKEM over any NIKE, AEAD and hash whose digest is an AEAD
-key. -/
+/-- MKEM over a NIKE, an AEAD, and a hash whose digest is an AEAD key. -/
 def mkemOfNike (nike : NIKE) (aead : AEAD) (hash : Hash) (h : hash.digestSize = aead.keySize) :
     MKEM :=
   ofBase ⟨nike, aead, hash, h⟩

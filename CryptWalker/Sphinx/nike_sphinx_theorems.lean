@@ -47,25 +47,8 @@ open CryptWalker.Util.Bytes (ofVector extract_append_le extract_append_of_le ext
 
 /-! # NIKE-Sphinx
 
-Port of `sphinx.go`'s NIKE path (`createHeader`, `newNIKEPacket`, `unwrapNIKE`), genuinely generic
-over *any* `NIKE` (`CryptWalker/NIKE/NIKE.lean`) — not hardcoded to X25519, and not bundled with a
-proof of any particular key size either. A `NIKE` already carries its own
-`publicKeySize`/`privateKeySize`/`sharedSecretSize`; every function below just reads those fields
-off the `nike : NIKE` it's given and sizes its `Vector`s accordingly (`Common.toVecN`), the same
-way `Geometry.ofNIKE`/`buildNIKE` already compute `headerLength` from `scheme.publicKeySize` rather
-than assuming 32. `createHeader` takes its randomness (client ephemeral key, hop-count-hiding
-filler) as plain arguments rather than `IO`, so it stays pure.
-
-The one place a fixed width still appears is `blindingFactorPrivKey`: matching Go's
-`rand.NewDeterministicRandReader`, it reads exactly one 32-byte ChaCha20 block regardless of
-`nike.privateKeySize` — a real limitation for a hypothetical NIKE with a >32-byte private key
-(silently zero-padded, since it's built from `Common.toVecN`), stated here rather than hidden. It
-does not affect any NIKE currently registered.
-
-`unwrapNIKE` needs no randomness, which is what makes it the half `Crypto.aez_test` and friends
-can eventually check against Go's own `sphinx_vectors.json` byte-for-byte: that file's packets
-were built with a client ephemeral key it doesn't record, so `createHeader`'s output can't be
-reproduced from it, but `Unwrap` is deterministic. -/
+Sphinx packet creation and unwrapping over any `NIKE`, with sizes read from the NIKE's own fields.
+`createHeader` takes its randomness as arguments, so it is pure. -/
 
 private theorem nikeEncodePublicKey_injective (nike : NIKE) :
     Function.Injective nike.encodePublicKey := fun a b h => by
@@ -95,19 +78,13 @@ instance (nike : NIKE) : Inhabited nike.PublicKey := ⟨nike.derivePublicKey def
 
 noncomputable instance (nike : NIKE) : SampleableType nike.PrivateKey := SampleableType.ofFintype _
 
-/-- Decode a `PrivateKey`'s raw bytes — the one place a caller-supplied value that turns out not
-to encode a valid key gets rejected, rather than silently misused. `toVecN` never fails (it pads
-or truncates), so the rejection comes entirely from `nike.decodePrivateKey`'s own canonical-encoding
-check. -/
+/-- Decode a private key, rejecting bytes that are not a valid encoding. -/
 private def nikeDecodePrivateKey (nike : NIKE) (bytes : ByteArray) : Except String nike.PrivateKey :=
   match nike.decodePrivateKey (toVecN nike.privateKeySize bytes) with
   | none => throw "sphinx: invalid private key encoding"
   | some sk => pure sk
 
-/-- The group action, at the byte level: decode `pkBytes`, check it's safe to act on (`NIKE.Safe`
-— rejecting e.g. small-order Curve25519 points), then run `groupAction` and re-encode the result.
-Both failure paths (bad encoding, unsafe key) are genuine, checked ones — nothing here silently
-processes whatever bytes a packet carried. -/
+/-- Byte-level group action: decode `pkBytes`, require `NIKE.Safe`, act, and re-encode. -/
 private def nikeDH (nike : NIKE) (sk : nike.PrivateKey) (pkBytes : ByteArray) :
     Except String ByteArray :=
   match nike.decodePublicKey (toVecN nike.publicKeySize pkBytes) with
@@ -116,12 +93,8 @@ private def nikeDH (nike : NIKE) (sk : nike.PrivateKey) (pkBytes : ByteArray) :
     if h : nike.Safe pk then pure (ofVector (nike.encodeSharedSecret (nike.groupAction sk ⟨pk, h⟩)))
     else throw "sphinx: unsafe public key"
 
-/-- Re-blind an envelope by a factor, at the byte level — `nikeDH` with the factor as private key
-and the envelope as public key. Total, falling back to `pk` unchanged on decode/safety failure
-(provably unreachable in practice: every call site already established safety via a preceding
-`nikeDH`). Resized to `pk.size` regardless of `nike.sharedSecretSize` (`size_nikeBlind` below),
-so `createHeader`'s blinding chain preserves the group-element width with no size-agreement
-proof needed. -/
+/-- Re-blind `pk` by `factor`, resized to `pk.size`. Returns `pk` unchanged if decoding or the
+safety check fails. -/
 private def nikeBlind (nike : NIKE) (pk factor : ByteArray) : ByteArray :=
   let result := match nike.decodePrivateKey (toVecN nike.privateKeySize factor) with
     | none => pk
@@ -133,11 +106,7 @@ private def nikeBlind (nike : NIKE) (pk factor : ByteArray) : ByteArray :=
   unfold nikeBlind
   exact Util.Bytes.size_ofVector _
 
-/-- **`nikeDH`, bridged to the typed group action**: given an honestly-encoded, `Safe` public key,
-`nikeDH` computes exactly `groupAction sk pk h`, re-encoded. The byte-level `decodePublicKey`
-round trip is `decode_encode_pub`; nothing else in `nikeDH`'s definition depends on the caller's
-bytes once they decode to `pk`. The atomic byte-level fact `NIKE.telescope_agree`'s abstract
-argument needs threaded through `createHeader`/`unwrapNIKE`'s actual `ByteArray` calls. -/
+/-- On an encoded `Safe` public key, `nikeDH` computes the encoded `groupAction`. -/
 theorem nikeDH_bridge (nike : NIKE) (sk : nike.PrivateKey) (pk : nike.PublicKey)
     (h : nike.Safe pk) :
     nikeDH nike sk (ofVector (nike.encodePublicKey pk))
@@ -148,11 +117,8 @@ theorem nikeDH_bridge (nike : NIKE) (sk : nike.PrivateKey) (pk : nike.PublicKey)
   rw [dif_pos h]
   rfl
 
-/-- **`nikeBlind`, bridged to the typed re-blinding action**: given an honestly-encoded, `Safe`
-envelope and any factor bytes that decode to `sk` (not necessarily `sk`'s canonical encoding —
-`createHeader`'s actual blinding factors are raw `blindingFactorPrivKey` output, never
-re-encoded), `nikeBlind` computes exactly `reinterpret (groupAction sk pk h)`, re-encoded, via
-`NIKE.encodePublicKey_reinterpret` once `nikeDH_bridge` identifies the DH output. -/
+/-- On an encoded `Safe` public key and factor bytes decoding to `sk`, `nikeBlind` computes the
+encoded `reinterpret (groupAction sk pk h)`. -/
 theorem nikeBlind_bridge (nike : NIKE) (pk : nike.PublicKey) (sk : nike.PrivateKey)
     (h : nike.Safe pk) (factor : ByteArray)
     (hfactor : nike.decodePrivateKey (toVecN nike.privateKeySize factor) = some sk) :
@@ -166,9 +132,7 @@ theorem nikeBlind_bridge (nike : NIKE) (pk : nike.PublicKey) (sk : nike.PrivateK
   rw [Util.Bytes.size_ofVector, ← nike.encodePublicKey_reinterpret]
   exact ofVector_toVecN _ (Util.Bytes.size_ofVector _)
 
-/-- As `nikeBlind`, but on decoded `NIKE` values rather than raw bytes — what
-`NIKESphinxScheme.blind` (the abstract re-blindable-envelope interface `wrap_resistant` is stated
-against) actually needs. -/
+/-- `nikeBlind` on decoded values. -/
 private def nikeBlindTyped (nike : NIKE) (factor : nike.PrivateKey) (pk : nike.PublicKey) :
     nike.PublicKey :=
   if h : nike.Safe pk then
@@ -177,23 +141,18 @@ private def nikeBlindTyped (nike : NIKE) (factor : nike.PrivateKey) (pk : nike.P
     ).getD pk
   else pk
 
-/-- A client's own public key, from its private key's raw bytes — total, falling back to the
-private-key bytes themselves if they fail to decode (unreachable whenever a caller like
-`createHeader` already succeeded, since it decodes the same bytes with the same function first). -/
+/-- A client's public key from its private-key bytes. Falls back to the input bytes if they do
+not decode. -/
 private def nikeSelfPublicKeyBytes (nike : NIKE) (skBytes : ByteArray) : ByteArray :=
   match nike.decodePrivateKey (toVecN nike.privateKeySize skBytes) with
   | none => skBytes
   | some sk => ofVector (nike.encodePublicKey (nike.derivePublicKey sk))
 
-/-- `BlindingFactor`'s raw seed, as the NIKE private key it represents: the first 32 bytes of
-`rand.NewDeterministicRandReader(seed)`, unclamped (clamping, if any, happens inside
-`nike.decodePrivateKey`/`groupAction`, matching `nike/x25519.NewKeypair`). Always exactly 32
-bytes — see this file's module doc for the resulting limitation on `nike.privateKeySize > 32`. -/
+/-- The blinding factor private key: the first 32 bytes of the ChaCha20 stream keyed by `seed`.
+Always 32 bytes, so a NIKE with a larger private key gets a zero-padded factor. -/
 private def blindingFactorPrivKey (seed : Vector UInt8 32) : ByteArray := ⟨keystream32 seed.toArray⟩
 
-/-- Everything `crypto.KDF` derives for one hop. `blindingFactor` is raw bytes, not a decoded
-`nike.PrivateKey`, since `HopKeys` is shared with `KEMSphinx` (unused there) and isn't itself
-parametric in which `NIKE` produced it. -/
+/-- Per-hop keys. `blindingFactor` is raw bytes so `HopKeys` does not depend on the NIKE. -/
 structure HopKeys where
   headerMAC : Vector UInt8 32
   headerEncryption : Vector UInt8 32
@@ -202,10 +161,7 @@ structure HopKeys where
   blindingFactor : ByteArray
   deriving Inhabited
 
-/-- `sharedSecret` is whatever a NIKE's `encodeSharedSecret` produced (no fixed width assumed).
-Generic in `kdfS` via `Sphinx.KDF.packetKeysFrom`, agreeing with `Sphinx.KDF.sphinxKDF`
-definitionally when `kdfS = CryptWalker.KDF.HKDF.hkdfSha256Expand`. Shared with
-`kem_sphinx_theorems.lean`. -/
+/-- Derive one hop's keys from its shared secret. -/
 def deriveHopKeys (kdfS : KDF) (sharedSecret : ByteArray) : HopKeys :=
   let pk : PacketKeys := CryptWalker.Sphinx.KDF.packetKeysFrom kdfS sharedSecret
   { headerMAC := pk.headerMAC
@@ -214,9 +170,8 @@ def deriveHopKeys (kdfS : KDF) (sharedSecret : ByteArray) : HopKeys :=
     payloadEncryption := pk.payloadEncryption
     blindingFactor := blindingFactorPrivKey pk.blindingFactorSeed }
 
-/-- **`createHeader`**. `filler` must be exactly `(geom.nrHops - path.size) *
-geom.perHopRoutingInfoLength` bytes (ignored, and may be empty, when `path.size = geom.nrHops`)
-— the random padding that hides a shorter-than-maximum path's true hop count. -/
+/-- `filler` must be `(geom.nrHops - path.size) * geom.perHopRoutingInfoLength` bytes; it
+hides the hop count of a short path. -/
 def createHeader (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
     (clientPrivateKey : ByteArray)
     (filler : ByteArray) (path : Array PathHop) : Except String (ByteArray × Array SPRPKey) := do
@@ -290,9 +245,7 @@ private theorem ite_pure_yield {α : Type} (c : Prop) [Decidable c] (a b : α) :
 
 @[simp] private theorem byteArray_mk_size (a : Array UInt8) : (⟨a⟩ : ByteArray).size = a.size := rfl
 
-/-- As `Common.Array.getElem!_stable_of_pushes`, for a trace whose array size is `j + 1` rather
-than `j` at step `j` — `createHeader`'s own `keys` trace: it starts at *one* entry (the first
-hop's key, already known before the loop over `[1:nrHops]` even begins), not zero. -/
+/-- As `Common.Array.getElem!_stable_of_pushes`, for a trace of size `j + 1` at step `j`. -/
 private theorem Array.getElem!_stable_of_pushes' {α : Type} [Inhabited α] (t : Nat → Array α) (n : Nat)
     (hpush : ∀ j, j < n → ∃ x, t (j + 1) = (t j).push x) (hsize : ∀ j, j ≤ n → (t j).size = j + 1) :
     ∀ i m, i < m → m ≤ n → (t m)[i]! = (t (i + 1))[i]! := by
@@ -307,9 +260,7 @@ private theorem Array.getElem!_stable_of_pushes' {α : Type} [Inhabited α] (t :
     · have hie : i = m := by omega
       rw [hie]
 
-/-- As `Array.getElem!_stable_of_pushes'`, collapsed to compare against the array's value at the
-index's own step `i` directly (rather than one step later) — one more `getElem!_push_stable`
-closes that last gap. -/
+/-- As `Array.getElem!_stable_of_pushes'`, comparing against the value at step `i`. -/
 private theorem Array.getElem!_stable_from_pushes {α : Type} [Inhabited α] (t : Nat → Array α) (n : Nat)
     (hpush : ∀ j, j < n → ∃ x, t (j + 1) = (t j).push x) (hsize : ∀ j, j ≤ n → (t j).size = j + 1) :
     ∀ i m, i ≤ m → m ≤ n → (t m)[i]! = (t i)[i]! := by
@@ -321,11 +272,8 @@ private theorem Array.getElem!_stable_from_pushes {α : Type} [Inhabited α] (t 
     rw [hx, CryptWalker.Sphinx.Common.Array.getElem!_push_stable _ _ _
       (by rw [hsize i (by omega)]; omega)]
 
-/-- **The inner "keep DH-ing" loop, bridged**: given an honestly-encoded `Safe` target public key
-and a sequence of `n` already-honestly-decodable factor bytes, running `nikeDH` once against the
-target then `n` more times against each factor in turn (`createHeader`'s inner loop, exactly)
-reproduces `NIKE.telescopeSecret`'s value at `n`. Pure induction on `n` using `nikeDH_bridge` at
-each step — no new algebra beyond what that lemma already gives. -/
+/-- `nikeDH` against the target, then against `n` factors in turn, gives
+`NIKE.telescopeSecret` at `n`. -/
 private theorem nikeDH_innerLoop_bridge (nike : NIKE) (baseSk targetSk : nike.PrivateKey)
     (pkBytes : ByteArray) (hpk : pkBytes = ofVector (nike.encodePublicKey (nike.derivePublicKey targetSk)))
     (factorBytes : Nat → ByteArray) (f : Nat → nike.PrivateKey) (n : Nat)
@@ -383,22 +331,18 @@ private theorem nikeDH_innerLoop_bridge (nike : NIKE) (baseSk targetSk : nike.Pr
   rw [htn] at hmain
   exact hmain
 
-/-- `a.push x`'s new element, addressed via `!` at the array's own (pre-push) size — the
-`getElem!` counterpart of `Array.getElem_push_eq`. -/
+/-- `getElem!` counterpart of `Array.getElem_push_eq`. -/
 private theorem getElem!_push_eq {α : Type} [Inhabited α] (a : Array α) (x : α) :
     (a.push x)[a.size]! = x := by
   rw [getElem!_pos (a.push x) a.size (by rw [Array.size_push]; omega), Array.getElem_push_eq]
 
-/-- As `getElem!_push_eq`, addressed by an arbitrary index already known to equal the array's
-size — avoids rewriting `i` in place at the call site, which would also hit `i`'s other
-occurrences inside the pushed value itself. -/
+/-- As `getElem!_push_eq`, at an index known to equal the array's size. -/
 private theorem getElem!_push_eq' {α : Type} [Inhabited α] (a : Array α) (x : α) (i : Nat)
     (hi : i = a.size) : (a.push x)[i]! = x := by
   rw [hi]; exact getElem!_push_eq a x
 
-/-- **`createHeader`'s second loop, at the content level — kept in its native `forIn`/`Except`
-shape**: `riKeyStream[i]!`/`riPadding[i]!` spelled out exactly, matching what `createHeader`'s
-actual elaborated body produces. Mirrors `createKEMHeader_loop2_content`. -/
+/-- Content of `createHeader`'s second loop (`riKeyStream`, `riPadding`), in its elaborated
+`forIn` form. -/
 private theorem createHeader_loop2_content_native (streamS : StreamCipher) (geom : Geometry)
     (keys : Array HopKeys) (nrHops : Nat) (final : Array ByteArray × Array ByteArray)
     (hfinal : forIn (List.range' 0 nrHops) (#[], #[])
@@ -521,9 +465,7 @@ private theorem createHeader_loop2_content_native (streamS : StreamCipher) (geom
     · dsimp only
       rw [if_neg hi0, h2, ← congrArg Prod.snd hstepi, getElem!_push_eq' _ _ _ hpi2.symm]
 
-/-- **`riPadding[i]!`'s byte size**: exactly `(i+1) * perHopRoutingInfoLength`, by induction on
-the content facts `createHeader_loop2_content_native`/`createHeader_unfold` produce. Needed for
-`hopPacket`'s overall size, since `riPadding[k-1]!` is one of its components. -/
+/-- `riPadding[i]!` has size `(i+1) * perHopRoutingInfoLength`. -/
 private theorem createHeader_loop2_padsize_of_content (streamS : StreamCipher) (geom : Geometry)
     (keys : Array HopKeys) (nrHops : Nat) (riKeyStream riPadding : Array ByteArray)
     (hriContent : ∀ i (_hi : i < nrHops),
@@ -573,11 +515,7 @@ private theorem createHeader_loop2_padsize_of_content (streamS : StreamCipher) (
     omega
 
 set_option maxHeartbeats 1000000 in
-/-- `createHeader`'s header always starts with `v0AD ++ groupElements[0]!`, and
-`groupElements[0]!` is `clientPublicKey0` untouched — the blinding loop only ever writes indices
-`≥ 1` of an array every entry of which starts as `clientPublicKey0`. Note the group-element slot's
-width is `nike.publicKeySize`, not a fixed literal — genuinely different NIKEs get genuinely
-different-width headers, matching `Geometry.buildNIKE`. -/
+/-- `createHeader`'s header starts with `v0AD ++ clientPublicKey0`. -/
 private theorem createHeader_hdr_bytesPub (nike : NIKE) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry)
     (clientPrivateKey : ByteArray) (filler : ByteArray) (path : Array PathHop)
@@ -652,9 +590,7 @@ private theorem createHeader_hdr_bytesPub (nike : NIKE) (macS : MAC) (kdfS : KDF
         (ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)))
 
 set_option maxHeartbeats 1000000 in
-/-- **The full trace of `createHeader`'s third loop**: not just the per-iteration size growth but
-the actual sequence of `(routingInfo, macBytes)` pairs, one per hop — the content-level fact
-`unwrapNIKE`'s peeling side needs, mirroring `createKEMHeader_loop3_trace`. -/
+/-- Trace of `createHeader`'s third loop: the `(routingInfo, macBytes)` pair at each hop. -/
 private theorem createHeader_loop3_trace (_nike : NIKE) (macS : MAC) (geom : Geometry)
     (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
@@ -772,10 +708,8 @@ private theorem createHeader_loop3_trace (_nike : NIKE) (macS : MAC) (geom : Geo
       Bool.false_eq_true, reduceIte] using h1
 
 
-/-- **Sizes along the `createHeader_loop3_trace` trace**: `(s j).1` grows by exactly one
-`perHopRoutingInfoLength` per step (`zeroPadTo`'s output width, by `commandsToBytes_size_le` +
-`zeroPadTo_size`), and `(s j).2` — once at least one step has run — is always exactly
-`macS.tagSize` wide, by the type of `macS.mac` alone. Mirrors `KEMSphinx.createKEMHeader_s_size`. -/
+/-- Sizes along `createHeader_loop3_trace`: `(s j).1` grows by `perHopRoutingInfoLength` per
+step, and `(s j).2` is `macS.tagSize` bytes after the first step. -/
 private theorem createHeader_s_size (_nike : NIKE) (macS : MAC) (geom : Geometry)
     (path : Array PathHop) (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
     (hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength)
@@ -822,9 +756,8 @@ private theorem createHeader_s_size (_nike : NIKE) (macS : MAC) (geom : Geometry
     · rw [h2]; exact Util.Bytes.size_ofVector _
 
 set_option maxHeartbeats 1000000 in
-/-- **`createHeader`**'s `hdr.size`: `2 + nike.publicKeySize + geom.routingInfoLength +
-macLength`, matching `geom.headerLength` whenever `geom` was actually built for `nike`
-(`hvalid`, satisfied by construction for any `Geometry.ofNIKE nike.hpqcName ...`). -/
+/-- `createHeader`'s header size is `2 + nike.publicKeySize + geom.routingInfoLength +
+macLength`, which is `geom.headerLength` when `geom` is valid for `nike`. -/
 theorem createHeader_hdr_size (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
     (geom : Geometry) (clientPrivateKey filler : ByteArray)
     (path : Array PathHop) (hdr : ByteArray) (sprpKeys : Array SPRPKey)
@@ -864,7 +797,7 @@ theorem createHeader_hdr_size (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS :
       injection h with h
       have hhdr := congrArg Prod.fst h
       simp only at hhdr
-      -- `groupElements[0]!`, untouched by loop1 — same argument as `createHeader_hdr_bytesPub`.
+      -- `groupElements[0]!` is untouched by loop1.
       have hidx0 : loop1Final.1[0]! =
           (Array.replicate path.size (ofVector (nike.encodePublicKey (nike.derivePublicKey clientSk)))
             : Array ByteArray)[0]! :=
@@ -887,7 +820,6 @@ theorem createHeader_hdr_size (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS :
           = nike.publicKeySize := Util.Bytes.size_ofVector _
       have hge0size : loop1Final.1[0]!.size = nike.publicKeySize := by
         rw [hidx0, getElem!_pos _ _ (by simpa using hpos), Array.getElem_replicate, hpub]
-      -- `loop3Final.1`'s size, by pushing the per-iteration size growth through the loop.
       have hinit_size :
           (if geom.nrHops > path.size then filler else (ByteArray.empty : ByteArray)).size
             = (geom.nrHops - path.size) * geom.perHopRoutingInfoLength := by
@@ -974,8 +906,7 @@ theorem createHeader_hdr_size (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS :
       rw [hheader, hrouting, ← hmulcombine]
       simp only [adLength, macLength]
 
-/-- **`newNIKEPacket`**. Generic in the wide-block cipher/MAC/KDF/stream cipher, matching
-`createKEMHeader`/`unwrapKEM` on the KEM side. -/
+/-- Build a forward packet. -/
 def newNIKEPacket (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (clientPrivateKey : ByteArray)
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) : Except String ByteArray := do
@@ -1016,10 +947,7 @@ private theorem newNIKEPacket_bytesPub (nike : NIKE) (cipher : WideBlockCipher) 
     rw [hpkt, CryptWalker.Util.Bytes.extract_append_of_le _ _ (by omega)]
     exact hhdrPub
 
-/-- A successful `newNIKEPacket` on a `geom.forwardPayloadLength`-sized payload produces exactly
-`geom.packetLength` bytes: `headerLength` (`createHeader_hdr_size`) plus `payloadTagLength +
-payload.size` (`cipher.encrypt_size`'s length preservation). `wrapNIKE` uses it to give
-`Sphinx.Interface.wrap` a packet-length-preserving type. -/
+/-- `newNIKEPacket` on a `geom.forwardPayloadLength` payload yields `geom.packetLength` bytes. -/
 theorem newNIKEPacket_size (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (clientPrivateKey : ByteArray)
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
@@ -1056,16 +984,13 @@ theorem newNIKEPacket_size (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     simp only [byteArray_mk_size, Array.size_replicate]
     omega
 
-/-- `newNIKEPacket`'s payload loop's one-step accumulator update — never fails, so its `forIn`
-collapses to a bare `List.foldl` under `List.forIn_pure_yield_eq_foldl`. Mirrors
-`KEMSphinx.payloadEncryptStep` (the payload-encryption loop is byte-identical between the two
-schemes: both layer `sprpKeys` back-to-front over the tag-prefixed payload). -/
+/-- One step of `newNIKEPacket`'s payload-encryption loop. -/
 private def payloadEncryptStep (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
     (b : ByteArray) (iRev : Nat) : ByteArray :=
   let k := sprpKeys[sprpKeys.size - 1 - iRev]!
   cipher.encrypt k.key.toArray (ofVector k.iv) b
 
-/-- **The full trace of `newNIKEPacket`'s payload-encryption loop.** -/
+/-- Trace of `newNIKEPacket`'s payload-encryption loop. -/
 private theorem newNIKEPacket_payload_trace (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
     (init : ByteArray) :
     ∃ t : Nat → ByteArray, t 0 = init ∧
@@ -1078,10 +1003,7 @@ private theorem newNIKEPacket_payload_trace (cipher : WideBlockCipher) (sprpKeys
   have hj' : j < (List.range' 0 sprpKeys.size).length := by simpa using hj
   simpa using hstep j hj'
 
-/-- **The payload-layering invariant, at the content level**: writing `payloadAt k := t
-(sprpKeys.size - k)` for the trace above, hop `k` recovers `payloadAt (k+1)` from `payloadAt k`
-by decrypting with exactly *its own* `sprpKeys[k]!` — the SPRP-layering fact `unwrapNIKE`'s
-payload decryption at each hop needs. -/
+/-- Hop `k` recovers `payloadAt (k+1)` from `payloadAt k` by decrypting with `sprpKeys[k]!`. -/
 private theorem newNIKEPacket_payload_content (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
     (t : Nat → ByteArray)
     (hstep : ∀ j (_hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j)
@@ -1094,7 +1016,7 @@ private theorem newNIKEPacket_payload_content (cipher : WideBlockCipher) (sprpKe
   rw [show sprpKeys.size - 1 - (sprpKeys.size - k - 1) = k from by omega] at hstepk
   rw [hstepk, show sprpKeys.size - (k + 1) = sprpKeys.size - k - 1 from by omega]
 
-/-- The payload trace never changes size — `cipher.encrypt` preserves length at every step. -/
+/-- The payload trace preserves size. -/
 private theorem newNIKEPacket_payload_size_trace (cipher : WideBlockCipher) (sprpKeys : Array SPRPKey)
     (t : Nat → ByteArray)
     (hstep : ∀ j (_hj : j < sprpKeys.size), t (j + 1) = payloadEncryptStep cipher sprpKeys (t j) j) :
@@ -1110,13 +1032,8 @@ private theorem newNIKEPacket_payload_size_trace (cipher : WideBlockCipher) (spr
 
 set_option maxHeartbeats 4000000 in
 set_option maxRecDepth 4000 in
-/-- **`createHeader`, fully unfolded to content.** Packages the loop1 blinding-chain content, the
-loop2 (`riKeyStream`/`riPadding`) content, and the loop3 trace — plus the `hdr`/`sprpKeys`
-assembly itself — behind one hypothesis, in the exact shape a successful `createHeader` call
-unfolds to, so `groupElements`/`keys` are shared between the blinding-chain content and loop3's
-step formula with no cross-theorem array-equality needed. Mirrors `createKEMHeader_unfold`,
-though loop1's induction is inlined here rather than factored out, since NIKE's nested
-inner re-blinding loop makes a standalone signature unwieldy. -/
+/-- A successful `createHeader`, unfolded: the blinding-chain content, the loop2 content, the
+loop3 trace, and the `hdr`/`sprpKeys` assembly, over shared `groupElements`/`keys`. -/
 private theorem createHeader_unfold (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
     (geom : Geometry) (clientPrivateKey filler : ByteArray) (path : Array PathHop)
     (hdr : ByteArray) (sprpKeys : Array SPRPKey)
@@ -1366,7 +1283,6 @@ private theorem createHeader_unfold (nike : NIKE) (macS : MAC) (kdfS : KDF) (str
           · rw [hSeq, hpushedEq, ← hfinalSS_eq]
           · rw [hPeq, hX, hEeq, Array.getElem!_set!_self _ _ _ (by rw [hsizeG m (by omega)]; omega), hX]
       have hsl1' : s1 (path.size - 1) = loop1Final := by rw [hlen1] at hsl1; exact hsl1
-      -- Loop1's content, in terms of `loop1Final` directly.
       have hgsize : loop1Final.1.size = path.size := by rw [← hsl1']; exact hsizeG (path.size - 1) (le_refl _)
       have hksize0 : loop1Final.2.1.size = path.size := by
         rw [← hsl1']; rw [hsize (path.size - 1) (le_refl _)]; omega
@@ -1387,8 +1303,8 @@ private theorem createHeader_unfold (nike : NIKE) (macS : MAC) (kdfS : KDF) (str
         · rw [hE]; exact mE
         · rw [hS]; exact mS
         · rw [hS]; exact hf i
-      -- Loop2, using its own raw `forIn` directly (no `List.forIn_pure_yield_eq_foldl`
-      -- collapsing, since the elaborated term shape doesn't match what that collapse produces).
+      -- Loop2 via its raw `forIn`; the elaborated term does not match
+      -- `List.forIn_pure_yield_eq_foldl`.
       have hloop2content : ∀ i (hi : i < path.size),
           loop2Final.1[i]! = (streamS.keystream (ofVector (loop1Final.2.1[i]!).headerEncryption)
               (ofVector (loop1Final.2.1[i]!).headerEncryptionIV)
@@ -1450,7 +1366,6 @@ private theorem createHeader_unfold (nike : NIKE) (macS : MAC) (kdfS : KDF) (str
               · simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hstepj
                 rw [← congrArg Prod.snd hstepj]; simp [ih (by omega)]
         rw [← hsl2']; exact hsize2 path.size (le_refl _)
-      -- Loop3, using the SAME `loop1Final`/`loop2Final` this whole proof has been built on.
       obtain ⟨s3, hs03, hsl3, hstep3⟩ := createHeader_loop3_trace nike macS geom path loop1Final.2.1
         loop1Final.1 loop2Final.1 loop2Final.2 path.size
         (if geom.nrHops > path.size then filler else ByteArray.empty, ByteArray.empty) loop3Final hLoop3
@@ -1467,10 +1382,7 @@ private theorem createHeader_unfold (nike : NIKE) (macS : MAC) (kdfS : KDF) (str
         exact h2 hgt
       · rw [hhdreq, ← hsl3]
 
-/-- **`newNIKEPacket`, fully unfolded to content.** As `createHeader_hdr_size`'s own opening moves:
-packages `createHeader`'s own success and the payload-encryption trace
-(`newNIKEPacket_payload_trace`) behind one hypothesis, in the shape a successful `newNIKEPacket`
-call actually unfolds to. Mirrors `KEMSphinx.newKEMPacket_unfold`. -/
+/-- A successful `newNIKEPacket`, unfolded: `createHeader`'s success and the payload trace. -/
 private theorem newNIKEPacket_unfold (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (clientPrivateKey : ByteArray)
     (filler : ByteArray) (path : Array PathHop) (payload : ByteArray) (pkt : ByteArray)
@@ -1504,20 +1416,13 @@ private theorem newNIKEPacket_unfold (nike : NIKE) (cipher : WideBlockCipher) (m
     rw [hfeq] at hfx
     rw [← hfx, htl]
 
-/-- **The packet arriving at hop `k`** (`0 ≤ k < nrHops`), assembled from `createHeader`'s
-`groupElements`/`riPadding`/loop3 trace `s` and `newNIKEPacket`'s payload trace `t`. Mirrors
-`KEMSphinx.hopPacket`, with `groupElements[k]!` (this hop's re-blinded group element, width
-`nike.publicKeySize`) in place of `kemElements[k]!` (an independent per-hop ciphertext, width
-`kem.ciphertextSize`) — the one structural difference between the two schemes' wire formats. -/
+/-- The packet arriving at hop `k`, built from `createHeader`'s and `newNIKEPacket`'s traces. -/
 private def hopPacket (groupElements riPadding : Array ByteArray) (s : Nat → ByteArray × ByteArray)
     (t : Nat → ByteArray) (nrHops k : Nat) : ByteArray :=
   v0AD ++ groupElements[k]! ++ ((s (nrHops - k)).1 ++ (if k > 0 then riPadding[k - 1]! else ByteArray.empty))
     ++ (s (nrHops - k)).2 ++ t (nrHops - k)
 
-/-- **`hopPacket`'s size**: exactly `geom.packetLength`, for every `k < nrHops` — the routing-info
-slot (`R(k) ++ P(k-1)`) is always exactly `geom.routingInfoLength` bytes regardless of `k`, matching
-the classical Sphinx invariant that the wire format never changes size as a packet is forwarded.
-Mirrors `KEMSphinx.hopPacket_size`. -/
+/-- `hopPacket` is `geom.packetLength` bytes at every hop. -/
 private theorem hopPacket_size (nike : NIKE) (macS : MAC) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
     (sprpKeys : Array SPRPKey)
@@ -1579,11 +1484,7 @@ private theorem hopPacket_size (nike : NIKE) (macS : MAC) (geom : Geometry) (pat
     simp only [Nat.sub_zero, Nat.zero_mul, Nat.add_zero] at hnrHmul ⊢
     omega
 
-/-- **`hopPacket`'s five wire-format slices**, spelled out at the exact byte offsets `unwrapNIKE`
-reads them at (`geOff = 2`, `riOff = geOff + nike.publicKeySize`, `macOff = riOff +
-routingInfoLength`, `payloadOff = macOff + macLength`) — the fact `unwrapNIKE`'s own extracts need
-to match against a packet built by `hopPacket`, one slice at a time. Shares `hopPacket_size`'s
-hypotheses and its proof's opening moves. Mirrors `KEMSphinx.hopPacket_slices`. -/
+/-- `hopPacket`'s wire-format slices at the offsets `unwrapNIKE` reads. -/
 private theorem hopPacket_slices (nike : NIKE) (macS : MAC) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
     (sprpKeys : Array SPRPKey)
@@ -1639,8 +1540,7 @@ private theorem hopPacket_slices (nike : NIKE) (macS : MAC) (geom : Geometry) (p
   have hnrHmul : (nrHops - k) * geom.perHopRoutingInfoLength + k * geom.perHopRoutingInfoLength
       = nrHops * geom.perHopRoutingInfoLength := by
     rw [← Nat.add_mul]; congr 1; omega
-  -- The routing-info slot's total width is always exactly `geom.routingInfoLength`, regardless
-  -- of `k` — the same arithmetic `hopPacket_size` needs, extracted here as its own fact.
+  -- The routing-info slot is `geom.routingInfoLength` bytes for every `k`.
   have hRPsize : (s (nrHops - k)).1.size
       + (if k > 0 then riPadding[k - 1]! else ByteArray.empty).size = geom.routingInfoLength := by
     rw [hrouting, hR]
@@ -1711,8 +1611,8 @@ private theorem hopPacket_slices (nike : NIKE) (macS : MAC) (geom : Geometry) (p
 open CryptWalker.Sphinx.Interface (SeedStream nextSeed drawBytes seedBytes fillerLength
   unwrapChainAux)
 
-/-- **`wrapNIKE`**: `Sphinx.Interface.wrap` for `NIKESphinxScheme` — `newNIKEPacket`, drawing the
-client's ephemeral private key and then the unused-hop filler from the seed stream. -/
+/-- `Sphinx.Interface.wrap`: `newNIKEPacket` with the client key and filler drawn from the seed
+stream. -/
 def wrapNIKE (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (path : List PathHop)
     (payload : Vector UInt8 geom.forwardPayloadLength) :
@@ -1726,16 +1626,14 @@ def wrapNIKE (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     if hsize : pkt.size = geom.packetLength then pure ⟨pkt.data, hsize⟩
     else throw "sphinx: internal error: newNIKEPacket produced a wrong-sized packet"
 
-/-- **`newNIKESURB`**. `keyPayload` is the recipient's own random SPRP key ‖ iv for the reply's
-final payload-encryption layer (`sprpKeyMaterialLength = 64` bytes — `surb.go`'s
-`io.ReadFull(r, keyPayload[:])`). Returns `(surb, decryptionKeys)`; `decryptionKeys` is exactly
-what `SURB.decryptSURBPayload` wants. -/
+/-- Build a SURB. `keyPayload` is the 64-byte SPRP key and IV for the reply's final payload
+layer. Returns `(surb, decryptionKeys)`. -/
 def newNIKESURB (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
     (clientPrivateKey : ByteArray)
     (keyPayload : Vector UInt8 64) (filler : ByteArray) (path : Array PathHop) :
     Except String (ByteArray × ByteArray) := do
   let (hdr, sprpKeys) ← createHeader nike macS kdfS streamS geom clientPrivateKey filler path
-  -- Reverse hop order, "to ease decryption" (surb.go's comment).
+  -- Reverse hop order for decryption.
   let mut k : ByteArray := ByteArray.empty
   for iRev in [0:sprpKeys.size] do
     let kk := sprpKeys[sprpKeys.size - 1 - iRev]!
@@ -1744,10 +1642,7 @@ def newNIKESURB (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
   let surb := hdr ++ ofVector (path[0]!).id ++ ofVector keyPayload
   pure (surb, k)
 
-/-- As `newNIKEPacket_size`: `geom.surbLength = headerLength + nodeIDLength +
-sprpKeyMaterialLength`, and `newNIKESURB`'s `surb` is exactly `hdr ++ id(32) ++
-keyPayload(64)` with `hdr.size = geom.headerLength` (`createHeader`'s own loop-accumulated
-invariant, the same one `newNIKEPacket_size` relies on). -/
+/-- `newNIKESURB`'s SURB is `geom.surbLength` bytes. -/
 theorem newNIKESURB_size (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher)
     (geom : Geometry) (clientPrivateKey : ByteArray)
     (keyPayload : Vector UInt8 64) (filler : ByteArray) (path : Array PathHop)
@@ -1773,9 +1668,8 @@ theorem newNIKESURB_size (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : Stre
     CryptWalker.Sphinx.Constants.sprpKeyLength, CryptWalker.Sphinx.Constants.sprpIVLength,
     CryptWalker.Sphinx.Constants.streamIVLength]
 
-/-- **`wrapNIKESURB`**: `Sphinx.Interface.newSURB` for `NIKESphinxScheme` — `newNIKESURB`, drawing
-the client's ephemeral key, `keyPayload` (two seeds' worth) and then the unused-hop filler from the
-seed stream. -/
+/-- `Sphinx.Interface.newSURB`: `newNIKESURB` with the client key, `keyPayload` and filler drawn
+from the seed stream. -/
 def wrapNIKESURB (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
     (path : List PathHop) :
     EStateM String SeedStream (Vector UInt8 geom.surbLength × ByteArray) := do
@@ -1789,9 +1683,7 @@ def wrapNIKESURB (nike : NIKE) (macS : MAC) (kdfS : KDF) (streamS : StreamCipher
     if hsize : surb.size = geom.surbLength then pure (⟨surb.data, hsize⟩, k)
     else throw "sphinx: internal error: newNIKESURB produced a wrong-sized SURB"
 
-/-- **`unwrapNIKE`**: `(payload, replayTag, cmds, forwardPkt)`, satisfying `Sphinx.Interface.unwrap`
-(see that file). Unlike Go, a MAC mismatch reports only an error string, not also the replay
-tag. -/
+/-- Unwrap one layer: `(payload, replayTag, cmds, forwardPkt)`. -/
 def unwrapNIKE (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (privKey : ByteArray) (pkt : ByteArray) :
     Except String
@@ -1801,8 +1693,7 @@ def unwrapNIKE (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF
   let macOff := riOff + geom.routingInfoLength
   let payloadOff := macOff + macLength
 
-  -- Dependent `if`: the size proof below needs `¬(pkt.size < payloadOff)` as a hypothesis, not
-  -- just as control flow.
+  -- Dependent `if`: the size proof below needs `¬(pkt.size < payloadOff)`.
   if h1 : pkt.size < payloadOff then throw "sphinx: invalid packet, truncated"
   else do
   if (pkt.extract 0 2).data ≠ v0AD.data then throw "sphinx: invalid packet, unknown version"
@@ -1817,7 +1708,7 @@ def unwrapNIKE (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF
   if (ofVector gotMac).data ≠ (pkt.extract macOff (macOff + macLength)).data then
     throw "sphinx: invalid packet, MAC mismatch"
 
-  -- Decrypt the (padding-extended) routing_info block and split off this hop's fragment.
+  -- Decrypt the padded routing info and split off this hop's fragment.
   let mut b : ByteArray := pkt.extract riOff macOff ++ ⟨Array.replicate geom.perHopRoutingInfoLength 0⟩
   have hb : b.size = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
     have hpad : (⟨Array.replicate geom.perHopRoutingInfoLength (0 : UInt8)⟩ : ByteArray).size
@@ -1895,12 +1786,8 @@ def unwrapNIKE (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF
       pure (some (decPayload.extract geom.payloadTagLength decPayload.size), replayTag, cmds, none)
 
 set_option maxHeartbeats 1000000 in
-/-- **The single-hop agreement theorem, non-terminal case.** `unwrapNIKE` applied to the packet
-`hopPacket ... k` arriving at hop `k` (`k+1 < nrHops`) reproduces `hopPacket ... (k+1)` exactly,
-given the receiver's private key decodes to `targetSk k` and `path[k]!` is well-formed. Beyond
-the terminal case's key-agreement argument, this needs `nikeBlind_bridge` to show the receiver's
-`nikeBlind groupElement keys.blindingFactor` is definitionally `telescopeElem`'s next term.
-Mirrors `unwrapKEM_hopPacket_nonterminal` (simpler: no ciphertext to embed). -/
+/-- Non-terminal hop: `unwrapNIKE` on `hopPacket ... k` (`k+1 < nrHops`) yields
+`hopPacket ... (k+1)`, given the hop's private key decodes to `targetSk k`. -/
 theorem unwrapNIKE_hopPacket_nonterminal (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
@@ -1967,14 +1854,14 @@ theorem unwrapNIKE_hopPacket_nonterminal (nike : NIKE) (cipher : WideBlockCipher
         ++ [RoutingCommand.nextNodeHop (path[k + 1]!).id (toVec32 (s (nrHops - 1 - k)).2)] := by
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
   have hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength := by omega
-  -- The honest NIKE key agreement at hop `k`, via `nikeDH_bridge` + `NIKE.telescope_agree`.
+  -- Key agreement at hop `k`.
   obtain ⟨hgeq, hkeq, hfdecode⟩ := hgcontent k (by omega)
   have htel := telescope_agree nike clientSk (targetSk k) f k
   have hdh : nikeDH nike (targetSk k) groupElements[k]!
       = Except.ok (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk k) f k).1)) := by
     rw [hgeq, nikeDH_bridge nike (targetSk k) (telescopeElem nike clientSk f k).1
       (telescopeElem nike clientSk f k).2, htel]
-  -- The loop3 trace's step at hop `k` (`j := nrHops - 1 - k`).
+  -- Loop3 trace step at hop `k`.
   have hj1 : nrHops - 1 - k < nrHops := by omega
   obtain ⟨riFragment0, hriFragment0, hR1, hM1⟩ := hstep (nrHops - 1 - k) hj1
   have hidx : nrHops - 1 - (nrHops - 1 - k) = k := by omega
@@ -1999,7 +1886,7 @@ theorem unwrapNIKE_hopPacket_nonterminal (nike : NIKE) (cipher : WideBlockCipher
     simp only [ByteArray.size_append, hnn]
     omega
   have hrfsize : riFragmentFull.size = geom.perHopRoutingInfoLength := zeroPadTo_size hle1
-  -- Sizes needed for `cascading_xor_step`.
+  -- Sizes for `cascading_xor_step`.
   have hssize := createHeader_s_size nike macS geom path keys groupElements riKeyStream riPadding
     hperhop hnnh nrHops s hstep
   have hRk1size : (s (nrHops - 1 - k)).1.size
@@ -2122,7 +2009,7 @@ theorem unwrapNIKE_hopPacket_nonterminal (nike : NIKE) (cipher : WideBlockCipher
       = (s (nrHops - 1 - k)).1 ++ riPadding[k]! := by
     rw [hbsize, ← hpart1, ← hpart2, ByteArray.extract_append_extract]
     congr 1 <;> omega
-  -- The packet's own wire-format slices.
+  -- Wire-format slices.
   have hslices := hopPacket_slices nike macS geom path keys groupElements riKeyStream riPadding
     sprpKeys nrHops s t hvalid hmactag hs0size hstep hgnsize hgesize hpadsize htsize ht0size
     hsprp hgen k (by omega)
@@ -2208,8 +2095,7 @@ theorem unwrapNIKE_hopPacket_nonterminal (nike : NIKE) (cipher : WideBlockCipher
     rw [List.findSome?_append, hfindnone]
     rfl
   simp only [hnextNode]
-  -- The new (re-blinded) group element: `nikeBlind`, bridged, is definitionally `telescopeElem`'s
-  -- own next term.
+  -- The re-blinded group element is `telescopeElem`'s next term.
   obtain ⟨hgeq1, -, -⟩ := hgcontent (k + 1) (by omega)
   have hnewge : nikeBlind nike groupElements[k]! keys[k]!.blindingFactor
       = groupElements[k + 1]! := by
@@ -2225,7 +2111,7 @@ theorem unwrapNIKE_hopPacket_nonterminal (nike : NIKE) (cipher : WideBlockCipher
     rfl
   have hnextMac : ofVector (toVec32 (s (nrHops - 1 - k)).2) = (s (nrHops - 1 - k)).2 :=
     ofVector_toVec32 _ hM2size
-  -- The payload SPRP layering: this hop peels its own outermost encryption layer.
+  -- This hop removes its payload layer.
   have hpayloadstep := newNIKEPacket_payload_content cipher sprpKeys t htstep k (by omega)
   have hsprpkeyk : sprpKeys[k]!.key = keys[k]!.payloadEncryption
       ∧ sprpKeys[k]!.iv = keys[k]!.headerEncryptionIV := by
@@ -2290,13 +2176,8 @@ theorem unwrapNIKE_hopPacket_nonterminal (nike : NIKE) (cipher : WideBlockCipher
   simp only [hpkteq]
 
 set_option maxHeartbeats 1000000 in
-/-- **The single-hop agreement theorem, terminal case.** `unwrapNIKE` applied to the packet
-`hopPacket ... k` arriving at the final hop `k = nrHops - 1` reveals `payload`, given the
-receiver's private key decodes to `targetSk k` and `path[k]!` is well-formed. The key agreement
-is `nikeDH_bridge` composed with `NIKE.telescope_agree`: the receiver's `nikeDH (targetSk k)
-groupElement` is exactly the sender's `telescopeSecret ... k`, so `deriveHopKeys` produces the
-same `keys[k]!` on both sides, and everything downstream matches byte-for-byte. Mirrors
-`unwrapKEM_hopPacket_terminal` (simpler: no ciphertext to carve out of the routing info). -/
+/-- Terminal hop: `unwrapNIKE` on `hopPacket ... (nrHops - 1)` reveals `payload`, given the hop's
+private key decodes to `targetSk k`. -/
 theorem unwrapNIKE_hopPacket_terminal (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
@@ -2350,14 +2231,14 @@ theorem unwrapNIKE_hopPacket_terminal (nike : NIKE) (cipher : WideBlockCipher) (
       = Except.ok (some payload, sha512_256 groupElements[k]!, (path[k]!).commands, none) := by
   obtain ⟨hnnh, hperhopEq, hrouting, hheader, hpacket, -⟩ := id hvalid
   have hperhop : geom.nextNodeHopLength ≤ geom.perHopRoutingInfoLength := by omega
-  -- The honest NIKE key agreement at hop `k`, via `nikeDH_bridge` + `NIKE.telescope_agree`.
+  -- Key agreement at hop `k`.
   obtain ⟨hgeq, hkeq, -⟩ := hgcontent k (by omega)
   have htel := telescope_agree nike clientSk (targetSk k) f k
   have hdh : nikeDH nike (targetSk k) groupElements[k]!
       = Except.ok (ofVector (nike.encodeSharedSecret (telescopeSecret nike clientSk (targetSk k) f k).1)) := by
     rw [hgeq, nikeDH_bridge nike (targetSk k) (telescopeElem nike clientSk f k).1
       (telescopeElem nike clientSk f k).2, htel]
-  -- The loop3 trace's step at hop `k` (`j := nrHops - 1 - k = 0`).
+  -- Loop3 trace step at hop `k`.
   have hj1 : nrHops - 1 - k < nrHops := by omega
   obtain ⟨riFragment0, hriFragment0, hR1, hM1⟩ := hstep (nrHops - 1 - k) hj1
   have hidx : nrHops - 1 - (nrHops - 1 - k) = k := by omega
@@ -2373,7 +2254,7 @@ theorem unwrapNIKE_hopPacket_terminal (nike : NIKE) (cipher : WideBlockCipher) (
   set riFragmentFull := zeroPadTo geom.perHopRoutingInfoLength riFragment0 with hrfFdef
   have hrfsize : riFragmentFull.size = geom.perHopRoutingInfoLength :=
     zeroPadTo_size (commandsToBytes_size_le hriFragment0)
-  -- Sizes needed for `cascading_xor_step`.
+  -- Sizes for `cascading_xor_step`.
   have hssize := createHeader_s_size nike macS geom path keys groupElements riKeyStream riPadding
     hperhop hnnh nrHops s hstep
   have hRk1size : (s (nrHops - 1 - k)).1.size
@@ -2461,7 +2342,7 @@ theorem unwrapNIKE_hopPacket_terminal (nike : NIKE) (cipher : WideBlockCipher) (
     rw [hRsize, ← hkssize, hks_hyp]
   have hbsize : b.size = geom.routingInfoLength + geom.perHopRoutingInfoLength := by
     rw [hbdef, size_xorBytes, hRawSize]
-  -- The packet's own wire-format slices.
+  -- Wire-format slices.
   have hslices := hopPacket_slices nike macS geom path keys groupElements riKeyStream riPadding
     sprpKeys nrHops s t hvalid hmactag hs0size hstep hgnsize hgesize hpadsize htsize ht0size
     hsprp hgen k (by omega)
@@ -2537,7 +2418,7 @@ theorem unwrapNIKE_hopPacket_terminal (nike : NIKE) (cipher : WideBlockCipher) (
     | nodeDelay _ => simp
     | null => simp
   simp only [hfindnone, hnosurb]
-  -- The payload SPRP layering: the terminal hop peels its last encryption layer, exposing `t 0`.
+  -- The terminal hop removes the last payload layer, exposing `t 0`.
   have hpayloadstep := newNIKEPacket_payload_content cipher sprpKeys t htstep k (by omega)
   have hsprpkeyk : sprpKeys[k]!.key = keys[k]!.payloadEncryption
       ∧ sprpKeys[k]!.iv = keys[k]!.headerEncryptionIV := by
@@ -2593,11 +2474,8 @@ theorem unwrapNIKE_hopPacket_terminal (nike : NIKE) (cipher : WideBlockCipher) (
   simp only [hpayloadEq, Bool.false_eq_true, if_false]
 
 set_option maxHeartbeats 1000000 in
-/-- **The multi-hop completeness induction.** Starting `unwrapChainAux` at any hop `k < nrHops` on
-`hopPacket ... k`, given the remaining `nrHops - k` private keys each decoding to `targetSk
-(k+i)`, always recovers `payload` — downward induction on `privKeys`, repeatedly applying
-`unwrapNIKE_hopPacket_nonterminal` to peel one hop until `unwrapNIKE_hopPacket_terminal` closes
-the last one. Mirrors `unwrapChain_hopPacket` on the KEM side. -/
+/-- Unwrapping `hopPacket ... k` through the remaining hops, with private keys decoding to
+`targetSk (k+i)`, recovers `payload`. -/
 theorem unwrapChain_hopPacket (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (path : Array PathHop)
     (keys : Array HopKeys) (groupElements riKeyStream riPadding : Array ByteArray)
@@ -2737,9 +2615,7 @@ private theorem wrapNIKE_bytesPub (nike : NIKE) (cipher : WideBlockCipher) (macS
         (seedBytes str (i + 1) (fillerLength geom path.length))
       path.toArray (ofVector payload) raw hX
 
-/-- Envelope bytes are a pure function of the seed drawn from `state` (`createHeader`'s
-`groupElements[0]!`, never overwritten after `Array.replicate`), regardless of the path/
-payload the rest of `wrap` is building. -/
+/-- The envelope bytes depend only on the seed drawn from `state`. -/
 theorem wrapNIKE_envelope_indep (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (hop0 hop1 : PathHop)
     (rest0 rest1 : List PathHop)
@@ -2756,11 +2632,8 @@ theorem wrapNIKE_envelope_indep (nike : NIKE) (cipher : WideBlockCipher) (macS :
     wrapNIKE_bytesPub nike cipher macS kdfS streamS geom (hop1 :: rest1) payload1 i str
       pkt1 st1' hvalid hmactag h1]
 
-/-- **`wrapNIKE`, fully unfolded to content.** A successful `wrapNIKE` run drew one seed (via
-`nextSeed`, which never fails) and then the filler, and `newNIKEPacket` succeeded on them,
-producing exactly `pkt`'s own bytes. The filler is `seedBytes` of the seed stream, never
-caller-supplied. Mirrors `KEMSphinx.wrapKEM_unfold` (simpler: `wrapNIKE` draws a single
-client-key seed, not an array of per-hop seeds). -/
+/-- A successful `wrapNIKE`, unfolded: one seed and the filler are drawn, and `newNIKEPacket`
+succeeds on them producing `pkt`. -/
 theorem wrapNIKE_unfold (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (path : List PathHop)
     (payload : Vector UInt8 geom.forwardPayloadLength) (i : Nat) (str : Nat → Vector UInt8 32)
@@ -2805,12 +2678,7 @@ theorem wrapNIKE_unfold (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (k
         | _, rfl => dsimp only; rw [dif_neg hsz]; rfl
       rw [hw] at h; injection h
 
-/-- **The real completeness theorem**: `NIKESphinxScheme`'s witness for
-`Sphinx.Interface.unwrap_complete`, proved outright, generic over the wide-block cipher/MAC/KDF/
-stream cipher (mirrors `wrapKEM_unwrapKEM_complete_valid`). `targetSk i` is `privKeys[i]!`'s own
-decoded private key, never an independently-chosen "honest" secret — this is what lets the
-key-agreement argument go through with no `derivePublicKey`-injectivity assumption: the receiver
-at hop `i` simply uses the secret `hpriv` already says its own public key matches. -/
+/-- Completeness: `NIKESphinxScheme`'s witness for `Sphinx.Interface.unwrap_complete`. -/
 theorem wrapNIKE_unwrapNIKE_complete_valid (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
     (hmactag : macS.tagSize = macLength) (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
@@ -2833,7 +2701,7 @@ theorem wrapNIKE_unwrapNIKE_complete_valid (nike : NIKE) (cipher : WideBlockCiph
   have hlen : path.length = privKeys.length := by
     have := congrArg List.length hpriv
     simpa using this
-  -- `targetSk i` is `privKeys[i]!`'s own decoded private key.
+  -- `targetSk i` is the decoded `privKeys[i]!`.
   let targetSk : Nat → nike.PrivateKey := fun i =>
     (nike.decodePrivateKey_total (toVecN nike.privateKeySize privKeys[i]!)).choose
   have htargetSk : ∀ i, nike.decodePrivateKey (toVecN nike.privateKeySize privKeys[i]!) = some (targetSk i) :=
@@ -2943,11 +2811,8 @@ theorem wrapNIKE_unwrapNIKE_complete_valid (nike : NIKE) (cipher : WideBlockCiph
   rw [hpkteq2]
   exact hind
 
-/-- The base `Sphinx.Interface.Sphinx` instance for `nike` — everything `nikeSphinxSchemeOf`
-provides except the re-blindable-envelope structure, which needs a `Fintype`/`SampleableType`
-instance for `nike.PrivateKey` only classical choice can supply for an arbitrary runtime `NIKE`.
-This core needs none of that, so unlike `nikeSphinxSchemeOf`/`nikeSphinxScheme` it compiles to
-real code — executable callers (tests, vector generation) should use this. -/
+/-- The executable `Sphinx.Interface.Sphinx` instance for `nike`, without the re-blindable
+envelope structure (which needs noncomputable instances). -/
 def nikeSphinxCore (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS : KDF)
     (streamS : StreamCipher) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
     (hmactag : macS.tagSize = macLength)
@@ -2968,17 +2833,12 @@ def nikeSphinxCore (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC) (kdfS :
   newSURB := wrapNIKESURB nike macS kdfS streamS geom
   newPacketFromSURB := fun surb payload =>
     CryptWalker.Sphinx.SURB.newPacketFromSURB cipher geom (ofVector surb) payload
-  -- NIKE-Sphinx never fails the way a lattice-based KEM can, so `unwrapReliable` stays at
-  -- `Sphinx`'s trivial default and this proof just discards the new, always-true hypothesis.
+  -- NIKE-Sphinx unwrapping cannot fail, so `unwrapReliable` keeps its trivial default.
   unwrap_complete := fun path privKeys payload st pkt st' hpath _hrel hkeys hcmds hsurb hwrap =>
     wrapNIKE_unwrapNIKE_complete_valid nike cipher macS kdfS streamS geom hvalid hmactag h16
       path privKeys payload st pkt st' hpath hkeys hcmds hsurb hwrap
 
-/-- Build a `NIKESphinxScheme` from any `NIKE` at all — total, no `Except`, since every field here
-is defined unconditionally (needed by test/vector-generation code, which can't route through
-`nikeSphinxScheme`'s `Except` return because `NIKESphinxScheme` has `Type`-valued fields, putting it
-in `Type 1`, which `IO.ofExcept` cannot hold). `noncomputable` — see `nikeSphinxCore`'s doc comment
-if only the base `Sphinx` fields are actually needed. -/
+/-- `NIKESphinxScheme` for any `NIKE`. Noncomputable; use `nikeSphinxCore` for executable code. -/
 noncomputable def nikeSphinxSchemeOf (nike : NIKE) (cipher : WideBlockCipher) (macS : MAC)
     (kdfS : KDF) (streamS : StreamCipher) (geom : Geometry)
     (hvalid : geom.ValidForNIKE nike) (hmactag : macS.tagSize = macLength)
@@ -2996,14 +2856,8 @@ noncomputable def nikeSphinxSchemeOf (nike : NIKE) (cipher : WideBlockCipher) (m
         payload1 st pkt0 pkt1 st0' st1' hvalid hmactag h0 h1)
   nike := nike
 
-/-- Build a `NIKESphinxScheme` for whatever NIKE `geom.scheme` names, resolved through
-`CryptWalker.NIKE.byName` — the same registry `Geometry.ofNIKE` resolves against. Registering a
-new NIKE needs no change here. Checks `geom.ValidForNIKE nike` (decidable), rejecting a mismatched
-`geom` explicitly rather than trusting it silently.
-
-The one place that picks a concrete cryptographic stack (AEZ/HMAC-SHA256/HKDF-SHA256-Expand/
-AES-256-CTR, matching `sphinx_nike_vectors.json`) — `nikeSphinxSchemeOf` underneath is fully
-generic, this is just the default a caller who only knows a NIKE's name needs. -/
+/-- `NIKESphinxScheme` for the NIKE named by `geom.scheme`, with AEZ, HMAC-SHA256,
+HKDF-SHA256-Expand and AES-256-CTR. Rejects a `geom` not valid for that NIKE. -/
 noncomputable def nikeSphinxScheme (geom : Geometry) : Except String NIKESphinxScheme :=
   match geom.scheme with
   | .inr name => throw s!"sphinx: geometry scheme {name} is a KEM, not a NIKE"

@@ -7,14 +7,11 @@ import Lean.Data.Json
 import CryptWalker.MultiRecipientHybrid.Schemes
 import CryptWalker.Util.newhex
 
-/-! # Multi-recipient hybrid: known-answer tests, against `hpqc`
+/-! # Multi-recipient hybrid: known-answer tests
 
-Checks `hybridMLKEM768X25519Blake2b` against vectors vendored from hpqc
-(`testdata/multirecipient_hybrid.json`, hpqc's `kem/mrhybrid` over `"MLKEM768-X25519"`). KEM
-encapsulation is randomized on both sides, so for each recipient: build the private key from its
-X25519 scalar and ML-KEM-768 `(d, z)`, decapsulate the ciphertext reduced to that recipient
-(`forRecipient`), and check the derived key and the payload; then open the reply under recipient
-0's derived key. -/
+Vectors from `testdata/multirecipient_hybrid.json` for `hybridMLKEM768X25519Blake2b`. For each
+recipient, decapsulate its `forRecipient` ciphertext and check the derived key and payload; then
+open the reply under recipient 0's key. -/
 
 open Lean
 open CryptWalker.KEM (kemX25519Blake2b kemMLKEM768X25519Blake2b)

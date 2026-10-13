@@ -13,22 +13,9 @@ import Mathlib.Tactic.Set
 
 /-! # The `Acks` field of a group chat message
 
-See "Rosters" (Layout, Parsing) in the group chat spec, and katzenqt's `ack_codec.py`, which this
-follows. A field names the acknowledged members by roster index, as a list of index bytes or a
-bitmap, whichever is shorter, and then carries one value of `v` bytes for each, in ascending order
-of roster index. Nothing frames the parts: a reader divides the field's length by `v`, and the
-quotient is the number of values and the remainder the length of the naming.
-
-Bytes are natural numbers here; `decode` is only ever handed real bytes (each `< 256`).
-
-* `decode_encode`: decoding undoes encoding whenever `v > 32`.
-* `decode_encode_iff`: and only then. For every `v ≤ 32` some acknowledgement set is misread,
-  which is the spec's "were a value ever made shorter than 33 bytes, the field would need an
-  explicit count".
-* `encode_decode`: with `strict`, a field that decodes is the encoding of what it decodes to, so
-  each set of acknowledgements has exactly one field.
-* `spec_decode_malleable`: the spec's parser (not `strict`) also accepts a list where the bitmap
-  is shorter, so one set of acknowledgements has two fields. -/
+Acknowledged members are named by roster index, as a list of index bytes or a bitmap, whichever
+is shorter, followed by one `v`-byte value each in ascending index order. See "Rosters" in the
+group chat spec. Bytes are natural numbers here, each `< 256`. -/
 
 namespace CryptWalker.GroupChat.AckCodec
 
@@ -189,8 +176,8 @@ theorem length_chunks {v : ℕ} : ∀ {n : ℕ} {l : List ℕ}, (chunks v l n).l
 theorem width_le {i : ℕ} (h : i < rosterMax) : width i ≤ maxNaming := by
   simp only [width, rosterMax, maxNaming] at *; omega
 
-/-- **Decoding undoes encoding**, under either parser, whenever a value is longer than the
-longest naming. -/
+/-- Decoding undoes encoding, under either parser, whenever a value is longer than the longest
+naming. -/
 theorem decodeUncounted_encodeUncounted (strict : Bool) {v : ℕ} (hv : maxNaming < v) {acks : List (ℕ × List ℕ)}
     (h : WF v acks) : decodeUncounted strict v (encodeUncounted acks) = some acks := by
   obtain ⟨hs, hlt, hsz⟩ := h
@@ -276,8 +263,8 @@ theorem decodeUncounted_encodeUncounted (strict : Bool) {v : ℕ} (hv : maxNamin
 
 /-! ## Only then: a value of 32 bytes or fewer is misread -/
 
-/-- **The layout needs values longer than 32 bytes.** Decoding undoes encoding for every set of
-acknowledgements exactly when it does. -/
+/-- Without a count, decoding undoes encoding for every acknowledgement set exactly when values
+exceed 32 bytes. -/
 theorem decodeUncounted_encodeUncounted_iff (strict : Bool) (v : ℕ) :
     (∀ acks, WF v acks → decodeUncounted strict v (encodeUncounted acks) = some acks) ↔ maxNaming < v := by
   refine ⟨fun h => ?_, fun hv acks hw => decodeUncounted_encodeUncounted strict hv hw⟩
@@ -392,8 +379,7 @@ theorem nameMembers_setBits {naming : List ℕ} (hbytes : ∀ b ∈ naming, b < 
     have h2 : 7 - (8 * j + (7 - t)) % 8 = t := by omega
     rw [h1, h2, hget j hj2]; exact ht
 
-/-- **One field per set of acknowledgements.** Under the strict parser, a field that decodes is
-exactly the encoding of what it decodes to, and what it decodes to is well formed. -/
+/-- Under the strict parser, a field that decodes is the encoding of its well-formed result. -/
 theorem encodeUncounted_decodeUncounted {v : ℕ} {field : List ℕ} {acks : List (ℕ × List ℕ)}
     (hbytes : ∀ b ∈ field, b < 256) (h : decodeUncounted true v field = some acks) :
     WF v acks ∧ encodeUncounted acks = field := by
@@ -448,7 +434,7 @@ theorem encodeUncounted_decodeUncounted {v : ℕ} {field : List ℕ} {acks : Lis
 /-! ## The spec's parser is malleable; a strict one is not -/
 
 /-- The members 0, 1 and 2, named by a list where the bitmap `0xe0` is shorter, with three
-33-byte values: the spec's parser accepts it, and it is not what `encodeUncounted` writes. -/
+33-byte values: the spec's parser accepts it, but `encodeUncounted` would write the bitmap. -/
 theorem spec_decodeUncounted_malleable :
     let field := [0, 1, 2] ++ List.replicate 99 0
     ∃ acks, decodeUncounted false 33 field = some acks ∧ encodeUncounted acks ≠ field ∧
@@ -458,11 +444,10 @@ theorem spec_decodeUncounted_malleable :
   · decide
   · decide
 
-/-! ## The field katzenqt sends: a count, the naming, and 8-byte values
+/-! ## Counted field
 
-A value is a BACAP `Idx64`, 8 bytes, shorter than the longest naming, so by
-`decodeUncounted_encodeUncounted_iff` the field's length no longer says how many values it holds.
-The field begins with that count, less one; an empty field acknowledges no one. -/
+Values shorter than the longest naming need an explicit count, so the field begins with the count
+less one; an empty field acknowledges no one. -/
 
 /-- The field for `acks`: the count less one, the naming, then the values. -/
 def encode (acks : List (ℕ × List ℕ)) : List ℕ :=
@@ -553,7 +538,7 @@ theorem count_lt {v : ℕ} {acks : List (ℕ × List ℕ)} (h : WF v acks) :
   have : 0 < rosterMax := by decide
   omega
 
-/-- **Decoding undoes encoding**, under either parser, for values of every size. -/
+/-- Decoding undoes encoding, under either parser, for values of every size. -/
 theorem decode_encode (strict : Bool) (v : ℕ) {acks : List (ℕ × List ℕ)} (h : WF v acks) :
     decode strict v (encode acks) = some acks := by
   by_cases hne : acks = []
@@ -584,8 +569,7 @@ theorem decode_encode (strict : Bool) (v : ℕ) {acks : List (ℕ × List ℕ)} 
     readMembers_nameMembers strict hs hidx_lt, hnlen, ← hvlen, chunks_flatten hvals_sz]
   simp [hzip]
 
-/-- **One field per set of acknowledgements.** Under the strict parser, a field that decodes is
-exactly the encoding of what it decodes to, and what it decodes to is well formed. -/
+/-- Under the strict parser, a field that decodes is the encoding of its well-formed result. -/
 theorem encode_decode {v : ℕ} {field : List ℕ} {acks : List (ℕ × List ℕ)}
     (hbytes : ∀ b ∈ field, b < 256) (h : decode true v field = some acks) :
     WF v acks ∧ encode acks = field := by
@@ -621,7 +605,7 @@ theorem encode_decode {v : ℕ} {field : List ℕ} {acks : List (ℕ × List ℕ
       simp [hcount]
 
 /-- The members 0, 1 and 2, named by a list where the bitmap `0xe0` is shorter, with three 8-byte
-values: the spec's parser accepts it, and it is not what `encode` writes. -/
+values: the spec's parser accepts it, but `encode` would write the bitmap. -/
 theorem spec_decode_malleable :
     let field := [2, 0, 1, 2] ++ List.replicate 24 0
     ∃ acks, decode false 8 field = some acks ∧ encode acks ≠ field ∧
@@ -674,7 +658,7 @@ theorem length_le : ∀ (k n : ℕ), (le k n).length = k
 /-- Bytes in a value: an `Idx64`. -/
 def idxSize : ℕ := 8
 
-/-- The field katzenqt sends for `acks`, pairs of roster index and `Idx64`. -/
+/-- The field for `acks`, pairs of roster index and `Idx64`. -/
 def encodeIdx64 (acks : List (ℕ × ℕ)) : List ℕ := encode (acks.map fun a => (a.1, le idxSize a.2))
 
 def decodeIdx64 (strict : Bool) (field : List ℕ) : Option (List (ℕ × ℕ)) :=
@@ -694,7 +678,7 @@ theorem map_le_fromLE {acks : List (ℕ × ℕ)} (h : ∀ a ∈ acks, a.2 < 2 ^ 
   intro a ha
   simp [fromLE_le idxSize a.2 (by simpa [idxSize] using h a ha)]
 
-/-- **Decoding undoes encoding** for the field katzenqt sends. -/
+/-- Decoding undoes encoding for `Idx64` values. -/
 theorem decodeIdx64_encodeIdx64 (strict : Bool) {acks : List (ℕ × ℕ)} (h : WFIdx64 acks) :
     decodeIdx64 strict (encodeIdx64 acks) = some acks := by
   have hwf : WF idxSize (acks.map fun a => (a.1, le idxSize a.2)) :=
@@ -703,8 +687,8 @@ theorem decodeIdx64_encodeIdx64 (strict : Bool) {acks : List (ℕ × ℕ)} (h : 
      fun a ha => by obtain ⟨b, hb, rfl⟩ := List.mem_map.1 ha; exact length_le _ _⟩
   simp [decodeIdx64, encodeIdx64, decode_encode strict idxSize hwf, map_le_fromLE h.idx64]
 
-/-- **One field per set of acknowledgements**, for the field katzenqt sends: under the strict
-parser, a field that decodes is the encoding of what it decodes to, which is well formed. -/
+/-- For `Idx64` values, under the strict parser, a field that decodes is the encoding of its
+well-formed result. -/
 theorem encodeIdx64_decodeIdx64 {field : List ℕ} {acks : List (ℕ × ℕ)}
     (hbytes : ∀ b ∈ field, b < 256) (h : decodeIdx64 true field = some acks) :
     WFIdx64 acks ∧ encodeIdx64 acks = field := by

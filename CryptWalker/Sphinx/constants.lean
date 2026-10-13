@@ -5,55 +5,44 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 namespace CryptWalker.Sphinx.Constants
 
-/-! # Sphinx Packet Format constants
+/-! # Sphinx packet format constants
 
-The truly fixed constants — everything else (header/routing-info/packet lengths) is *computed*
-from these plus a NIKE/KEM scheme's key/ciphertext size, in `Geometry.lean`. Two sources:
+Scheme-dependent lengths are computed in `geometry.lean`. -/
 
-* `katzenpost/core/sphinx/constants/constants.go`
-* `katzenpost/core/sphinx/internal/crypto/crypto.go` (the crypto-primitive-derived sizes) —
-  cross-referenced against the ported primitives (`CryptWalker.MAC`/`KDF`/`StreamCipher`) rather
-  than restated as independent literals, so the two can't silently drift apart. -/
-
-/-- `constants.NodeIDLength`. -/
 def nodeIDLength : Nat := 32
 
-/-- `constants.RecipientIDLength`. -/
 def recipientIDLength : Nat := 32
 
-/-- `constants.SURBIDLength`. -/
 def surbIDLength : Nat := 16
 
-/-- `constants.CommandTagLength`: the one-byte command-type tag every routing command starts
-with. -/
+/-- The one-byte tag every routing command starts with. -/
 def commandTagLength : Nat := 1
 
-/-- `internal/crypto.MACLength`: `MAC.HMAC.hmacSha256`'s full tag width. -/
+/-- HMAC-SHA256 tag width. -/
 def macLength : Nat := 32
 
-/-- `internal/crypto.StreamIVLength`: `StreamCipher.AES256CTR.keystream`'s IV width. -/
+/-- AES-256-CTR IV width. -/
 def streamIVLength : Nat := 16
 
-/-- `internal/crypto.SPRPKeyLength`/`SPRPIVLength`: `WideBlockCipher.AEZ`'s key/nonce. -/
+/-- AEZ key and nonce widths. -/
 def sprpKeyLength : Nat := 48
 def sprpIVLength : Nat := streamIVLength
 
-/-- `geo.nextNodeHopLength`: `1 (tag) + NodeIDLength + MACLength`. -/
+/-- `1 (tag) + nodeIDLength + macLength`. -/
 def nextNodeHopLength : Nat := commandTagLength + nodeIDLength + macLength
 
-/-- `geo.surbReplyLength`: `1 (tag) + SURBIDLength`. -/
+/-- `1 (tag) + surbIDLength`. -/
 def surbReplyLength : Nat := commandTagLength + surbIDLength
 
-/-- `geo.adLength`: the two-byte version/domain prefix on every Sphinx header. -/
+/-- The two-byte version prefix on every header. -/
 def adLength : Nat := 2
 
-/-- `geo.payloadTagLength`: the all-zero tag a correctly-onion-decrypted payload ends in. -/
+/-- Width of the all-zero tag a correctly decrypted payload ends in. -/
 def payloadTagLength : Nat := 32
 
-/-- `geo.sphinxPlaintextHeaderLength`. -/
 def sphinxPlaintextHeaderLength : Nat := 2
 
-/-- `geo.sprpKeyMaterialLength`: `SPRPKeyLength + SPRPIVLength`, one SURB reply-payload key. -/
+/-- One SPRP key plus IV. -/
 def sprpKeyMaterialLength : Nat := sprpKeyLength + sprpIVLength
 
 end CryptWalker.Sphinx.Constants

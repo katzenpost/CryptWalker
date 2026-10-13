@@ -7,15 +7,10 @@ import Lean.Data.Json
 import CryptWalker.KEM.Schemes
 import CryptWalker.Util.newhex
 
-/-! # X25519 + ML-KEM-768 hybrid combiner vectors, for cross-checking against hpqc
+/-! # X25519 + ML-KEM-768 combiner vector generator
 
-As `Sphinx.gen_kem_vectors`: builds vectors with the Lean side's own computation (real IO
-randomness, not a fixed seed -- whatever concrete values are drawn get recorded), in the same
-schema `mlkem768_x25519_combiner_test.lean` checks, so hpqc's `kem/combiner` test suite can
-reconstruct each component from the recorded raw inputs and confirm it agrees on the combined
-ciphertext and shared secret.
-
-Uses `kemX25519Blake2b`, the deployed `blake2b-xof` adapter PRF. -/
+Writes random vectors in the schema `mlkem768_x25519_combiner_test.lean` checks, using
+`kemX25519Blake2b`. -/
 
 open Lean
 open CryptWalker.Util.newhex

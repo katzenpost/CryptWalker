@@ -19,8 +19,7 @@ open CryptWalker.NIKE.X25519Common
 
 namespace CryptWalker.NIKE.X25519_montgomery_ladder
 
-/-- Little-endian byte encoding, exactly 32 bytes by construction. Ladder-only: nothing on the
-group side needs to turn a field element back into raw RFC 7748 bytes. -/
+/-- Little-endian byte encoding, exactly 32 bytes. -/
 def fromField (x : ZMod p) : Vector UInt8 keySize :=
   Vector.ofFn (fun i : Fin keySize => (x.val >>> (8 * i.val)).toUInt8)
 
@@ -57,14 +56,8 @@ def montgomery_step (s : LadderState) : LadderState :=
 def cswap (swap : Bool) (x y : ZMod p) : (ZMod p × ZMod p) :=
   if swap then (y, x) else (x, y)
 
-/-- The ladder consumes the scalar as *bytes*, not as a `ZMod p`.
-
-Taking a `ZMod p` here and calling `fromField` to get the bits back was a correctness bug: a
-clamped scalar lies in `[2^254, 2^255)` and can exceed `p = 2^255 - 19`, so the round trip
-through the field reduced it modulo the field prime. A scalar reduces modulo the *group order*,
-never modulo `p`. It affected the two clamped values above `p` -- `2^255 - 16` and `2^255 - 8`
--- and was found by cross-checking against `X25519.Scheme`, which computes in the group
-and does not reduce. -/
+/-- The ladder takes the scalar as bytes: a clamped scalar can exceed `p`, so it must not be
+reduced modulo `p`. -/
 def montgomery_ladder (e : Vector UInt8 keySize) (point : ZMod p) : Id LadderState :=
   do
     let mut state : LadderState := {
@@ -95,18 +88,15 @@ def scalarmult (scalarBytes : Vector UInt8 keySize) (point : ZMod p) : ZMod p :=
 def curve25519 (scalar point : Vector UInt8 keySize) : Vector UInt8 keySize :=
   fromField (scalarmult scalar (toField point))
 
-/-- **X25519**, RFC 7748 signature: same name as `X25519.x25519`, distinguished by namespace.
-Unlike the group version, this never fails: the ladder computes directly on u-coordinates and
-is total over the whole 32-byte input space, quadratic-twist points included, so there's no
-`Option` here. -/
+/-- RFC 7748 X25519. Total: the ladder is defined on every u-coordinate, including twist
+points. -/
 def x25519 (scalarBytes uCoordBytes : Vector UInt8 keySize) : Vector UInt8 keySize :=
   curve25519 scalarBytes uCoordBytes
 
 /-! ## The same ladder on `Field25519.Fe`
 
-`montgomery_step` and `montgomery_ladder` again, on fixed-width limbs instead of `ZMod p`, with
-the swaps done by masking so the ladder does not branch on scalar bits. Checked against the `ZMod`
-ladder and RFC 7748 vectors; proving the two equal is future work. -/
+The ladder on fixed-width limbs, with masked swaps so it does not branch on scalar bits. Tested
+against the `ZMod` ladder and RFC 7748 vectors, not yet proved equal to it. -/
 
 open CryptWalker.NIKE.Field25519 (Fe)
 
@@ -160,10 +150,7 @@ def scalarmult_fe (scalarBytes : Vector UInt8 keySize) (point : Fe) : Fe :=
 def curve25519_fe (scalar point : Vector UInt8 keySize) : Vector UInt8 keySize :=
   (scalarmult_fe scalar (Fe.ofBytes point)).toBytes
 
-/-
-  NIKE types for x25519. `PrivateKey` is `X25519Common.PrivateKey`, opened unqualified;
-  `PublicKey` and `SharedSecret` are ladder-only, unlike the group scheme's `Point`/`ZMod p`.
--/
+/- NIKE types for X25519. -/
 
 structure PublicKey    where data : Vector UInt8 keySize
 structure SharedSecret where data : Vector UInt8 keySize
@@ -173,9 +160,8 @@ def derivePub (sk : PrivateKey) : PublicKey := ⟨curve25519 sk.data basepointBy
 private def bytes32 (l : List UInt8) (h : l.length = keySize := by decide) :
     Vector UInt8 keySize := ⟨l.toArray, by simpa using h⟩
 
-/-- Curve25519 small-order points, little-endian, per libsodium's `has_small_order`.
-    Seven values; the high bit of byte 31 is masked before comparison, so each
-    also covers its +2^255 variant. See eprint.iacr.org/2017/806. -/
+/-- Curve25519 small-order points, little-endian. Compared after masking the high bit of byte 31,
+so each also covers its `+2^255` variant. See eprint.iacr.org/2017/806. -/
 def smallOrderPoints : List (Vector UInt8 keySize) := [
   -- 0 (order 4)
   bytes32 (List.replicate 32 0x00),
@@ -195,7 +181,7 @@ def smallOrderPoints : List (Vector UInt8 keySize) := [
   bytes32 (0xee :: List.replicate 30 0xff ++ [0x7f])
 ]
 
-/-- Clear the high bit of byte 31, as libsodium does before comparison. -/
+/-- Clear the high bit of byte 31. -/
 def maskHighBit (v : Vector UInt8 keySize) : Vector UInt8 keySize :=
   v.set 31 (v[31] &&& 0x7f)
 
@@ -210,24 +196,13 @@ axiom derivePub_safe : ∀ sk : PrivateKey, SafePub (derivePub sk)
 axiom curve25519_commutes : ∀ sk₁ sk₂ : PrivateKey,
   curve25519 sk₁.data (derivePub sk₂).data = curve25519 sk₂.data (derivePub sk₁).data
 
-/-- `groupAction`'s output is always safe (never one of the 8 small-order points), regardless of
-whether the input `pk` itself was safe — matching X25519's standard scalar-clamping guarantee
-(`clampScalar` forces every private key to a multiple of the curve's cofactor 8, which annihilates
-any small-order component of the input point). What lets Sphinx's blinding chain apply *another*
-group action to a previously-blinded (not freshly-derived) group element; the analogous fact for
-`X25519.Scheme`'s group-theoretic construction (`groupActionX_safe`) is a real proof from the
-point's type staying on-curve, not an axiom — this one rests on the ladder's own clamping
-discipline instead, at the same trust level as `derivePub_safe`/`curve25519_commutes` above. -/
+/-- The ladder's output is never a small-order point: clamping makes every scalar a multiple of
+the cofactor 8. -/
 axiom curve25519_safe : ∀ (sk : PrivateKey) (pk : PublicKey),
   SafePub (⟨curve25519 sk.data pk.data⟩ : PublicKey)
 
-/-- **The Diffie-Hellman identity, generalized to a re-blinded chain**: `curve25519_commutes`
-above only covers two honestly-derived public keys; `createHeader`'s *iterated* blinding chain
-needs this more general form once later hops act on a previously-blinded (not freshly-derived)
-group element. Same trust tier as `curve25519_commutes`, just stated for an arbitrary point
-rather than one restricted to `derivePub`'s image — true of the underlying scalar multiplication
-regardless (it's the standard multi-party/iterated Diffie-Hellman property), just not what the
-narrower field above happens to state. -/
+/-- Group actions by two private keys commute on any public key, not only on derived ones as in
+`curve25519_commutes`. -/
 axiom curve25519_comm_gen : ∀ (sk₁ sk₂ : PrivateKey) (pk : Vector UInt8 keySize),
   curve25519 sk₁.data (curve25519 sk₂.data pk) = curve25519 sk₂.data (curve25519 sk₁.data pk)
 
@@ -270,9 +245,8 @@ def LadderScheme : NIKE where
 
 /-! ## The ladder on `Field25519` limbs, as a NIKE
 
-`FeScheme` is `LadderScheme` with `curve25519_fe` in place of `curve25519`. Its four axioms are
-the ladder's four, restated for `curve25519_fe`. They are temporary: proving
-`curve25519_fe = curve25519` would derive them from the ones above. -/
+`LadderScheme` with `curve25519_fe` in place of `curve25519`. Its axioms restate the ladder's for
+`curve25519_fe`; proving `curve25519_fe = curve25519` would remove them. -/
 
 def derivePubFe (sk : PrivateKey) : PublicKey := ⟨curve25519_fe sk.data basepointBytes⟩
 

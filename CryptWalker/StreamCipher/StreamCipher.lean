@@ -7,27 +7,19 @@ namespace CryptWalker.StreamCipher
 
 /-! # Stream ciphers, generically
 
-The same shape as `NIKE`, `KEM`, `Hash`, `HKDF`, `MAC`, `WideBlockCipher`: a plain structure whose
-one law is a field. `key`/`iv` are plain `ByteArray`s, `keySize`/`ivSize` informational only.
-
-Pseudorandomness is computational, so it can't be a field here (as `Hash.lean` explains for
-collision resistance); determinism needs no stating, since `keystream` being a plain function
-already gives it. What *is* statable, and what routing-info encryption depends on to line up
-sender and receiver, is the one structural constraint: a request for `len` bytes of keystream
-produces exactly `len` bytes. -/
+Pseudorandomness is computational and not stated. The one law is that a request for `len` bytes
+of keystream produces exactly `len` bytes. `keySize`/`ivSize` are informational. -/
 
 structure StreamCipher where
   keySize : Nat
   ivSize : Nat
 
-  /-- `len` bytes of keystream, from a key and nonce/IV. Any size `len`, including one not a
-  multiple of the cipher's underlying block size. -/
+  /-- `len` bytes of keystream from a key and IV. `len` need not be a block multiple. -/
   keystream : ByteArray → ByteArray → (len : Nat) → ByteArray
 
   keystream_size : ∀ key iv len, (keystream key iv len).size = len
 
-/-- The empty stream cipher: a placeholder so `StreamCipher` is demonstrably inhabited. Obviously
-not a stream cipher (every output is all-zero). -/
+/-- An all-zero keystream, showing the law is satisfiable. Provides no security. -/
 instance : Inhabited StreamCipher := ⟨{
   keySize := 0
   ivSize  := 0

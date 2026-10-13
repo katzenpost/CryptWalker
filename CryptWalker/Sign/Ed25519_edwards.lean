@@ -8,10 +8,7 @@ import CryptWalker.Sign.Ed25519_facts
 
 /-! # Edwards-side facts: completeness and the special sums
 
-`Ed25519Math.add` is the affine twisted-Edwards formula with a division, so it means nothing
-where a denominator vanishes. Because `d` is not a square, no denominator ever vanishes on curve
-points (`complete`), which is what lets the transport in `Ed25519_group` treat `add` as a total
-group law. -/
+Because `d` is not a square, the denominators of `Ed25519Math.add` never vanish on curve points. -/
 
 namespace CryptWalker.Sign.Ed25519Edwards
 
@@ -37,8 +34,8 @@ lemma one_add_d_sq_ne {x y : F} (h : -x ^ 2 + y ^ 2 = 1 + d * x ^ 2 * y ^ 2) : 1
   rw [hy] at h0
   linear_combination h0
 
-/-- **Completeness of the Edwards law.** The denominators `1 ± d x₁x₂y₁y₂` never vanish on curve
-points, because `d` is a non-square. -/
+/-- Completeness of the Edwards law: the denominators `1 ± d x₁x₂y₁y₂` never vanish on curve
+points. -/
 theorem complete {x1 y1 x2 y2 : F} (h1 : -x1 ^ 2 + y1 ^ 2 = 1 + d * x1 ^ 2 * y1 ^ 2)
     (h2 : -x2 ^ 2 + y2 ^ 2 = 1 + d * x2 ^ 2 * y2 ^ 2) : (d * x1 * x2 * y1 * y2) ^ 2 ≠ 1 := by
   intro ht

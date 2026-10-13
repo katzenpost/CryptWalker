@@ -8,34 +8,12 @@ import VCVio.CryptoFoundations.PRG
 import VCVio.CryptoFoundations.SecExp
 import VCVio.OracleComp.Constructions.SampleableType
 
-/-! # §4.4: Security and Indistinguishability of Forward and Reply Messages
+/-! # §4.4: Indistinguishability of forward and reply messages
 
-The paper's proof only turns on the *first* challenge hop's tuple `((α0,β0,γ0),δ0)` — general `j`
-reduces to `j = 0` for free — so this file models just that one hop, not the full recursive
-multi-hop header `Integrity` (§4.2) needs. Works at the paper's own abstraction (generic DDH
-group, generic PRG-shaped ρ/μ/π), not concrete AES/HMAC/AEZ byte code, the same trade-off
-`WrapResistance` makes for §4.3.
-
-`ρ(hρ(s0))`, `μ(hμ(s0), β0)`, `π(hπ(s0), ·)`, viewed as one-shot values, are each exactly
-`PRGScheme.gen`'s shape once their second argument is fixed, so no new VCVio primitive is
-needed — `PRGScheme` is reused three times instead of a bespoke PRF/PRP game.
-
-## One idealization, one computational assumption
-
-Two hypotheses, both isolated as explicit arguments rather than baked into a proof:
-
-* **DDH** (`DiffieHellman.lean`, unchanged): `s0`'s indistinguishability from an independent
-  random group element.
-* **Joint random-oracle independence**: `hρ, hμ, hπ`, queried at the same fresh `s0`, behave as
-  three independent random functions. Modeled as a `PRGScheme` (`jointKeyPRG` below) rather than
-  an exact bijection — a bijection would be false for any real expanding KDF (pigeonhole) — so
-  the gap it introduces is bounded by that PRG's own advantage like the other hybrid steps.
-
-## Out of scope
-
-No claim that concrete AES-CTR/HMAC-SHA256/AEZ or curve25519 satisfy the abstract games here.
-General `j` and full reply-vs-nymserver indistinguishability (§4.4 footnote 1) aren't mechanized;
-the paper itself only informally reduces both to the `j = 0` forward case. -/
+Models the first challenge hop's tuple `((α0,β0,γ0),δ0)` over a generic DDH group with ρ/μ/π as
+PRGs; the paper reduces general `j` to `j = 0`. Assumptions: DDH, and that `hρ, hμ, hπ` at a fresh
+`s0` are jointly pseudorandom (`jointKeyPRG`). General `j` and reply-vs-nymserver
+indistinguishability are not mechanized. -/
 
 namespace CryptWalker.Sphinx.Indistinguishability
 
@@ -46,8 +24,7 @@ open DiffieHellman (DDHAdversary ddhExpReal ddhExpRand ddhDistAdvantage)
 variable {F G Seed KeyMu KeyPi Beta Gamma Delta : Type}
 variable [Field F] [AddCommGroup G] [Module F G] [AddCommGroup Beta]
 
-/-- **§3.1's system parameters** for hop 0's tuple: the generator `g`; the random oracles
-`hρ, hμ, hπ` keying ρ/μ/π off the DH shared secret `s0`; and ρ/μ/π themselves. -/
+/-- §3.1's system parameters: the generator `g`, the random oracles `hρ, hμ, hπ`, and ρ/μ/π. -/
 structure Sys (F G Seed KeyMu KeyPi Beta Gamma Delta : Type) where
   g : G
   hρ : G → Seed
@@ -57,33 +34,28 @@ structure Sys (F G Seed KeyMu KeyPi Beta Gamma Delta : Type) where
   μeval : KeyMu → Beta → Gamma
   πenc : KeyPi → Delta → Delta
 
-/-- The two challenge-branch plaintexts: §3.2's `{n1‖γ1‖β1[0..]}` XORed into `β0`, and `δ0`'s
-plaintext. Fixed by the adversary's choice of path/message, independent of the fresh `x`. -/
+/-- The two challenge branches: the routing plaintext XORed into `β0`, and `δ0`'s plaintext. -/
 structure Choice (Beta Delta : Type) where
   betaPt : Beta
   deltaPt : Delta
 
 variable (S : Sys F G Seed KeyMu KeyPi Beta Gamma Delta)
 
-/-- Hop 0's tuple `((α0,β0,γ0),δ0)`, given `α0 = x • g` and `s0` (either `x`'s genuine DH shared
-secret with `n0`, or an independent random element in the hybrid games below). -/
+/-- Hop 0's tuple `((α0,β0,γ0),δ0)` from `α0 = x • g` and `s0`. -/
 def buildFrom (α0 s0 : G) (c : Choice Beta Delta) : G × Beta × Gamma × Delta :=
   let β0 := c.betaPt + S.ρgen (S.hρ s0)
   let γ0 := S.μeval (S.hμ s0) β0
   let δ0 := S.πenc (S.hπ s0) c.deltaPt
   (α0, β0, γ0, δ0)
 
-/-- An adversary against the §4.4 game: given hop 0's tuple, guess which of the two challenge
-branches produced it. -/
+/-- An adversary that guesses which challenge branch produced hop 0's tuple. -/
 abbrev Adversary := G × Beta × Gamma × Delta → ProbComp Bool
 
 section Games
 
 variable [SampleableType F]
 
-/-- **Game `G`** (§4.4), specialized to `j = 0`: the challenger flips `b`, builds hop 0's tuple
-honestly from the branch `b` picks (`s0` the genuine DH shared secret, `xn0` unknown to the
-adversary), and the adversary guesses `b`. -/
+/-- Game `G` (§4.4) at `j = 0`: hop 0's tuple built from branch `b` with the real DH secret. -/
 def gameReal (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) : ProbComp Bool := do
   let x ← $ᵗ F
@@ -92,7 +64,7 @@ def gameReal (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := D
   let guess ← A (buildFrom S (x • S.g) ((x * xn0) • S.g) (if b then c1 else c0))
   return (b == guess)
 
-/-- **Game `G2`**: `s0` replaced by an independent random group element — the DDH hybrid step. -/
+/-- Game `G2`: `s0` replaced by an independent random group element. -/
 def game2 (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) : ProbComp Bool := do
   let x ← $ᵗ F
@@ -101,7 +73,7 @@ def game2 (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delt
   let guess ← A (buildFrom S (x • S.g) (c' • S.g) (if b then c1 else c0))
   return (b == guess)
 
-/-- The adversary's advantage in game `G`: distance from a coin-flip guess. -/
+/-- The adversary's advantage in game `G` over a coin flip. -/
 noncomputable def advantage
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) : ℝ :=
@@ -113,9 +85,7 @@ section DDHReduction
 
 variable [SampleableType F]
 
-/-- **`G` ⇒ `G2` reduction**: any `Adversary` gives a `DDHAdversary` — it ignores the DDH tuple's
-second group element (no fixed `n0pub` in this model) and replays `gameReal`/`game2`'s logic
-around the supplied `(α0, s0)`. -/
+/-- The DDH adversary built from an `Adversary`. -/
 def ddhAdversaryOf
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) : DDHAdversary F G :=
@@ -124,7 +94,7 @@ def ddhAdversaryOf
     let guess ← A (buildFrom S α0 s0 (if b then c1 else c0))
     return (b == guess)
 
-/-- `ddhExpReal` reconstructs `gameReal` exactly. -/
+/-- `ddhExpReal` equals `gameReal`. -/
 theorem probTrue_gameReal_eq_ddhExpReal
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
@@ -133,8 +103,7 @@ theorem probTrue_gameReal_eq_ddhExpReal
   unfold gameReal ddhExpReal ddhAdversaryOf
   rfl
 
-/-- `ddhExpRand` reconstructs `game2` exactly (its unused middle DDH sample never reaches the
-adversary, matching `game2`'s lack of an `n0pub`). -/
+/-- `ddhExpRand` equals `game2`. -/
 theorem probTrue_game2_eq_ddhExpRand
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
@@ -152,7 +121,7 @@ section KeyIndependence
 variable [SampleableType F] [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi]
   [SampleableType (Seed × KeyMu × KeyPi)] [Finite F]
 
-/-- `buildFrom`, with `S.hρ s0 / S.hμ s0 / S.hπ s0` abstracted to plain arguments. -/
+/-- `buildFrom` with the three oracle outputs as arguments. -/
 def buildFromKeys (α0 : G) (seed : Seed) (kmu : KeyMu) (kpi : KeyPi) (c : Choice Beta Delta) :
     G × Beta × Gamma × Delta :=
   let β0 := c.betaPt + S.ρgen seed
@@ -166,8 +135,7 @@ omit [Field F] [AddCommGroup G] [Module F G] [SampleableType F] [SampleableType 
 @[simp] lemma buildFrom_eq_buildFromKeys (α0 s0 : G) (c : Choice Beta Delta) :
     buildFrom S α0 s0 c = buildFromKeys S α0 (S.hρ s0) (S.hμ s0) (S.hπ s0) c := rfl
 
-/-- **Game `G2'`**: `s0`'s three random-oracle-keyed outputs replaced by an independently sampled
-triple (the module doc's joint-independence idealization). -/
+/-- Game `G2'`: the three oracle outputs replaced by an independent uniform triple. -/
 def game2' (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) : ProbComp Bool := do
   let x ← $ᵗ F
@@ -176,16 +144,12 @@ def game2' (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Del
   let guess ← A (buildFromKeys S (x • S.g) p.1 p.2.1 p.2.2 (if b then c1 else c0))
   return (b == guess)
 
-/-- **`G2` ⇒ `G2'` is a PRG hybrid step, not an exact equality**: the map
-`c' ↦ (hρ(c'•g), hμ(c'•g), hπ(c'•g))` is a real key-derivation function (e.g. `NIKESphinx`'s
-HKDF-Expand call) that cannot be a bijection onto a larger codomain (pigeonhole), so it's modeled
-as this `PRGScheme` instead, with `G2`/`G2'` its real/ideal experiments — bounded by
-`jointKeyPRG`'s own `prgAdvantage`, not claimed to vanish. -/
+/-- The map `c' ↦ (hρ(c'•g), hμ(c'•g), hπ(c'•g))` as a PRG; `G2` and `G2'` are its real and
+ideal experiments. -/
 def jointKeyPRG : PRGScheme F (Seed × KeyMu × KeyPi) :=
   ⟨fun c' => (S.hρ (c' • S.g), S.hμ (c' • S.g), S.hπ (c' • S.g))⟩
 
-/-- The joint-key hybrid's reduction adversary: given a `Seed × KeyMu × KeyPi` value (real or
-ideal), sample `x`/`b` and finish. -/
+/-- The `jointKeyPRG` reduction adversary. -/
 def jointAdversaryOf
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) (x : F) : PRGAdversary (Seed × KeyMu × KeyPi) := fun p => do
@@ -195,7 +159,7 @@ def jointAdversaryOf
 
 omit [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi]
   [SampleableType (Seed × KeyMu × KeyPi)] [Finite F] in
-/-- `prgRealExp (jointKeyPRG) (jointAdversaryOf ... x)` reconstructs `game2` exactly. -/
+/-- The `jointKeyPRG` real experiment equals `game2`. -/
 theorem probTrue_game2_eq_prgRealExp_joint
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
@@ -207,8 +171,7 @@ theorem probTrue_game2_eq_prgRealExp_joint
   rfl
 
 omit [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi] [Finite F] in
-/-- `prgIdealExp (jointAdversaryOf ... x)` reconstructs `game2'` up to reordering the independent
-`b`/`p` samples (`probOutput_bind_bind_swap`). -/
+/-- The `jointKeyPRG` ideal experiment equals `game2'`. -/
 theorem probTrue_game2'_eq_prgIdealExp_joint
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (c0 c1 : Choice Beta Delta) :
@@ -230,9 +193,7 @@ variable [SampleableType F] [SampleableType Seed] [SampleableType KeyMu] [Sample
   [SampleableType Beta] [SampleableType Gamma] [SampleableType Delta]
   [SampleableType (Seed × KeyMu × KeyPi)] [SampleableType (Beta × Gamma × Delta)]
 
-/-- `ρgen`/`μeval`/`πenc` composed into one derivation `(seed, kmu, kpi) ↦ (β0, γ0, δ0)`, for a
-fixed challenge branch `c`. One combined `PRGScheme` rather than three separate ones, since
-`γ0`'s computation needs `β0`. -/
+/-- ρ/μ/π combined into one PRG `(seed, kmu, kpi) ↦ (β0, γ0, δ0)` for a fixed branch `c`. -/
 def combinedGen (c : Choice Beta Delta) (p : Seed × KeyMu × KeyPi) : Beta × Gamma × Delta :=
   let β0 := c.betaPt + S.ρgen p.1
   let γ0 := S.μeval p.2.1 β0
@@ -242,8 +203,7 @@ def combinedGen (c : Choice Beta Delta) (p : Seed × KeyMu × KeyPi) : Beta × G
 def combinedPRG (c : Choice Beta Delta) : PRGScheme (Seed × KeyMu × KeyPi) (Beta × Gamma × Delta) :=
   ⟨combinedGen S c⟩
 
-/-- The combined-hybrid reduction adversary: given a `Beta × Gamma × Delta` value (real or
-ideal), finish the game with the already-fixed `x`/`b`. -/
+/-- The combined-PRG reduction adversary. -/
 def combinedAdversaryOf
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (x : F) (b : Bool) : PRGAdversary (Beta × Gamma × Delta) := fun t =>
@@ -262,8 +222,7 @@ theorem probTrue_game2'_eq_prgRealExp_combined
   unfold game2' prgRealExp combinedPRG combinedAdversaryOf combinedGen
   rfl
 
-/-- **Game `G3`**: `β0, γ0, δ0` all replaced by an independent fresh uniform triple — the paper's
-final hybrid, where the challenge tuple carries no information about `b`. -/
+/-- Game `G3`: `β0, γ0, δ0` replaced by an independent uniform triple. -/
 def game3 (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     (_c0 _c1 : Choice Beta Delta) : ProbComp Bool := do
   let x ← $ᵗ F
@@ -289,9 +248,7 @@ theorem probTrue_game3_eq_prgIdealExp_combined
 omit [AddCommGroup Beta] [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi]
   [SampleableType Beta] [SampleableType Gamma] [SampleableType Delta]
   [SampleableType (Seed × KeyMu × KeyPi)] in
-/-- **Proved outright**: in `G3` the tuple handed to the adversary is fresh and uniform,
-independent of `b`, so a well-formed (`NeverFail`) adversary guesses correctly with probability
-exactly `1/2` — the paper's baseline. -/
+/-- In `G3` a `NeverFail` adversary guesses `b` with probability exactly `1/2`. -/
 theorem probTrue_game3
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     [∀ v, NeverFail (A v)] (c0 c1 : Choice Beta Delta) :
@@ -303,8 +260,7 @@ theorem probTrue_game3
         let guess ← A (x • S.g, t.1, t.2.1, t.2.2)
         return (b == guess)] = 1 / 2 := by
     intro x
-    -- The tuple handed to `A` doesn't mention `b` at all, so this is exactly
-    -- `probOutput_decide_eq_uniformBool_half` for the constant family `f _ := (t←$ᵗ...; A ...)`.
+    -- The adversary's input does not depend on `b`.
     have h := probOutput_decide_eq_uniformBool_half
       (f := fun _ : Bool => do
         let t ← $ᵗ (Beta × Gamma × Delta)
@@ -339,14 +295,8 @@ variable [SampleableType F] [SampleableType Seed] [SampleableType KeyMu] [Sample
   [SampleableType (Seed × KeyMu × KeyPi)] [Finite F]
 
 omit [Finite F] [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi] in
-/-- **Main theorem (§4.4)**: the adversary's advantage is bounded by three gaps, one per hybrid
-step (`G ⇒ G2`, `G2 ⇒ G2'`, `G2' ⇒ G3`), each a genuine computational assumption:
-
-* `hddh` — `ddhDistAdvantage`'s bound on the reduction `ddhAdversaryOf`.
-* `hjointPRG` — `jointKeyPRG`'s PRG-distinguishing advantage against `jointAdversaryOf`.
-* `hprg` — the combined `ρ/μ/π`-derivation's PRG advantage against `combinedAdversaryOf`.
-
-`game3`'s zero-advantage fact (`probTrue_game3`) closes the chain. -/
+/-- §4.4: the advantage is bounded by the DDH advantage (`hddh`), the joint-key PRG advantage
+(`hjointPRG`), and the combined ρ/μ/π PRG advantage (`hprg`). -/
 theorem advantage_le
     (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     [∀ v, NeverFail (A v)] (c0 c1 : Choice Beta Delta) (εDDH εJoint εPRG : ℝ)
@@ -383,7 +333,7 @@ theorem advantage_le
     _ ≤ εDDH + (εJoint + εPRG) := add_le_add hddh (add_le_add hjointPRG hprg)
     _ = εDDH + εJoint + εPRG := by ring
 
-/-- `advantage_le`'s statement, closed over every scheme it's about. -/
+/-- The statement of `advantage_le`. -/
 abbrev AdvantageLeType :=
   ∀ (A : Adversary (G := G) (Beta := Beta) (Gamma := Gamma) (Delta := Delta))
     [∀ v, NeverFail (A v)] (c0 c1 : Choice Beta Delta) (εDDH εJoint εPRG : ℝ),

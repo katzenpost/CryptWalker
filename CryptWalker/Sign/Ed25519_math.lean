@@ -16,16 +16,7 @@ open CryptWalker.Sign.Sign
 
 /-! # Native Ed25519 arithmetic
 
-This is the RFC 8032 arithmetic path, expressed over Mathlib's finite field `ZMod p`.
-Mathlib does not currently provide an Edwards-curve group, so the affine twisted-Edwards
-addition formula is written here. The field, inverses, powers, finite-width vectors, and
-decidable checks are all supplied by Mathlib.
-
-The operations are executable and contain no assumed cryptographic primitive. Their correctness is
-proved elsewhere: `Ed25519_group` shows `add` is Curve25519's group law transported across the
-birational map, `Ed25519_order` that the basepoint has order `l`, and `Ed25519_verify` that
-`verifyNative (publicKey sk) m (signNative sk m) = true`, which is what `nativeSignature` (defined
-there) needs.
+RFC 8032 arithmetic over `ZMod p`, with the affine twisted-Edwards addition formula.
 -/
 
 abbrev p : Nat := CryptWalker.NIKE.X25519Common.p

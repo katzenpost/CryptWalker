@@ -8,21 +8,9 @@ import CryptWalker.GroupChat.Member.Reader
 
 /-! # A reader acknowledges only what it has read
 
-See "Opportunistic acknowledgements and backfill" in the group chat spec: a member acknowledges a
-box only once it has read it and every box before it from where it started reading the stream.
-
-The reader does not remember every box it passed; it keeps only the boxes a scan stepped past
-unread (`kept`), the first one it gave up on (`lost`), and the box before each. Its history is
-a ghost: every box it passed, in order, each read or not. `Inv` ties the reader to its history,
-every reader operation keeps it, and under it `run`, what the reader acknowledges, names a box
-that it read along with every box before it (`run_safe`). Reading only ever turns a box from
-unread to read, so an acknowledgement stays true once sent (`Safe.mono`).
-
-* `Inv.start`: a reader that has read nothing.
-* `read_inv`, `scan_inv`, `found_inv`, `walked_inv`: each operation keeps `Inv`, with the
-  history it adds to. A walk adds every box it stepped past, of which a driver hands back only
-  the last few (`walked_inv`'s `all`).
-* `run_safe`: what the reader acknowledges is safe. -/
+A `History` is a ghost record of every box a reader passed, read or not. `Inv` ties the reader's
+state to it; every operation keeps `Inv`, and under it `run` names a box read along with every box
+before it (`run_safe`). See "Opportunistic acknowledgements and backfill" in the group chat spec. -/
 
 namespace CryptWalker.GroupChat.Member
 
@@ -152,7 +140,7 @@ theorem safe_upto {h : History} {m : Nat} (hread : ∀ q < m, ∀ c x, h[q]? = s
   obtain ⟨⟨c, y⟩, hy⟩ := Option.isSome_iff_exists.1 (by simp [hlen] : h[q]?.isSome)
   exact ⟨c, by rw [hy, hread q (by omega) c y hy]⟩
 
-/-- **What a reader acknowledges it has read**, with every box before it. -/
+/-- What a reader acknowledges it has read, with every box before it. -/
 theorem run_safe {r : Reader} {h : History} (inv : Inv r h) : Safe h r.run := by
   unfold Reader.run
   split

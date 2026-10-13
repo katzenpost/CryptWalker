@@ -7,29 +7,8 @@ namespace CryptWalker.Cipher.AES
 
 /-! # AES-256
 
-The block cipher underneath `AESGCMSIV`, and only as much of it as that mode needs.
-
-## Encryption direction only
-
-There is no inverse cipher here, and its absence is not an omission. GCM-SIV never decrypts a
-block: POLYVAL authenticates, CTR encrypts by XOR against a keystream built from *forward* AES
-calls, and the tag is a forward AES call on the authenticator output. Opening a ciphertext runs
-the same forward machinery as sealing it. An `InvCipher` would be dead code carrying a real
-proof obligation — that it inverts `encryptBlock` — for no caller.
-
-## The S-box is computed, not tabulated
-
-`sboxByte` is FIPS-197 §5.1.1 as written: invert in `GF(2^8)`, then apply the affine map. The
-usual 256-entry table is 256 chances to transcribe a byte wrong, silently, in a way no type
-catches; the algebraic definition can be checked against the standard by eye. `sbox` tabulates
-it once at startup so lookups stay cheap, and `Cipher.test` pins the result to FIPS-197's
-known-answer vector.
-
-## Not constant time
-
-Every S-box lookup indexes an array with a secret byte, and `mul` branches on secret bits. This
-is a model of AES, suitable for stating and proving things about protocols that use it. It is
-not suitable for handling real keys on a machine an adversary can time.
+Encryption direction only. The S-box is computed from its FIPS-197 definition rather than
+transcribed. Not constant time.
 -/
 
 /-- Multiplication in `GF(2^8)` modulo AES's `x^8 + x^4 + x^3 + x + 1`. -/
@@ -47,9 +26,7 @@ def mul (a b : UInt8) : UInt8 := Id.run do
     y := y >>> 1
   return p
 
-/-- The multiplicative inverse in `GF(2^8)`, computed as `a^254`: the nonzero elements form a
-group of order 255, so `a^254 = a^(-1)`. Total, and `inv 0 = 0` — which is the convention the
-S-box wants for zero anyway. -/
+/-- The multiplicative inverse in `GF(2^8)`, computed as `a^254`; `inv 0 = 0`. -/
 def inv (a : UInt8) : UInt8 := Id.run do
   let mut square := a
   let mut acc : UInt8 := 1
@@ -68,18 +45,14 @@ def sboxByte (a : UInt8) : UInt8 :=
 /-- `sboxByte` tabulated over all 256 inputs. -/
 def sbox : Array UInt8 := (Array.range 256).map fun i => sboxByte (UInt8.ofNat i)
 
-/-- The round constant for round `i` of the key schedule: `x^i` in `GF(2^8)`. The 256-bit
-schedule reaches `i ≤ 6`, so this never gets as far as the `0x1b` wrap that the 128-bit
-schedule's table is famous for. -/
+/-- The key schedule round constant `x^i` in `GF(2^8)`. -/
 private def rcon (i : Nat) : UInt8 := Id.run do
   let mut c : UInt8 := 1
   for _ in [0:i] do
     c := mul c 2
   return c
 
-/-- The AES-256 key schedule: sixty 4-byte words, i.e. fifteen round keys laid end to end.
-`Nk = 8`, `Nr = 14`, and note the extra `SubWord` at `i % 8 == 4` that the 128- and 192-bit
-schedules do not have. -/
+/-- The AES-256 key schedule: sixty 4-byte words, fifteen round keys. -/
 def expandKey (key : Vector UInt8 32) : Array UInt8 := Id.run do
   let mut w := key.toArray
   for i in [8:60] do
@@ -93,18 +66,13 @@ def expandKey (key : Vector UInt8 32) : Array UInt8 := Id.run do
       w := w.push (w[4*(i - 8) + j]! ^^^ t[j]!)
   return w
 
-/-- Not `private`: `WideBlockCipher.AEZ` reuses this directly as AEZ's AES4/AES10 round function
-composes the same four steps under a different (fixed, 4- or 10-round) key schedule than
-AES-256 proper. -/
 def subBytes (s : Array UInt8) : Array UInt8 := s.map fun b => sbox[b.toNat]!
 
-/-- Byte `i` of the state is row `i % 4`, column `i / 4`; row `r` rotates left by `r` columns.
-Not `private`, for the same reason as `subBytes`. -/
+/-- Byte `i` of the state is row `i % 4`, column `i / 4`; row `r` rotates left by `r` columns. -/
 def shiftRows (s : Array UInt8) : Array UInt8 :=
   Array.ofFn fun i : Fin 16 => s[(i.val + 4 * (i.val % 4)) % 16]!
 
-/-- Each column multiplied by the fixed polynomial `{03}x³ + {01}x² + {01}x + {02}`. Not
-`private`, for the same reason as `subBytes`. -/
+/-- Each column multiplied by the fixed polynomial `{03}x³ + {01}x² + {01}x + {02}`. -/
 def mixColumns (s : Array UInt8) : Array UInt8 :=
   Array.ofFn fun i : Fin 16 =>
     let a := fun j => s[4 * (i.val / 4) + j]!
@@ -117,8 +85,7 @@ def mixColumns (s : Array UInt8) : Array UInt8 :=
 private def addRoundKey (s : Array UInt8) (rk : Array UInt8) (round : Nat) : Array UInt8 :=
   Array.ofFn fun i : Fin 16 => s[i.val]! ^^^ rk[16 * round + i.val]!
 
-/-- AES-256 on one block, against an already-expanded schedule. Fourteen rounds, the last
-without `MixColumns`. -/
+/-- AES-256 on one block, against an expanded key schedule. -/
 def encryptBlock (rk : Array UInt8) (input : Vector UInt8 16) : Vector UInt8 16 := Id.run do
   let mut s := addRoundKey input.toArray rk 0
   for round in [1:14] do
@@ -126,7 +93,7 @@ def encryptBlock (rk : Array UInt8) (input : Vector UInt8 16) : Vector UInt8 16 
   s := addRoundKey (shiftRows (subBytes s)) rk 14
   return Vector.ofFn fun i : Fin 16 => s[i.val]!
 
-/-- Expand and encrypt in one call, for the one-off block encryptions in key derivation. -/
+/-- Expand the key and encrypt one block. -/
 def encryptBlockWithKey (key : Vector UInt8 32) (input : Vector UInt8 16) : Vector UInt8 16 :=
   encryptBlock (expandKey key) input
 

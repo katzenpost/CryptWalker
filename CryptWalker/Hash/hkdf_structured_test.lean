@@ -8,12 +8,9 @@ import Lean.Data.Json
 import CryptWalker.Hash.HKDF
 import CryptWalker.Util.newhex
 
-/-!
-# HKDF-BLAKE2b-512 known-answer tests
+/-! # HKDF-BLAKE2b-512 known-answer tests
 
-Reads `testdata/hkdf_blake2b.json` from the hpqc repository.
-Tests both `extract` and `expand` of the structured `blake2b512_hkdf` instance,
-verifying the combined output matches the test vectors.
+Checks `extract` and `expand` of `blake2b512_hkdf` against `testdata/hkdf_blake2b.json`, from hpqc.
 -/
 
 open Lean
@@ -60,7 +57,6 @@ def main : IO UInt32 := do
   let vectors ← unwrap (parseFile contents)
   let mut ok := true
   for vector in vectors do
-    -- Test extract + expand via the structured HKDF instance
     let prk := blake2b512_hkdf.extract vector.salt vector.secret
     let got_vec := blake2b512_hkdf.expand prk vector.info vector.length
     let got := ⟨got_vec.toArray⟩

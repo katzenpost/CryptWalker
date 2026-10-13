@@ -7,13 +7,10 @@ import Lean.Data.Json
 import CryptWalker.MultiRecipientHybrid.Schemes
 import CryptWalker.Util.newhex
 
-/-! # Multi-recipient hybrid vectors, for cross-checking against hpqc
+/-! # Multi-recipient hybrid vector generator
 
-As `KEM/gen_mlkem768_hedged_vectors.lean`: builds vectors with the Lean side's own computation (real
-IO randomness, recorded as drawn), in the schema `multirecipient_hybrid_test.lean` checks, so hpqc's
-`kem/mrhybrid` tests can decapsulate them with `"MLKEM768-X25519"`. Uses
-`hybridMLKEM768X25519Blake2b`. Each recipient's decapsulation, and the reply, is checked here before
-the vector is written. -/
+Writes random vectors for `hybridMLKEM768X25519Blake2b` in the schema
+`multirecipient_hybrid_test.lean` checks, after checking each decapsulation and the reply. -/
 
 open Lean
 open CryptWalker.KEM (kemX25519Blake2b kemMLKEM768X25519Blake2b)

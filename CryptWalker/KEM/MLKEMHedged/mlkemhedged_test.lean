@@ -10,13 +10,9 @@ import CryptWalker.Util.newhex
 /-!
 # Hedged ML-KEM: NIST ACVP known-answer tests, for ML-KEM-512, -768 and -1024
 
-Runs each parameter set's NIST ACVP vectors through the hedged instances `kem ps` and `kemSeed ps`:
-their decoders, encoders, `derivePublicKey` and `decap`. Hedging changes only which message
-encapsulation encrypts, so every ACVP group applies except one step: ACVP gives
-`Encaps_internal`'s input `m` directly, which for the hedged scheme is the already-hashed message.
-`encapsHedged_eq_encaps_hashH` proves hedged encapsulation is `FIPS203.encaps` after `H`, so these
-vectors check everything but `H(m)` itself. The pre-hash is covered by the hpqc cross-check vectors
-(`KEM/mlkem768_hedged_test.lean`) and, for every size, by an encapsulate/decapsulate round trip.
+ACVP gives `Encaps_internal`'s message directly, so by `encapsHedged_eq_encaps_hashH` these
+vectors check everything except the pre-hash `H(m)`. The pre-hash is covered by
+`KEM/mlkem768_hedged_test.lean` and by round trips.
 -/
 
 open Lean

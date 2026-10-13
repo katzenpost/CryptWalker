@@ -11,18 +11,8 @@ import CryptWalker.GroupChat.Member.GroupProofs
 
 /-! # A member keeps every reader's invariant
 
-`ReaderProofs.lean` proves that each reader operation keeps `Inv`: what a reader keeps is true of
-the history of boxes it has passed. Here the member drives its readers: it creates them, reads,
-scans, walks, rechecks and removes them, alongside everything else it does. `ReadersOK` says every
-reader of a member is filed under its own stream and satisfies `Inv` for some history.
-
-* `found_ok`, `joined_ok`: a member starts with its readers OK.
-* `handle_keeps`, `observe_keeps`, `compose_keeps`, `written_keeps`, `abandoned_keeps`,
-  `beginInduction_keeps`, `introduceNow_keeps`, `cancelInduction_keeps`, `remove_keeps`: every
-  call on a member keeps its readers OK, given only that a walk the driver reports did not skip
-  more boxes than it stepped (`Event.WF`).
-* `acks_sent_safe`: so every acknowledgement a member reachable by such calls (`Reachable`) sends
-  names a box its reader read, along with every box before it. -/
+`ReadersOK`: every reader of a member is filed under its own stream and satisfies `Inv` for some
+history. Every call on a member keeps it, given well-formed walk reports (`Event.WF`). -/
 
 namespace CryptWalker.GroupChat.Member
 
@@ -556,8 +546,8 @@ theorem Reachable.ok {g : Group} : Reachable g → ReadersOK g.readers
   | .remove _ h => remove_keeps _ _ h.ok
   | .policy _ h => h.ok
 
-/-- **Every acknowledgement a reachable member sends names a box its reader of that stream read,
-along with every box before it.** Every message takes its acknowledgements from `acksOf`. -/
+/-- Every acknowledgement a reachable member sends names a box its reader of that stream read,
+along with every box before it. -/
 theorem acks_sent_safe {g : Group} (hg : Reachable g) (p : Pending) :
     ∀ x ∈ (g.acksOf p).1, ∃ m r h b, (x.1, some m) ∈ g.rosters.known g.me ∧
       g.readers.get? m = some r ∧ r.stream = m ∧ Inv r h ∧ counter b = x.2 ∧ Safe h (some b) := by

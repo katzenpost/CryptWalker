@@ -10,7 +10,7 @@ import CryptWalker.Bench.MLKEMSteps
 import CryptWalker.Bench.Field25519
 import CryptWalker.Bench.Cipher
 
-/-! # The benchmark driver: every registered NIKE, KEM and Sphinx scheme, plus the ML-KEM step, field and cipher suites, via LeanBench -/
+/-! # Benchmark driver for all registered schemes and suites -/
 
 def main (args : List String) : IO UInt32 := do
   for e in CryptWalker.NIKE.registry do

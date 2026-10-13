@@ -13,19 +13,7 @@ open CryptWalker.Util.UInt64
 
 /-! # SHA-512 (FIPS 180-4)
 
-A native Lean implementation. 64-bit words, 80 rounds, 128-byte blocks, 64-byte digest.
-
-This is the hash Ed25519 needs: RFC 8032 uses it for seed expansion, nonce derivation and the
-signature challenge, and hpqc's blinded variant reaches it at four call sites plus SHA-512/256
-for the blinding factor. It is *not* SHA-256 with wider words — the initial hash values and the
-eighty round constants are different, being derived from the cube roots of the first eighty
-primes rather than the first sixty-four.
-
-The constants below were computed rather than transcribed: `H[i]` is the fractional part of
-`sqrt(prime i)` scaled by `2^64`, `K[t]` the same for `cbrt(prime t)`.
-
-Validated against `testdata/sha512.json`, generated from Go's `crypto/sha512` by
-`hpqc/testvectors/cmd/generate`.
+64-bit words, 80 rounds, 128-byte blocks, 64-byte digest. Tested against `testdata/sha512.json`.
 -/
 
 /-- The eight-word chaining state. -/
@@ -134,7 +122,7 @@ def compress (block : Array UInt64) (st : Digest) : Digest := Id.run do
   return { h0 := st.h0 + a, h1 := st.h1 + b, h2 := st.h2 + c, h3 := st.h3 + d,
            h4 := st.h4 + e, h5 := st.h5 + f, h6 := st.h6 + g, h7 := st.h7 + h }
 
-/-- **SHA-512.** -/
+/-- SHA-512. -/
 def sha512 (msg : ByteArray) : Vector UInt8 64 := Id.run do
   let words := toWords (pad msg)
   let mut st := initHash
@@ -161,10 +149,8 @@ def sha512_256 (msg : ByteArray) : Vector UInt8 32 := Id.run do
 
 /-! ### The `Hash` instance
 
-`State` is the accumulated message. That makes `update_append` and `hash_spec` immediate from
-`ByteArray`'s append lemmas, at the cost of holding the whole message rather than a single block
-buffer. A memory-bounded implementation would carry a partial block and the same two laws would
-become real proof obligations about that buffer — which is the point of stating them here. -/
+`State` is the accumulated message, so `update_append` and `hash_spec` follow from `ByteArray`
+append lemmas. -/
 def Scheme : Hash where
   State      := ByteArray
   name       := "SHA-512"

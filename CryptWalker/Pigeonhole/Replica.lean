@@ -6,26 +6,16 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Mathlib.Tactic.SplitIfs
 import CryptWalker.Sign.Sign
 
-/-! # A Pigeonhole replica
+/-! # Pigeonhole replica
 
-A replica stores *boxes*: for each box ID, an encrypted payload and a signature. The box ID is a
-public key, and the signature is over the payload under that key, so anyone can check a box is
-genuine without knowing who wrote it. This file models the replica's request handling exactly as
-`katzenpost/replica/handlers.go` does it, as a pure state machine `step : Store → Request →
-Store × Reply`, and proves what the handlers guarantee.
+A replica stores, per box ID (a public key), a payload and a signature over it under that key.
+Requests are handled by the state machine `step`:
 
-* **Write** (non-empty payload): the payload must be exactly `boxSize` bytes, the signature must
-  verify under the box ID, and the box must not already exist. Otherwise an error code, and the
-  store is untouched. A second write to an existing box is `boxAlreadyExists`, not an overwrite.
-* **Tombstone** (empty payload): the signature must verify over the empty payload; the box is then
-  replaced by a tombstone, which is how a writer deletes a message.
-* **Read**: not found, or the stored payload and signature, with a distinct code for a tombstone.
+* Write: the payload must be `boxSize` bytes, verify under the box ID, and the box must be free.
+* Tombstone (empty payload): must verify over the empty payload; replaces the box.
+* Read: returns the stored entry, with a distinct code for a tombstone.
 
-The replica never trusts the sender: `step_valid` shows that whatever requests arrive, in whatever
-order, every stored box verifies under its own ID.
-
-Not modelled: storage-full and database failures, box-ID unmarshalling, read repair between
-replicas, and epochs. -/
+Not modelled: storage failures, read repair, epochs. -/
 
 namespace CryptWalker.Pigeonhole.Replica
 
@@ -33,13 +23,11 @@ open CryptWalker.Sign.Sign (Signature)
 
 variable (Sg : Signature) [DecidableEq Sg.PublicKey]
 
-/-- What is kept under a box ID: the encrypted payload and its signature. An empty payload is a
-tombstone. -/
+/-- A stored payload and its signature. An empty payload is a tombstone. -/
 structure Entry where
   payload : ByteArray
   sig : Sg.Sig
 
-/-- The replica's storage. -/
 abbrev Store := Sg.PublicKey → Option (Entry Sg)
 
 variable {Sg}
@@ -62,7 +50,7 @@ inductive Request
   | write (id : Sg.PublicKey) (payload : ByteArray) (sig : Sg.Sig)
   | read (id : Sg.PublicKey)
 
-/-- The result codes the handlers return (the ones this model reaches). -/
+/-- Reply result codes. -/
 inductive Code
   | success | invalidPayload | invalidSignature | boxAlreadyExists | boxIDNotFound | tombstone
   deriving DecidableEq
@@ -73,7 +61,7 @@ inductive Reply
 
 variable {Sg}
 
-/-- One request. `boxSize` is the exact ciphertext length a box must have. -/
+/-- Handle one request. `boxSize` is the required payload length. -/
 def step (boxSize : Nat) (s : Store Sg) : Request Sg → Store Sg × Reply Sg
   | .write id payload sig =>
     if payload.size = 0 then
@@ -111,8 +99,7 @@ theorem valid_put {s : Store Sg} (hs : Valid s) (id : Sg.PublicKey) (e : Entry S
   · rw [Store.put_other _ _ hxid] at hx
     exact hs x e' hx
 
-/-- **The replica cannot be made to store a bad box.** Whatever request arrives, valid stores stay
-valid. -/
+/-- Every request preserves `Valid`. -/
 theorem step_valid (boxSize : Nat) (s : Store Sg) (hs : Valid s) (r : Request Sg) :
     Valid (step boxSize s r).1 := by
   cases r with
@@ -141,8 +128,7 @@ theorem run_valid (boxSize : Nat) (rs : List (Request Sg)) :
   | nil => intro s hs; exact hs
   | cons r rs ih => intro s hs; exact ih _ (step_valid boxSize s hs r)
 
-/-- A write is accepted only if its signature verifies under the box ID (over the empty payload,
-for a tombstone). -/
+/-- An accepted write's signature verifies under the box ID. -/
 theorem write_success_verifies (boxSize : Nat) (s : Store Sg) (id : Sg.PublicKey)
     (payload : ByteArray) (sig : Sg.Sig)
     (h : (step boxSize s (.write id payload sig)).2 = .writeReply .success) :
@@ -155,8 +141,7 @@ theorem write_success_verifies (boxSize : Nat) (s : Store Sg) (id : Sg.PublicKey
   · simp at h
   · simp [h0]; simpa using hbad
 
-/-- A write either leaves the store alone, or stores exactly the request under its own box ID, and
-in that case the signature verified. -/
+/-- A write leaves the store unchanged, or stores a verified entry under its box ID. -/
 theorem step_write_cases (boxSize : Nat) (s : Store Sg) (id : Sg.PublicKey) (payload : ByteArray)
     (sig : Sg.Sig) :
     (step boxSize s (.write id payload sig)).1 = s ∨
@@ -183,8 +168,7 @@ theorem write_fresh (boxSize : Nat) (s : Store Sg) (id : Sg.PublicKey) (payload 
   rw [if_neg hne, if_neg (fun h => h hsz), if_neg hbad]
   simp [hfree]
 
-/-- **A box is written once.** A second correctly signed write to an existing box is refused and
-changes nothing; only a tombstone can remove a message. -/
+/-- A non-empty write to an existing box is refused and changes nothing. -/
 theorem write_existing (boxSize : Nat) (s : Store Sg) (id : Sg.PublicKey) (payload : ByteArray)
     (sig : Sg.Sig) (hne : payload.size ≠ 0) (hsz : payload.size = boxSize)
     (hv : Sg.verify id payload sig = true) (e : Entry Sg) (hex : s id = some e) :
@@ -194,20 +178,20 @@ theorem write_existing (boxSize : Nat) (s : Store Sg) (id : Sg.PublicKey) (paylo
   rw [if_neg hne, if_neg (fun h => h hsz), if_neg hbad]
   simp [hex]
 
-/-- A read leaves the store alone, and reports what is under the box ID. -/
+/-- A read leaves the store unchanged and returns the stored entry. -/
 theorem step_read_put (boxSize : Nat) (s : Store Sg) (id : Sg.PublicKey) (e : Entry Sg) :
     step boxSize (s.put id e) (.read id)
       = (s.put id e, .readReply (if e.payload.size = 0 then .tombstone else .success) (some e)) := by
   simp [step]
 
-/-- Reading a box just written returns exactly what was written. -/
+/-- Reading a box just written returns what was written. -/
 theorem read_after_write (boxSize : Nat) (s : Store Sg) (id : Sg.PublicKey) (payload : ByteArray)
     (sig : Sg.Sig) (hne : payload.size ≠ 0) :
     (step boxSize (s.put id ⟨payload, sig⟩) (.read id)).2
       = .readReply .success (some ⟨payload, sig⟩) := by
   simp [step, hne]
 
-/-- A correctly signed tombstone replaces the box, and a read then reports a tombstone. -/
+/-- A signed tombstone replaces the box; a read then reports a tombstone. -/
 theorem tombstone_then_read (boxSize : Nat) (s : Store Sg) (id : Sg.PublicKey) (sig : Sg.Sig)
     (hv : Sg.verify id ByteArray.empty sig = true) :
     step boxSize s (.write id ByteArray.empty sig)
@@ -218,8 +202,7 @@ theorem tombstone_then_read (boxSize : Nat) (s : Store Sg) (id : Sg.PublicKey) (
   · simp [step, hv]
   · simp [step]
 
-/-- **Only a signed write changes a box.** If a request changes what is stored under `x`, it was a
-write to `x` whose signature verifies under `x` (over the empty payload for a tombstone). -/
+/-- A request that changes the entry at `x` is a write to `x` whose signature verifies. -/
 theorem step_frame (boxSize : Nat) (s : Store Sg) (r : Request Sg) (x : Sg.PublicKey)
     (h : (step boxSize s r).1 x ≠ s x) :
     ∃ payload sig, r = .write x payload sig ∧

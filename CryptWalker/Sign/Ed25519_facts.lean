@@ -6,12 +6,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 import Mathlib.NumberTheory.LegendreSymbol.Basic
 import CryptWalker.NIKE.X25519
 
-/-! # Arithmetic facts about `p = 2^255 - 19` that the Ed25519 group law rests on
+/-! # Arithmetic facts about `p = 2^255 - 19`
 
-Everything here is a theorem: the only assumption anywhere below is `X25519.p_prime`. The
-non-square-ness of the Edwards `d` is Euler's criterion evaluated by the kernel (`decide +kernel`
-adds no axiom, unlike `native_decide`), using a fuelled square-and-multiply so the 254-bit exponent
-never unfolds unary. -/
+The non-squareness of `d` is Euler's criterion evaluated by `decide +kernel`, with fuelled
+square-and-multiply so the exponent never unfolds in unary. -/
 
 namespace CryptWalker.Sign.Ed25519Facts
 
@@ -146,8 +144,7 @@ lemma d_ne_zero : d ≠ 0 := by
 lemma d_rel : d * 121666 = -121665 := by
   unfold d; exact div_mul_cancel₀ _ h121666
 
-/-- **`d` is not a square in `F`.** Everything about completeness of the Edwards law and about
-the exceptional points of the Montgomery model reduces to this. -/
+/-- `d` is not a square in `F`. -/
 theorem d_nonsquare : ¬ IsSquare d := by
   rintro ⟨s, hs⟩
   apply n0_nonsquare

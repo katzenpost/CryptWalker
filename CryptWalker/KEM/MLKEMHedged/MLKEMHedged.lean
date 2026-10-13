@@ -7,25 +7,11 @@ import CryptWalker.KEM.MLKEM.MLKEM
 import CryptWalker.KEM.KEM
 import LatticeCrypto.MLKEM.KPKE
 
-/-! # Hedged ML-KEM, every parameter set: restoring round-3 Kyber's `m ← H(m)` pre-hash
+/-! # Hedged ML-KEM: round-3 Kyber's `m ← H(m)` pre-hash
 
-FIPS 203's `ML-KEM.Encaps_internal` derives its encryption coins as `G(m ‖ H(ek))`, straight from
-the freshly-sampled message `m`. Round-3 Kyber, the predecessor CRYSTALS-Kyber submission FIPS 203
-is drawn from, first replaced `m` with `H(m)` — a hedge against a weak or structured RNG, since the
-derived coins and the encrypted plaintext both then depend on the sampled `m` only through its
-hash, not on `m` itself. FIPS 203 dropped that step. This file restores it, for each FIPS 203
-parameter set.
-
-Named `MLKEMHedged` rather than `MLKEM...`: this is deliberately *not* the standardized scheme. It
-does not match FIPS 203 and must never be confused with it.
-
-## What changes, and why decapsulation does not
-
-Only `encapsHedged` differs from `FIPS203.encaps`: it hashes `m` before deriving `(k, r)` and
-before it is the plaintext `KPKE.encrypt` seals. Decapsulation needs no analogous change and none
-is made — `FIPS203.decaps` already treats whatever `KPKE.decrypt` recovers as "the message"
-without caring what it represents; here that is simply `H(m)` rather than `m`. Key generation and
-wire encoding are untouched, so `FIPS203`'s are reused directly. -/
+Encapsulation replaces the sampled message `m` with `H(m)` before deriving coins and encrypting,
+hedging against a weak RNG. This is not FIPS 203. Decapsulation, key generation and encodings are
+`FIPS203`'s. -/
 
 namespace CryptWalker.KEM.MLKEMHedged
 
@@ -37,11 +23,9 @@ open CryptWalker.Util.Bytes (ofVector)
 
 variable (ps : ParameterSet)
 
-/-! ## `encapsHedged`: the one place the two schemes differ -/
+/-! ## `encapsHedged` -/
 
-/-- `ML-KEM.Encaps_internal`, with round-3 Kyber's `m ← H(m)` restored: hash the sampled message
-before it is used for anything. `H` is `FIPS203.hashH`, SHA3-256, the same hash FIPS 203 itself
-uses for `H(ek)` — round-3 Kyber used the identical function for both. -/
+/-- `ML-KEM.Encaps_internal` on `H(m)`, with `H` = SHA3-256. -/
 def encapsHedged (ek : EncapsulationKey (params ps) (encoding ps)) (m : Message) :
     SharedSecret × Ciphertext (params ps) (encoding ps) :=
   let mh : Message := hashH (ofVector m)
@@ -49,9 +33,7 @@ def encapsHedged (ek : EncapsulationKey (params ps) (encoding ps)) (m : Message)
   let (k, r) := (primitives ps).gEncaps mh ekHash
   (k, KPKE.encrypt ring (encoding ps) (primitives ps) ek mh r)
 
-/-- Hedged encapsulation is exactly FIPS 203's `Encaps_internal` (`FIPS203.encaps`) applied to
-`H(m)`. This is why NIST's ACVP encapsulation vectors, which give `Encaps_internal`'s input
-directly, check the hedged scheme everywhere except the pre-hash itself. -/
+/-- Hedged encapsulation is `FIPS203.encaps` applied to `H(m)`. -/
 theorem encapsHedged_eq_encaps_hashH (ek : EncapsulationKey (params ps) (encoding ps)) (m : Message) :
     (encapsHedged ps) ek m
       = FIPS203.encaps ps ek (hashH (ofVector m)) :=
@@ -68,17 +50,12 @@ private theorem encapsHedged_ct_wf (ek : EncapsulationKey (params ps) (encoding 
   · show ((encoding ps).byteEncodeDV _ : ByteArray).size = 32 * (params ps).dv
     exact concreteEncoding_byteEncodeDV_size (params ps) _
 
-/-! ## `State`, `Reliable`, and the `KEM.KEM` instance
+/-! ## The `KEM.KEM` instance
 
-`State` and randomness (`seedBlock`/`nextDraw`/`stateFromSeed`) are exactly `FIPS203`'s — hedging
-draws no extra randomness, it only reroutes `m` through a hash before use. -/
+`State` and randomness are `FIPS203`'s. -/
 
-/-- `s` is `Reliable` when the draw it would next produce, encapsulated with `encapsHedged`
-against any keypair, decapsulates back correctly — the same operational statement as
-`FIPS203.Reliable`, for `encapsHedged`/`decaps` instead of `encaps`/`decaps`. See
-`FIPS203`'s module doc for why this is stated operationally rather than via a checkable noise
-bound: everything said there about ML-KEM's CBD noise applies unchanged here, since hedging affects
-which message is encrypted, not the noise the encryption itself introduces. -/
+/-- The next draw from `s`, encapsulated with `encapsHedged` against any key pair, decapsulates
+correctly. -/
 def Reliable (s : State) : Prop :=
   ∀ (dk : DecapsulationKey (params ps) (encoding ps)) (ek : EncapsulationKey (params ps) (encoding ps)),
     ek = dk.ekPKE →
@@ -89,8 +66,7 @@ def encapM (pk : (PublicKey ps)) : EStateM KEMError State ((CT ps) × Vector UIn
   let m ← nextDraw
   pure (⟨((encapsHedged ps) pk.1 m).2, (encapsHedged_ct_wf ps) pk.1 m⟩, ((encapsHedged ps) pk.1 m).1)
 
-/-- As `FIPS203.honestRoundTripM` — see its docstring for why the proof goes through `simp only`
-unfolding rather than `injection` on `CT`'s subtype. -/
+/-- Round trip from a `Reliable` state, as `FIPS203.honestRoundTripM`. -/
 theorem honestRoundTripM (sk : (PrivateKey ps)) (s : State) (hrel : (Reliable ps) s)
     (c : (CT ps)) (k : Vector UInt8 32) (s' : State)
     (hc : (encapM ps) ((derivePublicKeyM ps) sk) s = .ok (c, k) s') (t : State) :
@@ -105,10 +81,7 @@ theorem honestRoundTripM (sk : (PrivateKey ps)) (s : State) (hrel : (Reliable ps
   rw [← hc1, h, hc2]
   rfl
 
-/-- The assembled `KEM.KEM` instance for hedged ML-KEM. `decap`, key generation and every
-encode/decode function are `FIPS203`'s, unchanged; only `encap`, `Reliable` and the round-trip
-witness are this file's own. The 768 instance is registered in `KEM/Schemes.lean` as
-`"MLKEM768Hedged"`. -/
+/-- Hedged ML-KEM with the expanded FIPS 203 private key. -/
 def kem : KEM where
   State := State
   PublicKey := (PublicKey ps)
@@ -157,10 +130,7 @@ def kem : KEM where
 
   plaintextEq := inferInstance
 
-/-! ## Seed-format private keys
-
-As `FIPS203.kemSeed`: the private key is `(d, z)`, encoded `ek ‖ d ‖ z`, so both schemes'
-seed instances share one key format. -/
+/-! ## Seed-format private keys, as in `FIPS203.kemSeed` -/
 
 theorem honestRoundTripFromSeed (sk : SeedPrivateKey) : ∀ s, (Reliable ps) s → ∀ c k s',
     (encapM ps) ((derivePublicKeyFromSeed ps) sk) s = .ok (c, k) s' → ∀ t, ∃ t', (decapMFromSeed ps) sk c t = .ok k t' :=

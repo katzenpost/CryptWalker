@@ -15,22 +15,9 @@ open CryptWalker.Util.Bytes (ofVector toVecN)
 
 /-! # HKDF: HMAC-based Key Derivation Function (RFC 5869)
 
-## How this differs from `Hash`
+Extract maps `(salt, IKM)` to a digest-sized `PRK`; Expand maps `(PRK, info, len)` to exactly
+`len` bytes. -/
 
-A hash takes arbitrary input and produces a fixed-size digest. HKDF has two phases
-with different types:
-
-* **Extract** `(salt, IKM) → PRK`: a fixed-size intermediate key whose width equals the
-  hash digest size. The `PRK` type is abstract — its width is a dependent type carried
-  by `encodePRK` into `Vector UInt8 hash.digestSize`.
-* **Expand** `(PRK, info, len) → OKM`: variable-length output. The `len` parameter
-  appears in the return type `Vector UInt8 len`, giving a type-level width guarantee.
-
-The laws bind the two phases: the output width is exactly `len`. These are structural
-properties of the Extract-then-Expand composition, distinct from `Hash`'s
-`update_append` law. -/
-
-/-- HKDF: HMAC-based Key Derivation Function (RFC 5869). -/
 structure HKDF where
   hash : Hash
 
@@ -58,8 +45,7 @@ instance : Inhabited HKDF := ⟨trivialHKDF⟩
 
 /-! ## HKDF-BLAKE2b-512 -/
 
-/-- BLAKE2b-512 as a `Hash` instance.
-    Stateful form matching SHA-512's `Scheme`: accumulate the message, hash at finalize. -/
+/-- BLAKE2b-512 as a `Hash`: accumulate the message, hash at finalize. -/
 @[reducible] def blake2b_hashScheme : Hash where
   State      := ByteArray
   name       := "BLAKE2b-512"

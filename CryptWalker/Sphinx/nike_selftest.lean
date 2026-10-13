@@ -13,20 +13,8 @@ import CryptWalker.Util.Bytes
 /-!
 # NIKE-Sphinx create/unwrap round-trip self-test
 
-`createHeader`'s exact output can't be cross-checked against Go (the client's ephemeral
-randomness isn't recorded in katzenpost's vectors — see `NIKESphinx`'s module doc), so this
-checks it the only way available: build a packet with fresh Lean-side keys, then `Unwrap` it
-hop by hop with the system CSPRNG, and confirm the commands and final payload come back exactly
-as built. `Crypto.aez_test`/`Crypto.test`/`commands_test` already pin every primitive this
-exercises against Go; what's new here is that `createHeader`/`unwrapNIKE` compose them the same
-way `sphinx.go` does.
-
-Runs the full round set (several hop counts, all equal to the geometry's `nrHops` so no filler
-padding is needed, one round with `nrHops < geom.nrHops` to exercise the filler path, plus the
-abstract-interface/completeness/SURB rounds below) once per registered NIKE-Sphinx scheme —
-`"x25519-ladder"` (`NIKE.X25519LadderScheme`) and `"x25519-group"` (`NIKE.X25519Scheme`) — since
-`createHeader`/`unwrapNIKE` are generic over any `NIKE`, not just the ladder implementation
-`nike_vectors_test`'s Go-cross-checked vectors happen to use. -/
+Builds packets with fresh keys and checks that unwrapping recovers the commands and payload, for
+every registered NIKE-Sphinx scheme. -/
 
 open CryptWalker.Util.newhex
 open CryptWalker.Sphinx.Geometry
@@ -39,8 +27,6 @@ open CryptWalker.Util.Bytes (ofVector toVecN)
 private def x25519Ladder := CryptWalker.NIKE.X25519LadderScheme
 private def x25519Group := CryptWalker.NIKE.X25519Scheme
 
--- As `kem_selftest.lean`: the four crypto primitives `nikeSphinxCore` now takes explicitly rather
--- than wiring up internally.
 private def wbCipher := CryptWalker.WideBlockCipher.AEZ.aez
 private def macS := CryptWalker.MAC.HMAC.hmacSha256MAC
 private def kdfS := CryptWalker.KDF.HKDF.hkdfSha256Expand
@@ -58,12 +44,7 @@ structure Node where
   pub : ByteArray
   deriving Inhabited
 
-/-- The public key `priv` derives under `nike` — both `x25519LadderEntry`/`x25519GroupEntry` have
-`privateKeySize = publicKeySize = 32`, but their encodings differ (u-coordinate bytes vs. the
-group's field-element encoding), so this must go through `nike.derivePublicKey`/
-`encodePublicKey` rather than any one scheme's raw arithmetic. `decodePrivateKey` never actually
-fails here (both schemes' is total, `decodePrivateKey_total`), so the `none` branch is
-unreachable in practice, not a real error path. -/
+/-- The encoded public key of `priv` under `nike`. -/
 private def derivePubBytes (nike : NIKE) (priv : Vector UInt8 32) : IO ByteArray := do
   match nike.decodePrivateKey (toVecN nike.privateKeySize (ofVector priv)) with
   | none => throw (IO.userError "derivePubBytes: decodePrivateKey failed")
@@ -93,8 +74,7 @@ private def buildPath (nodes : Array Node) (isSURB : Bool := false) : IO (Array 
     path := path.push { id := node.id, publicKey := node.pub, commands := cmds }
   pure path
 
-/-- Unwrap `pkt` at every node in order, checking forwarding commands and the final payload
-against `wantPayload`. Returns whether every hop behaved as expected. -/
+/-- Unwrap `pkt` at every node, checking forwarding commands and the final payload. -/
 def unwrapAll (nike : NIKE) (geom : Geometry) (nodes : Array Node) (pkt0 : ByteArray)
     (wantPayload : ByteArray) : IO Bool := do
   let n := nodes.size
@@ -136,8 +116,7 @@ def unwrapAll (nike : NIKE) (geom : Geometry) (nodes : Array Node) (pkt0 : ByteA
               ok := false
   pure ok
 
-/-- One round: build an `nrHops`-hop path using all of `geom.nrHops`'s slots (so `filler` is
-empty), send a random payload through it, and unwrap hop by hop. -/
+/-- One round over a path that fills every hop slot of `geom`. -/
 def runRound (nike : NIKE) (geom : Geometry) : IO Bool := do
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode nike)
   let path ← buildPath nodes
@@ -154,8 +133,7 @@ def runRound (nike : NIKE) (geom : Geometry) : IO Bool := do
     else
       unwrapAll nike geom nodes pkt0 payload
 
-/-- A round using only 3 of a 5-hop geometry's slots, so `createHeader` exercises the random
-filler for the two skipped hops. -/
+/-- A round using 3 of 5 hop slots, exercising the filler. -/
 def runFillerRound (schemeName : String) (nike : NIKE) : IO Bool := do
   let geom ← IO.ofExcept (ofNIKE schemeName 103 false 5)
   let nodes ← (List.range 3).toArray.mapM (fun _ => newNode nike)
@@ -169,10 +147,7 @@ def runFillerRound (schemeName : String) (nike : NIKE) : IO Bool := do
     pure false
   | .ok pkt0 => unwrapAll nike geom nodes pkt0 payload
 
-/-- The same round as `runRound`, but driven through `Sphinx.Interface.wrap`/`nikeSphinxScheme`
-instead of calling `newNIKEPacket` directly — confirms the abstract-interface unification
-actually produces a packet `unwrapNIKE` accepts, not just that it typechecks. A `pathLen` below
-`geom.nrHops` exercises `wrap`'s own filler draw. -/
+/-- As `runRound`, through `Sphinx.Interface.wrap`. -/
 def runAbstractWrapRound (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength)
     (pathLen : Nat := geom.nrHops) : IO Bool := do
@@ -187,10 +162,7 @@ def runAbstractWrapRound (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidFor
     pure false
   | .ok pkt _ => unwrapAll nike geom nodes (ofVector pkt) (ofVector payload)
 
-/-- Empirical check of `Sphinx.Interface.unwrap_complete` (the property
-`wrapNIKE_unwrapNIKE_complete_valid` proves outright): `unwrapChainAux`, given every hop's private
-key in path order, recovers the payload from a `wrap`-built packet in one call — no per-hop
-bookkeeping, unlike `unwrapAll`. -/
+/-- Empirical check of `Sphinx.Interface.unwrap_complete`. -/
 def runCompletenessRound (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
   let scheme := nikeSphinxCore nike wbCipher macS kdfS streamS geom hvalid rfl h16
@@ -218,8 +190,7 @@ def runCompletenessRound (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidFor
       else
         pure true
 
-/-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB` — confirms those two fields
-round-trip through `unwrapNIKE`/`SURB.decryptSURBPayload`, not just that they typecheck. -/
+/-- As `runAbstractWrapRound`, over `newSURB`/`newPacketFromSURB`. -/
 def runAbstractSURBRound (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidForNIKE nike)
     (h16 : 16 ≤ geom.payloadTagLength + geom.forwardPayloadLength) : IO Bool := do
   let scheme := nikeSphinxCore nike wbCipher macS kdfS streamS geom hvalid rfl h16
@@ -276,11 +247,8 @@ def runAbstractSURBRound (nike : NIKE) (geom : Geometry) (hvalid : geom.ValidFor
                     ok := false
       pure ok
 
-/-- Full SURB round trip: build a SURB (`newNIKESURB`), use it to build a reply packet
-(`SURB.newPacketFromSURB`), unwrap that reply through every hop, and confirm
-`SURB.decryptSURBPayload` recovers the original payload — the creation-side counterpart to the
-byte-exact `newPacketFromSURB`/`decryptSURBPayload` checks in `nike_vectors_test` (which can
-only check the deterministic half; nothing records the randomness a real SURB was built with). -/
+/-- SURB round trip: build a SURB, build a reply packet from it, unwrap through every hop, and
+check `decryptSURBPayload` recovers the payload. -/
 def runSURBRound (nike : NIKE) (geom : Geometry) : IO Bool := do
   let nodes ← (List.range geom.nrHops).toArray.mapM (fun _ => newNode nike)
   let path ← buildPath nodes true
@@ -343,13 +311,7 @@ def runSURBRound (nike : NIKE) (geom : Geometry) : IO Bool := do
                     ok := false
       pure ok
 
-/-- The full round set above, run against one registered NIKE-Sphinx scheme. Called once per
-entry in `NIKE.registry` from `main`. The abstract/completeness/SURB rounds build their geometry
-via `ofNIKEWith` (which needs no `byName` witness, since it's handed `nike` directly) rather than
-`ofNIKE schemeName`, purely to sidestep `byName`'s case-insensitive `String.toLower` comparison
-being unable to reduce inside a kernel proof for anything but the registry's first entry — the
-concrete `runRound`/`runFillerRound`/`runSURBRound` calls below still go through the real
-string-keyed `ofNIKE`, so that resolution path stays exercised at runtime for every scheme. -/
+/-- Every round, against one NIKE-Sphinx scheme. -/
 def runSuite (schemeName : String) (nike : NIKE) : IO Bool := do
   IO.println s!"-- {schemeName} --"
   let mut ok := true

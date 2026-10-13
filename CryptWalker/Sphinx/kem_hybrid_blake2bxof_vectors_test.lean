@@ -13,9 +13,7 @@ import CryptWalker.Util.Bytes
 /-!
 # KEM-Sphinx full-packet vectors: X25519 + ML-KEM-768 hybrid, blake2b-xof
 
-As `kem_hybrid_vectors_test`, but for `kemMLKEM768X25519Blake2b`: checks
-`testdata/sphinx_kem_hybrid_blake2bxof_vectors.json`, vendored from katzenpost
-(`.sha256` records which copy). -/
+As `kem_hybrid_vectors_test`, for `kemMLKEM768X25519Blake2b`. -/
 
 open Lean
 open CryptWalker.Util.newhex
@@ -76,8 +74,8 @@ def parseVec (j : Json) : Except String TestVec := do
   let surbKeys ← field j "SurbKeys"
   pure { nodes, path, packets, payload, surb, surbKeys }
 
-/-- Replay `unwrapKEM` at every node against the recorded `Packets`/`Payload`; for `withSurb`,
-also checks `newPacketFromSURB` against the recorded first packet. -/
+/-- Replay `unwrapKEM` at every node against the recorded packets and payload; for `withSurb`,
+also check `newPacketFromSURB`. -/
 def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   let withSurb := decide (v.surb.size > 0)
   let geom := if withSurb then geomSurb else geomNoSurb

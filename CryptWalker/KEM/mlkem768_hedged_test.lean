@@ -7,13 +7,9 @@ import Lean.Data.Json
 import CryptWalker.KEM.MLKEMHedged.MLKEMHedged768
 import CryptWalker.Util.newhex
 
-/-! # Hedged ML-KEM-768: known-answer tests, against `hpqc`
+/-! # Hedged ML-KEM-768: known-answer tests from `testdata/mlkem768_hedged.json`
 
-Checks `kemMLKEMHedged768Seed` and `encaps768Hedged` against vectors vendored from hpqc
-(`testdata/mlkem768_hedged.json`, hpqc's `"MLKEMHedged768"`). Unlike the NIST ACVP suite
-(`MLKEMHedged/mlkemhedged768_test.lean`), these vectors start from the unhashed `m`, so they cover
-the pre-hash too: for each vector, keygen from `d`,`z`, then `H(m)`, then hedged encapsulation of `m`,
-then decapsulation back to the shared secret. -/
+These vectors start from the unhashed `m`, so they also cover the pre-hash. -/
 
 open Lean
 open MLKEM

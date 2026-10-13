@@ -13,16 +13,10 @@ import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
 
 /-!
-# NIKE-Sphinx packet-creation vectors, for cross-checking against Go
+# NIKE-Sphinx packet-creation vectors
 
-The reverse direction of `nike_vectors_test`: that file replays *Go*-built packets through
-`unwrapNIKE`, checking the Lean port's unwrap side against real output. Nothing checks the
-creation side (`createHeader`/`newNIKEPacket`/`newNIKESURB`) against an independent
-implementation — `nike_selftest` only confirms Lean agrees with itself. This builds packets with
-the Lean port's creation side and writes them out in the same `hexSphinxTest` JSON shape
-`sphinx_vectors_test.go` uses (`Nodes`/`Path`/`Packets`/`Payload`/`Surb`/`SurbKeys`, all hex), so
-they can be vendored into katzenpost and unwrapped there — the same `withSURB ∈ {false,true} ×
-nrHops 1..5` matrix, geometry `GeometryFromUserForwardPayloadLength(x25519, 103, withSURB, 5)`. -/
+Builds packets with `createHeader`/`newNIKEPacket`/`newNIKESURB` and writes them as JSON for
+unwrapping by another implementation, over `withSURB ∈ {false,true} × nrHops 1..5`. -/
 
 open Lean
 open CryptWalker.Util.newhex
@@ -85,10 +79,8 @@ private def hexPathHop (h : PathHop) : Json :=
               ("PublicKey", Json.str (byteArrayToHex h.publicKey)),
               ("Commands", Json.arr (h.commands.toArray.map (fun c => Json.str (byteArrayToHex c.toBytes))))]
 
-/-- One vector entry: create a path of `nrHops` hops (out of `geom.nrHops` slots) and, for
-`withSURB`, a SURB and a reply packet built from it; then unwrap hop by hop, recording the
-packet chain and final payload exactly as `buildVectorSphinx` does — so a consumer needs no
-Lean-side trust, only `Unwrap`/`DecryptSURBPayload`. -/
+/-- One vector: build an `nrHops`-hop packet (and, for `withSURB`, a SURB and reply packet), then
+unwrap hop by hop, recording every intermediate packet and the final payload. -/
 def buildVec (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   let nodes ← (List.range nrHops).toArray.mapM (fun _ => newNode)
   let path ← buildPath nodes withSURB

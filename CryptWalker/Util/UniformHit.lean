@@ -7,12 +7,8 @@ import VCVio.OracleComp.Constructions.SampleableType
 
 /-! # Hitting a fixed target through a bijection
 
-`uniformHit_eq`: a uniformly sampled value, pushed through a bijection, hits any fixed target
-with probability `1 / |domain|`. Shared by `Sphinx.NIKESphinx` (wrap-resistance: "blind by this
-freshly drawn factor," hitting a forged header) and `BACAP.Unlinkability`/`Sign.Blindable`
-(blinding a public key by a uniform scalar, hitting a chosen box ID) — the same fact about
-uniform sampling composed with a bijection, unrelated to Sphinx specifically, so it lives here
-rather than in either caller. -/
+A uniformly sampled value, pushed through a bijection, hits any fixed target with probability
+`1 / |domain|`. -/
 
 namespace CryptWalker.Util.UniformHit
 
