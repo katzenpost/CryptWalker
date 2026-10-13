@@ -12,19 +12,11 @@ import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
 
 /-!
-# KEM-Sphinx packet-creation vectors, for cross-checking against Go
+# KEM-Sphinx packet-creation vectors
 
-As `gen_nike_vectors`: builds packets with the Lean port's creation side
-(`createKEMHeader`/`newKEMPacket`/`newKEMSURB`) and writes them out in the same `hexSphinxTest`
-JSON shape `generate_kem/main.go` (and `generate_kem_hybrid/main.go`) use, so katzenpost's own
-`Unwrap` can check them.
-
-Generic over `kem : KEM` (`Node.priv`/`pub` are `ByteArray`, not a fixed `Vector UInt8 32`, since
-that's only true for X25519 -- the hybrid's private key is 1280 bytes), unlike this file's earlier
-X25519-only version: node keys now come from `kem.generate`, matching `kem_selftest.lean`'s
-generalization (not raw scalar bytes, which only happens to double as a valid key for a
-Diffie-Hellman KEM). Runs once each for `X25519LadderKEM`, `MLKEM768X25519` (sha256-v1),
-and `mlkem768-x25519-blake2bxof-kem` (`kemMLKEM768X25519Blake2b`). -/
+Builds packets with `createKEMHeader`/`newKEMPacket`/`newKEMSURB` and writes them as JSON for
+unwrapping by another implementation. Runs for `X25519LadderKEM`, `MLKEM768X25519` and
+`mlkem768-x25519-blake2bxof-kem`. -/
 
 open Lean
 open CryptWalker.Util.newhex
@@ -88,8 +80,7 @@ private def hexPathHop (h : PathHop) : Json :=
               ("PublicKey", Json.str (byteArrayToHex h.publicKey)),
               ("Commands", Json.arr (h.commands.toArray.map (fun c => Json.str (byteArrayToHex c.toBytes))))]
 
-/-- As `gen_nike_vectors.buildVec`, over `createKEMHeader`/`newKEMPacket`/`newKEMSURB`: one
-ephemeral seed per hop instead of one client private key. -/
+/-- As `gen_nike_vectors.buildVec`, with one ephemeral seed per hop. -/
 def buildVec (kem : KEM) (geom : Geometry) (withSURB : Bool) (nrHops : Nat) : IO Json := do
   let nodes ← (List.range nrHops).toArray.mapM (fun _ => newNode kem)
   let path ← buildPath nodes withSURB
@@ -163,8 +154,7 @@ def runGen (schemeName : String) (kem : KEM) (outPath : String) : IO Unit := do
   IO.FS.writeFile outPath out
   IO.println s!"wrote {outPath}"
 
-/-- As `runGen`, but for a `kem` not in `KEM.registry`: geometry comes from `ofKEMWith` directly,
-no `Except` to thread. -/
+/-- As `runGen`, for a `kem` not in `KEM.registry`. -/
 def runGenWith (label : String) (kem : KEM) (outPath : String) : IO Unit := do
   let mut vecs : Array Json := #[]
   for withSURB in [false, true] do

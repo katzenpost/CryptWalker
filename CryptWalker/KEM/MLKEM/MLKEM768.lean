@@ -71,7 +71,7 @@ abbrev decode_encode_privFromSeed := FIPS203.decode_encode_privFromSeed ps
 /-- ML-KEM-768 with the FIPS 203 expanded private key. -/
 abbrev kemMLKEM768 := FIPS203.kem ps
 
-/-- ML-KEM-768 with the `ek ‖ d ‖ z` seed private key, wire-compatible with Go's `crypto/mlkem`. -/
+/-- ML-KEM-768 with the `ek ‖ d ‖ z` seed private key. -/
 abbrev kemMLKEM768Seed := FIPS203.kemSeed ps
 
 end CryptWalker.KEM.MLKEM768

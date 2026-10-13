@@ -8,11 +8,7 @@ import CryptWalker.BACAP.Position
 import CryptWalker.BACAP.Types
 import CryptWalker.Util.newhex
 
-/-! # Generate the BACAP vector files from hpqc's inputs
-
-Reads `CryptWalker/testdata/bacap_inputs.json`, vendored from hpqc's `testvectors/bacap/inputs.json`,
-and generates the eight BACAP vector files with this implementation. hpqc's Go generator and its
-Python port generate the same files from the same inputs; the three must agree on every value.
+/-! # Generate the BACAP vector files from `testdata/bacap_inputs.json` (from hpqc)
 
     CryptWalker-BACAP-gen_vectors --check     compare with the vendored hpqc files
     CryptWalker-BACAP-gen_vectors DIR         write the files into DIR -/
@@ -40,7 +36,7 @@ def has (j : Json) (k : String) : Bool := match j.getObjVal? k with
 def toVec (n : Nat) (b : ByteArray) : Gen (Vector UInt8 n) :=
   if h : b.data.size = n then pure ⟨b.data, h⟩ else throw s!"expected {n} bytes, got {b.size}"
 
-/-- The Go generator's `deterministicBytes`: HKDF-BLAKE2b-512 over a label. -/
+/-- HKDF-BLAKE2b-512 over a label. -/
 def deterministicBytes (label name : String) (n : Nat) : ByteArray :=
   let prk := blake2b512_hkdf.extract ByteArray.empty ("hpqc-vector-seed-" ++ label).toUTF8
   ⟨(blake2b512_hkdf.expand prk name.toUTF8 n).toArray⟩
@@ -217,8 +213,7 @@ def generate (inp : Json) : Gen (List (String × Json)) := do
   let mut neg := #[]
   for v in ← arr inp "negative" do
     let op ← str v "operation"
-    -- Fields as Go writes them: empty strings and an unset advance_to left out,
-    -- advance_by always present.
+    -- Empty strings and an unset advance_to are omitted; advance_by is always present.
     let mut fs : List (String × Json) := []
     let mut advBy : Nat := 0
     match op with

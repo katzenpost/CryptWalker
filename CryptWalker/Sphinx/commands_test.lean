@@ -8,13 +8,10 @@ import CryptWalker.Sphinx.commands
 import CryptWalker.Util.newhex
 
 /-!
-# Sphinx routing-command wire-format known-answer tests
+# Sphinx routing-command known-answer tests
 
-Checks `Commands.RoutingCommand.toBytes` against `testdata/sphinx_commands_vectors.json`
-(`katzenpost/core/sphinx/commands/testdata/sphinx_commands_vectors.json`, vendored as-is — a
-flat object, not the usual `{primitive, vectors: [...]}` envelope, since it comes straight from
-`commands_vectors_test.go` rather than `testvectors/cmd/generate`), then round-trips each
-through `fromBytesOne` to check parsing agrees. -/
+Checks `RoutingCommand.toBytes` against `testdata/sphinx_commands_vectors.json` and round-trips
+each through `fromBytesOne`. -/
 
 open Lean
 open CryptWalker.Util.newhex

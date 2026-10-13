@@ -7,12 +7,10 @@ import Lean.Data.Json
 import CryptWalker.KEM.MLKEMHedged.MLKEMHedged768
 import CryptWalker.Util.newhex
 
-/-! # Hedged ML-KEM-768 vectors, for cross-checking against hpqc
+/-! # Hedged ML-KEM-768 vector generator
 
-As `gen_mlkem768_x25519_combiner_vectors.lean`: builds vectors with the Lean side's own computation
-(real IO randomness, recorded as drawn), in the schema `mlkem768_hedged_test.lean` checks, so hpqc's
-`kem/mlkem768` tests can check its `"MLKEMHedged768"` against them. Each vector is decapsulated
-here before it is written. -/
+Writes random vectors in the schema `mlkem768_hedged_test.lean` checks, each decapsulated before
+it is written. -/
 
 open Lean
 open MLKEM

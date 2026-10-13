@@ -8,9 +8,8 @@ import CryptWalker.GroupChat.Member.Events
 
 /-! # The boxes a member wrote to its own stream
 
-See "Sent-box records" and "Disappearing messages" in the group chat spec, and katzenqt's
-`groupchat/sentbox.py`: what a member may still rewrite, and what its retention policy lets it
-forget. -/
+What a member may still rewrite, and what retention lets it forget. See "Sent-box records" and
+"Disappearing messages" in the group chat spec. -/
 
 namespace CryptWalker.GroupChat.Member
 

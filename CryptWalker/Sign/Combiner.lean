@@ -13,20 +13,8 @@ open CryptWalker.Util.Combine
 
 /-! # Combining two signature schemes
 
-Models hpqc's `sign/hybrid` — Ed25519 paired with Falcon, as recorded in
-`testvectors/primitives/falcon_padded_512_ed25519.json`. Keys and signatures are pairs, the
-encodings concatenate, and verification is the **conjunction** of the two component checks.
-
-The security direction is the mirror image of the KEM combiner. There, shared secrets are
-XOR-combined under a split PRF and the hybrid is IND-CCA2 if *at least one* component is; here,
-demanding that both signatures verify means a forger has to forge both, so the hybrid is
-unforgeable if *at least one* component is. Same conclusion, opposite mechanism — and unlike
-the KEM combiner there is no transcript to bind, so nothing couples the components to each
-other. That is why the n-ary generalisation here is a fold of `&&` rather than the indexed
-recursion the KEM combiner needs.
-
-As with every combiner in this library, correctness is *derived* from the components' laws
-rather than assumed: `verify_sign` below is discharged, not axiomatised.
+Keys and signatures are pairs, encodings concatenate, and verification is the conjunction of the
+two component checks, so the hybrid is unforgeable if at least one component is.
 -/
 
 variable (s₁ s₂ : Signature)
@@ -60,13 +48,12 @@ def combineSign : Signature where
     let b ← s₂.decodeSig (splitR v)
     pure (a, b)
 
-  -- The combined seed is split, so each component gets independent entropy.
+  -- Split the seed so each component gets independent entropy.
   privateKeyFromSeed := fun v =>
     (s₁.privateKeyFromSeed (splitL v), s₂.privateKeyFromSeed (splitR v))
 
   pub := fun sk => (s₁.pub sk.1, s₂.pub sk.2)
 
-  -- Each component signs the same message against its own half of the product state.
   sign := fun sk m => do
     let a ← sliftL (s₁.sign sk.1 m)
     let b ← sliftR (s₂.sign sk.2 m)

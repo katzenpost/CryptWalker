@@ -7,14 +7,7 @@ namespace CryptWalker.Cipher.ChaCha20
 
 /-! # ChaCha20 (original/Bernstein construction, 64-bit nonce)
 
-Needed for one thing only: `hpqc/rand.NewDeterministicRandReader`, which
-`PacketKeys.blindingFactorSeed` feeds into to derive the next hop's blinding-factor NIKE private
-key — `NIKESphinx`'s blinding chain needs this to match Go byte-for-byte.
-
-`NewDeterministicRandReader` always uses an 8-byte zero nonce (original Bernstein variant, not
-RFC 8439's IETF one) and only ever reads the first 32 bytes, so only a single block (counter 0)
-is implemented — no counter increment. Otherwise standard ChaCha20: "expand 32-byte k" constants,
-20 rounds, add the original state back in, serialize little-endian. -/
+Single-block function; `ChaChaPoly` builds the RFC 8439 variant on top of it. -/
 
 private def rotl (x : UInt32) (n : UInt32) : UInt32 := (x <<< n) ||| (x >>> (32 - n))
 
@@ -64,9 +57,7 @@ def block (key : Array UInt8) (nonce : Array UInt8) (counterLo counterHi : UInt3
   let out : Array UInt32 := Array.ofFn fun i : Fin 16 => s[i.val]! + init[i.val]!
   return (Array.range 16).foldl (fun acc i => acc ++ leBytes out[i]!) #[]
 
-/-- The first `len ≤ 32` bytes of the ChaCha20 keystream for `key` under the all-zero 8-byte
-nonce and counter zero — exactly `DeterministicRandReader(seed).Read(buf[:len])`'s first block,
-which is all `GeneratePrivateKey` ever draws from it. -/
+/-- The first 32 bytes of the ChaCha20 keystream for `key`, with zero nonce and counter. -/
 def keystream32 (key : Array UInt8) : Array UInt8 :=
   (block key (Array.replicate 8 0) 0 0).extract 0 32
 

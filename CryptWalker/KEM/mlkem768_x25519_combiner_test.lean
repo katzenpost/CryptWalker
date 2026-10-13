@@ -7,15 +7,11 @@ import Lean.Data.Json
 import CryptWalker.KEM.Schemes
 import CryptWalker.Util.newhex
 
-/-! # X25519 + ML-KEM-768 hybrid combiner: known-answer tests, against `hpqc`
+/-! # X25519 + ML-KEM-768 combiner: known-answer tests
 
-Checks `kemMLKEM768X25519`'s two ingredients and the combiner glue against vectors vendored from
-hpqc (`testdata/mlkem768_x25519_combiner.json`). Each vector's `prf` field picks the X25519 half:
-`blake2b-xof` uses `kemX25519Blake2b`, `sha256-v1` uses `kemX25519`.
-
-Each vector gives every component's raw inputs and every intermediate output, so the check covers
-X25519 keygen/encap/decap, ML-KEM-768 keygen/encap, and the combiner's ciphertext concatenation
-and `splitPRF` all at once. -/
+Vectors from `testdata/mlkem768_x25519_combiner.json` check each component and the combined
+ciphertext and shared secret. Each vector's `prf` field selects `kemX25519Blake2b` or
+`kemX25519`. -/
 
 open Lean
 open CryptWalker.Util.newhex
@@ -92,17 +88,13 @@ def check (label : String) (want got : ByteArray) : IO Bool := do
     IO.println s!"           got  {hexOfB got}"
     pure false
 
-/-- The PRFs this suite can run the X25519 half under -- `KEM/vectors.lean`'s `prfByName`, but
-returning the whole `-kem`-suffixed KEM rather than the bare `Adapter.PRF`, since that's what
-every caller here actually needs. -/
+/-- The X25519 KEM for a PRF name. -/
 def x25519KEMByPRFName : String → Option KEM
   | "sha256-v1"   => some kemX25519
   | "blake2b-xof" => some kemX25519Blake2b
   | _             => none
 
-/-- The X25519 half under the named PRF: static keypair, ciphertext (= ephemeral pubkey), encap
-and decap shared secrets. Returns the ciphertext/shared-secret bytes too, for the combined-vector
-checks below. -/
+/-- Checks the X25519 component; also returns its ciphertext and shared secret. -/
 def runX25519 (kem : KEM) (v : Vec) : IO (Bool × ByteArray × ByteArray) := do
   match kem.decodePrivateKey (toVecN kem.privateKeySize v.x25519StaticPriv) with
   | none => IO.println "    FAIL x25519 static privkey decode"; pure (false, ByteArray.empty, ByteArray.empty)
@@ -123,8 +115,7 @@ def runX25519 (kem : KEM) (v : Vec) : IO (Bool × ByteArray × ByteArray) := do
           (ofVector (kem.encodePlaintext ssDecap))) && ok
         pure (ok, ctBytes, ssBytes)
 
-/-- The ML-KEM-768 half: keygen from `d`,`z`, encaps from `m`. Returns the ciphertext/shared-secret
-bytes too. -/
+/-- Checks the ML-KEM-768 component; also returns its ciphertext and shared secret. -/
 def runMLKEM (v : Vec) : IO (Bool × ByteArray × ByteArray) := do
   let d := toVecN 32 v.mlkemD
   let z := toVecN 32 v.mlkemZ
@@ -138,8 +129,7 @@ def runMLKEM (v : Vec) : IO (Bool × ByteArray × ByteArray) := do
   ok := (← check "mlkem768 shared secret" v.mlkemSs ssBytes) && ok
   pure (ok, ctBytes, ssBytes)
 
-/-- Returns `(ran, ok)`: whether the vector's PRF was available, and whether every check that ran
-passed. -/
+/-- `(ran, ok)`: whether the vector's PRF is supported, and whether its checks passed. -/
 def runVec (v : Vec) : IO (Bool × Bool) := do
   match x25519KEMByPRFName v.prf with
   | none =>

@@ -9,14 +9,9 @@ import CryptWalker.Hash.Blake2b
 import CryptWalker.Sign.Ed25519_math
 import CryptWalker.Util.newhex
 
-/-! # hpqc primitive vectors BACAP builds on, not checked elsewhere
+/-! # SHA-512/256, BLAKE2b-512 and Ed25519 vectors (from hpqc)
 
-Reads `testdata/sha512_256.json`, `testdata/blake2b_512.json` and `testdata/ed25519.json`,
-vendored from `hpqc/testvectors/primitives/`. SHA-512/256 and BLAKE2b-512 are hashed and compared;
-`ed25519.json` records only public keys, messages and signatures, so each signature must verify,
-and must stop verifying when one bit of it is flipped. The other primitive files hpqc shares are
-read by `Hash.test`, `Hash.hkdf_test`, `Hash.blake2b_256_test`, `Hash.blake2b_xof_test`,
-`Cipher.test` and `Sign.blinded_test`. -/
+Ed25519 vectors must verify, and must fail with one signature bit flipped. -/
 
 open Lean
 open CryptWalker.Util.newhex

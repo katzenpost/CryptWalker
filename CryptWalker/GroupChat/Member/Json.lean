@@ -8,13 +8,10 @@ import Lean.Data.Json
 import CryptWalker.GroupChat.Member.Group
 import CryptWalker.Util.newhex
 
-/-! # A member as katzenqt's traces write it
+/-! # JSON trace format
 
-katzenqt's `groupchat/trace.py` writes one JSON line per call made on a member: the call, its
-arguments, what it returned, and the member's state afterwards, in the shape
-`groupchat/state.py` keeps it. Messages are decoded, bytes are hex, a map is a list of pairs in
-its order. This file reads arguments and writes results and state in exactly that shape, so the
-replay can compare them. -/
+Reads call arguments and writes results and member state in katzenqt's trace format. Bytes are
+hex; a map is a list of pairs in order. -/
 
 namespace CryptWalker.GroupChat.Member.Trace
 

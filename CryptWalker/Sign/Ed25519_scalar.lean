@@ -8,10 +8,8 @@ import CryptWalker.Sign.Ed25519_order
 
 /-! # Scalar multiplication through the transport
 
-`Ed25519Math.scalarMul n (ψ P) = ψ (n • P)` for every point `P` of Curve25519, so scalar
-multiplication of Ed25519 points inherits everything Mathlib proves about `n • P` in an additive
-commutative group. The basepoint is `ψ G`, and `ℓ • G = 0` (from `Ed25519_order`), so
-scalars act modulo `ℓ`. -/
+`Ed25519Math.scalarMul n (ψ P) = ψ (n • P)`, so Ed25519 scalar multiplication inherits Mathlib's
+`n • P` lemmas. -/
 
 namespace CryptWalker.Sign.Ed25519Scalar
 
@@ -59,7 +57,7 @@ lemma eq_zero_of_psi_eq_zero {P : W} (h : psi P = zero) : P = 0 := by
 lemma natCast_ne_zero' {n : ℕ} (h0 : n ≠ 0) (hlt : n < CryptWalker.NIKE.X25519Common.p) :
     ((n : ℕ) : F) ≠ 0 := natCast_ne_zero h0 hlt
 
-/-- **The Ed25519 basepoint is the image of the X25519 basepoint.** -/
+/-- The Ed25519 basepoint is the image of the X25519 basepoint. -/
 theorem psi_G : psi CryptWalker.NIKE.X25519.G = basepoint := by
   have hy0 : CryptWalker.NIKE.X25519.basepointY ≠ 0 := by
     unfold CryptWalker.NIKE.X25519.basepointY CryptWalker.NIKE.X25519.basepointYNat
@@ -111,10 +109,7 @@ theorem ell_smul_G : ell • CryptWalker.NIKE.X25519.G = 0 := by
   rw [psi_smul, psi_G]
   exact CryptWalker.Sign.Ed25519Order.scalarMul_ell_basepoint
 
-/-! ### Multiples of the basepoint
-
-Every statement about `scalarMul n basepoint` becomes a statement about `n • G` in an additive
-commutative group, where `ℓ • G = 0` makes `n` matter only modulo `ℓ`. -/
+/-! ### Multiples of the basepoint -/
 
 lemma smul_mod (n : ℕ) : (n % ell) • CryptWalker.NIKE.X25519.G = n • CryptWalker.NIKE.X25519.G := by
   conv_rhs => rw [← Nat.mod_add_div n ell]

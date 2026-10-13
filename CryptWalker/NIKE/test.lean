@@ -31,10 +31,8 @@ def testX25519Vector : IO Unit := do
       throw (IO.userError s!"KAT mismatch: expected {expectedHex}, got {got}")
   IO.println "All vector tests passed for X25519!"
 
-/-- The same RFC 7748 vector as above, but through the group implementation: lift the
-u-coordinate to a curve point, multiply, and project back. This is what distinguishes a correct
-group implementation from a merely self-consistent one -- `testNIKE` below would pass even if
-every operation returned zero. -/
+/-- The RFC 7748 vector through the group implementation: lift the u-coordinate, multiply, and
+project back. -/
 def testX25519GroupVector : IO Unit := do
   let vectors := #[
     ( "a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4",
@@ -51,9 +49,8 @@ def testX25519GroupVector : IO Unit := do
         throw (IO.userError s!"group KAT mismatch: expected {expectedHex}, got {showVec got}")
   IO.println "All vector tests passed for X25519-group!"
 
-/-- Cross-check the two implementations against each other: for the same private key, the group
-scheme's point and the ladder's byte string must have the same u-coordinate, and the two must
-agree on a full Diffie-Hellman exchange. -/
+/-- The group and ladder schemes derive the same u-coordinate and agree on a Diffie-Hellman
+exchange. -/
 def testX25519GroupAgreesWithLadder : IO Unit := do
   let seeds := #[Vector.replicate 32 1, Vector.replicate 32 2,
                  Vector.replicate 32 7, Vector.replicate 32 255]

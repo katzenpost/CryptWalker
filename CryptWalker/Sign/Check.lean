@@ -14,15 +14,9 @@ open CryptWalker.Sign.Schemes
 
 /-! # Elaboration and axiom audit
 
-Deliberately *not* an executable. What this module does is force the compositions to elaborate and
-make the trusted surface visible.
-
-The `#print axioms` lines below are the important part, and each is pinned with `#guard_msgs`
-so that a change to the trusted surface fails the build rather than scrolling past in it. The
-first three must show only standard kernel axioms: they are derived from `Blindable`'s fields and
-must not depend on anything Ed25519-specific. The last two are the concrete instances, and they
-may assume exactly two things: `X25519.p_prime` and `Ed25519Blinded.ell_prime`, that the field
-prime `2^255 - 19` and the group order `ℓ` are prime. Every other law of Ed25519 is a theorem.
+The `#print axioms` checks are pinned with `#guard_msgs`, so a change to the trusted surface fails
+the build. The generic results use no axioms; the Ed25519 instances assume only
+`X25519.p_prime` and `Ed25519Blinded.ell_prime`.
 -/
 
 /-- info: 'CryptWalker.Sign.Blindable.verify_blinded' does not depend on any axioms -/
@@ -64,8 +58,7 @@ section
 variable (sk : ed25519Blindable.base.PrivateKey) (f : ed25519Blindable.Scalar)
          (m : ByteArray) (s : ed25519Blindable.base.State)
 
-/-- A signature made under a blinded key verifies against the blinded public key. This is the
-statement `BACAP.spthy` assumes as a rewrite rule, instantiated at Ed25519. -/
+/-- A signature made under a blinded key verifies against the blinded public key, at Ed25519. -/
 example : ed25519Blindable.base.verify
             (ed25519Blindable.blindPub (ed25519Blindable.base.pub sk) f) m
             (ed25519Blindable.base.sign (ed25519Blindable.blindPriv sk f) m s).1 = true :=
@@ -80,12 +73,12 @@ example : ed25519Blindable.base.pub
 
 end
 
-/-- The hybrid scheme's own correctness law, which the combiner derived rather than assumed. -/
+/-- The hybrid scheme's correctness law. -/
 example (sk : ed25519Hybrid.PrivateKey) (m : ByteArray) (s : ed25519Hybrid.State) :
     ed25519Hybrid.verify (ed25519Hybrid.pub sk) m (ed25519Hybrid.sign sk m s).1 = true :=
   ed25519Hybrid.verify_sign sk m s
 
-/-- Combining is closed: a hybrid is itself a `Signature`, so it can be combined again. -/
+/-- A hybrid is itself a `Signature`, so it can be combined again. -/
 noncomputable example : Signature :=
   Combiner.combineSign ed25519Hybrid ed25519Signature
 

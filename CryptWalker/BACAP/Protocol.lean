@@ -7,16 +7,10 @@ import CryptWalker.BACAP.Ratchet
 import CryptWalker.Sign.Blindable
 import CryptWalker.Cipher.AEAD
 
-/-! # BACAP Protocol: abstract structure with correctness laws
+/-! # BACAP protocol
 
-This file defines the abstract BACAP protocol specification that wires together:
-
-* A `Blindable` signature scheme (for box-ID derivation via key blinding)
-* An `HKDF` (for the ratchet and context key derivation)
-* An `AEAD` (for box encryption)
-
-The structure carries no mutable state; all operations take a `MessageBoxIndex`
-explicitly, matching the stateless-first design. -/
+Built from a `Blindable` signature scheme (box IDs), an `HKDF` (ratchet) and an `AEAD` (box
+encryption). Operations are stateless and take a `MessageBoxIndex` explicitly. -/
 
 namespace CryptWalker.BACAP.Protocol
 
@@ -27,38 +21,32 @@ open CryptWalker.Sign.Blindable
 open CryptWalker.Cipher.AEAD
 open OracleComp OracleSpec ENNReal
 
-/-- Abstract BACAP protocol structure. -/
 structure BACAPSpec where
   blindable : Blindable
   hkdf      : HKDF
   aead      : AEAD
 
-  /-- The blinding factors can be sampled uniformly. Instance fields, as in
-  `NIKESphinxScheme`: they are what `unlinkable` below is stated over. -/
+  /-- Blinding factors can be sampled uniformly. -/
   [scalarFintype : Fintype blindable.Scalar]
   [scalarSampleable : SampleableType blindable.Scalar]
   [pubDecEq : DecidableEq blindable.base.PublicKey]
 
-  /-- Derive the per-box public key from a root public key, ratchet state, and context.
-      The box ID is `blindPub(rootPub, K_i^ctx)`. -/
+  /-- The box ID `blindPub(rootPub, K_i^ctx)`. -/
   deriveBoxID : blindable.base.PublicKey → MessageBoxIndex → ByteArray → blindable.base.PublicKey
 
-  /-- Sign ciphertext with a blinded write key. Returns (boxID, signature). -/
+  /-- Sign a ciphertext with the blinded write key; returns (boxID, signature). -/
   signBox : blindable.base.PrivateKey → MessageBoxIndex → ByteArray → ByteArray →
     blindable.base.PublicKey × blindable.base.Sig
 
-  /-- Verify a signature under a given box ID. -/
   verifyBox : blindable.base.PublicKey → ByteArray → blindable.base.Sig → Bool
 
-  /-- Encrypt a plaintext under a write cap. Returns (boxID, ciphertext, signature).
-      The box ID is both the AEAD nonce prefix (first 12 bytes) and AD (all 32 bytes). -/
+  /-- Returns (boxID, ciphertext, signature). The box ID's first 12 bytes are the AEAD nonce;
+      all 32 bytes are the AD. -/
   encryptBox : blindable.base.PrivateKey → blindable.base.PublicKey →
     MessageBoxIndex → ByteArray → ByteArray →
     blindable.base.PublicKey × ByteArray × blindable.base.Sig
 
-  /-- Decrypt a ciphertext given a box ID, context, ciphertext, and signature.
-      Verifies signature first; for tombstones (empty ciphertext),
-      returns empty plaintext after verification. -/
+  /-- Verifies the signature first; a tombstone (empty ciphertext) decrypts to empty. -/
   decryptBox : blindable.base.PublicKey →
     MessageBoxIndex → ByteArray → ByteArray → blindable.base.Sig → Option ByteArray
 
@@ -67,28 +55,22 @@ structure BACAPSpec where
     let r := signBox sk idx ctx ct
     verifyBox r.1 ct r.2 = true
 
-  /-- The box `encryptBox` addresses is the one a reader derives from the root public key, index and
-      context. This is what lets a reader find a box it never saw written. -/
+  /-- `encryptBox` writes to the box a reader derives from the root public key. -/
   encrypt_boxid : ∀ sk pk idx ctx pt, (encryptBox sk pk idx ctx pt).1 = deriveBoxID pk idx ctx
 
-  /-- What `encryptBox` produces is a genuine box: its signature verifies under its box ID with the
-      signature scheme itself, which is what a replica checks. As for `decrypt_encrypt`,
-      `pk = base.pub sk`. -/
+  /-- The signature `encryptBox` produces verifies under its box ID. -/
   encrypt_verify : ∀ sk pk idx ctx pt, pk = blindable.base.pub sk →
     let r := encryptBox sk pk idx ctx pt
     blindable.base.verify r.1 r.2.1 r.2.2 = true
 
-  /-- Decrypting an encrypted box returns the original plaintext. The public key must be the
-      one derived from the private key (i.e. `pk = base.pub sk`), as in a valid WriteCap. -/
+  /-- Decrypting an encrypted box returns the plaintext. -/
   decrypt_encrypt : ∀ sk pk idx ctx pt,
     pk = blindable.base.pub sk →
     let r := encryptBox sk pk idx ctx pt
     decryptBox r.1 idx ctx r.2.1 r.2.2 = some pt
 
-  /-- Soundness: for non-tombstone ciphertexts, if decryption succeeds and the box ID
-      matches what `encryptBox` would derive from the given root public key, then encrypting
-      the plaintext with the same inputs produces the same ciphertext. The `ct.size > 0`
-      precondition excludes tombstones, which bypass the AEAD entirely. -/
+  /-- A non-tombstone ciphertext that decrypts at the derived box ID is exactly what
+      `encryptBox` produces for that plaintext. -/
   decrypt_sound : ∀ sk pk boxId idx ctx ct sig pt,
     pk = blindable.base.pub sk →
     deriveBoxID pk idx ctx = boxId →
@@ -96,12 +78,8 @@ structure BACAPSpec where
     ct.size > 0 →
     (encryptBox sk pk idx ctx pt).2.1 = ct
 
-  /-- **Unlinkability** (Echomix §4.3), under the idealization that blinding factors are truly
-  random: for a regular root key `pk`, a freshly drawn blinding factor produces each key in the
-  orbit of `pk` with probability exactly `1/|Scalar|`, whichever root secret `pk` came from. That
-  is `δ = 0` in the paper's game (`BACAP.Unlinkability` has the two-box form). Free for every
-  instance, like `NIKESphinxScheme.wrap_resistant`: it is `uniformHit_eq_of_injective` applied to
-  `blindable.blind_injective`, which is the only thing a scheme has to supply. -/
+  /-- Unlinkability (Echomix §4.3): for a regular root key `pk`, a uniform blinding factor yields
+  each key in the orbit of `pk` with probability `1/|Scalar|`. -/
   unlinkable : ∀ pk, blindable.Regular pk → ∀ target, target ∈ Set.range (blindable.blindPub pk) →
       Pr[= true | ($ᵗ blindable.Scalar) >>=
           fun f => pure (decide (blindable.blindPub pk f = target))] =

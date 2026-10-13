@@ -11,17 +11,9 @@ import CryptWalker.Util.newhex
 import CryptWalker.Util.Bytes
 
 /-!
-# KEM-Sphinx full-packet cross-implementation vectors: X25519 + ML-KEM-768 hybrid
+# KEM-Sphinx full-packet vectors: X25519 + ML-KEM-768 hybrid
 
-As `kem_vectors_test`, but for `"MLKEM768X25519"`. `testdata/sphinx_kem_hybrid_vectors.json`
-is `katzenpost/core/sphinx/testdata/kemsphinx_mlkem768x25519_vectors.json` (vendored as-is,
-`.sha256` records which copy) — 10 real KEM-Sphinx packets built by *Go*'s `NewKEMSphinx` with a
-combiner built directly from `adapter.FromNIKEWithPRF(x25519, SHA256v1)` and `mlkem768.Scheme()`
-(`core/sphinx/testvectors/cmd/generate_kem_hybrid`) -- not hpqc's registered `"MLKEM768-X25519"`,
-which defaults to the deployed BLAKE2b-XOF PRF this project hasn't ported; using that would make
-every packet here fail to unwrap, since the per-hop shared secret depends on which PRF derived it.
-Node private keys are `ByteArray`, not a fixed `Vector UInt8 32` (`kem_vectors_test`'s convention),
-since the hybrid's private key is `32 + (1184 + 64) = 1280` bytes. -/
+As `kem_vectors_test`, for `"MLKEM768X25519"` with the SHA256-v1 combiner PRF. -/
 
 open Lean
 open CryptWalker.Util.newhex
@@ -82,9 +74,8 @@ def parseVec (j : Json) : Except String TestVec := do
   let surbKeys ← field j "SurbKeys"
   pure { nodes, path, packets, payload, surb, surbKeys }
 
-/-- Replay `unwrapKEM` at every node, checking against the recorded `Packets`/`Payload`. Also,
-for the `withSurb` half: `Packets[0]` there is Go's `NewPacketFromSURB(Surb, Payload)` output
-(as `kem_vectors_test`), so `newPacketFromSURB` gets checked byte-for-byte against Go here too. -/
+/-- Replay `unwrapKEM` at every node against the recorded packets and payload; for `withSurb`,
+also check `newPacketFromSURB`. -/
 def runVec (geomNoSurb geomSurb : Geometry) (v : TestVec) : IO Bool := do
   let withSurb := decide (v.surb.size > 0)
   let geom := if withSurb then geomSurb else geomNoSurb

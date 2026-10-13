@@ -7,23 +7,8 @@ import CryptWalker.BACAP.API
 
 /-! # BACAP positions: a capability bound to one box on its stream
 
-The Lean counterpart of `hpqc/bacap/position.go` and `hpqc/py/hpqc/bacap/positions.py`.
-
-A box ID is derived from a cap's root key *and* an index's blinding factor, so a cap paired
-with an index from another stream addresses a box nobody writes to, and nothing reports it.
-Go and Python close that gap at run time: `Contains` walks the ratchet from the cap's index to
-the one given, and the position types can only be built through it. Here a position carries a
-proof instead: `Reaches cap.messageBoxIndex index`.
-
-* `ReadCap.contains` / `WriteCap.contains` check an index is on the cap's stream, within the
-  same walk bound as Go and Python (`maxContainsWalk`). `contains_ok_iff` says exactly which
-  indices pass.
-* `ReadPosition` / `WritePosition` with `start`, `positionAt`, `next`, `advanceTo`, `boxID`,
-  `open`, `encrypt` and `tombstone`. `next_index` and `advanceTo_index` show they move exactly
-  as `nextIndex` and `advanceIndexTo` do.
-* `MessageBoxIndex.openForContext` checks the box is the one the cap and index derive before
-  decrypting (`openForContext_box`). That check is what rejects a tombstone signed for another
-  box, since a tombstone has no ciphertext to authenticate (`openForContext_tombstone`). -/
+A cap paired with an index from another stream addresses a box nobody writes to. A position
+carries a proof `Reaches cap.messageBoxIndex index` that rules this out. -/
 
 namespace CryptWalker.BACAP.Types
 
@@ -100,13 +85,11 @@ theorem Reaches.iterate {start idx : MessageBoxIndex} (h : Reaches start idx) (j
   rw [iterate_idx64_toNat k start hk] at hj
   exact ⟨j + k, by omega, by rw [Function.iterate_add_apply]⟩
 
-/-- The furthest `contains` walks, as in Go (`maxContainsWalk`) and Python
-    (`MAX_CONTAINS_WALK`): 2^18 steps, about a second. -/
+/-- The furthest `contains` walks the ratchet. -/
 def maxContainsWalk : Nat := 2 ^ 18
 
-/-- Why a BACAP operation refused its input. Go and Python use these errors' namesakes;
-    `openFailed` covers both a bad signature and an AEAD failure, which
-    `decryptForContext` does not tell apart. -/
+/-- Why a BACAP operation refused its input. `openFailed` covers both a bad signature and an
+    AEAD failure. -/
 inductive BACAPError where
   | indexNotInChannel
   | indexTooFar
@@ -156,17 +139,16 @@ theorem checkReaches_ok_iff (start idx : MessageBoxIndex) :
 
 /-! ## Contains -/
 
-/-- `.ok ()` if `idx` is on this cap's stream: its own index or one the ratchet reaches from it,
-    within `maxContainsWalk` steps. Matches `ReadCap.Contains` in Go. -/
+/-- `.ok ()` if the ratchet reaches `idx` from the cap's index within `maxContainsWalk` steps. -/
 def ReadCap.contains (rc : ReadCap) (idx : MessageBoxIndex) : Except BACAPError Unit :=
   (checkReaches rc.messageBoxIndex idx).map fun _ => ()
 
-/-- See `ReadCap.contains`; a write cap and its read cap share a stream. -/
+/-- See `ReadCap.contains`. -/
 def WriteCap.contains (wc : WriteCap) (idx : MessageBoxIndex) : Except BACAPError Unit :=
   wc.readCap.contains idx
 
-/-- **`contains` is exact.** It accepts `idx` if and only if `idx` is the cap's own index ratcheted
-    forward at most `maxContainsWalk` times. -/
+/-- `contains` accepts `idx` iff `idx` is the cap's index ratcheted at most `maxContainsWalk`
+    times. -/
 theorem contains_ok_iff (rc : ReadCap) (idx : MessageBoxIndex) :
     rc.contains idx = .ok () ↔
       ∃ k ≤ maxContainsWalk, rc.messageBoxIndex.idx64.toNat + k < 2 ^ 64 ∧
@@ -174,7 +156,7 @@ theorem contains_ok_iff (rc : ReadCap) (idx : MessageBoxIndex) :
   rw [← checkReaches_ok_iff, ReadCap.contains]
   cases checkReaches rc.messageBoxIndex idx <;> simp [Except.map]
 
-/-- The same as `contains_ok_iff`, phrased with `advanceIndexTo`. -/
+/-- `contains_ok_iff`, phrased with `advanceIndexTo`. -/
 theorem contains_ok_iff_advanceIndexTo (rc : ReadCap) (idx : MessageBoxIndex) :
     rc.contains idx = .ok () ↔
       rc.messageBoxIndex.idx64 ≤ idx.idx64 ∧
@@ -199,8 +181,8 @@ theorem contains_ok_iff_advanceIndexTo (rc : ReadCap) (idx : MessageBoxIndex) :
 /-- The all-zero box ID, which a reply carries when the box was empty. -/
 def zeroBox : PubBytes := Vector.replicate 32 0
 
-/-- Verify and decrypt the box at this index on `rc`'s stream, after checking the box is the one
-    `rc` and this index derive under `ctx`. Matches `MessageBoxIndex.OpenForContext` in Go. -/
+/-- Check the box is the one `rc` and this index derive under `ctx`, then verify and decrypt.
+    The check rejects a tombstone signed for another box. -/
 def MessageBoxIndex.openForContext (m : MessageBoxIndex) (rc : ReadCap) (ctx : ByteArray)
     (box : PubBytes) (ciphertext : ByteArray) (sig : SigBytes) : Except BACAPError ByteArray :=
   if box = zeroBox then .error .emptyBox
@@ -209,8 +191,7 @@ def MessageBoxIndex.openForContext (m : MessageBoxIndex) (rc : ReadCap) (ctx : B
     | some pt => .ok pt
     | none => .error .openFailed
 
-/-- **`openForContext` checks the box.** It only returns a plaintext for the box the cap and
-    index derive. -/
+/-- `openForContext` only succeeds for the box the cap and index derive. -/
 theorem openForContext_box {m : MessageBoxIndex} {rc : ReadCap} {ctx : ByteArray} {box : PubBytes}
     {ct : ByteArray} {sig : SigBytes} {pt : ByteArray}
     (h : m.openForContext rc ctx box ct sig = .ok pt) : box = m.boxIDForContext rc ctx := by
@@ -232,9 +213,7 @@ theorem openForContext_encrypt (wc : WriteCap) (m : MessageBoxIndex) (ctx pt : B
       WriteCap.readCap]
   rw [if_neg hz, if_neg (show ¬ (_ ≠ _) from not_not.mpr hbox), decrypt_encryptForContext]
 
-/-- **Tombstones open as empty.** The signature `signBox` makes over the empty payload opens as
-    the empty message at its own box, unless that box ID is all zeros. At any other index it is
-    refused, by `openForContext_box`. -/
+/-- A tombstone opens as empty at its own box, unless that box ID is all zeros. -/
 theorem openForContext_tombstone (wc : WriteCap) (m : MessageBoxIndex) (ctx : ByteArray)
     (hz : (m.signBox wc ctx ByteArray.empty).1 ≠ zeroBox) :
     m.openForContext wc.readCap ctx (m.signBox wc ctx ByteArray.empty).1 ByteArray.empty
@@ -364,13 +343,12 @@ def ReadPosition.open (p : ReadPosition) (ctx : ByteArray) (box : PubBytes) (cip
     (sig : SigBytes) : Except BACAPError ByteArray :=
   p.index.openForContext p.cap ctx box ciphertext sig
 
-/-- Encrypt and sign `plaintext` for this box: the box ID, ciphertext and signature. -/
+/-- Returns (box ID, ciphertext, signature). -/
 def WritePosition.encrypt (p : WritePosition) (ctx plaintext : ByteArray) :
     PubBytes × ByteArray × SigBytes :=
   p.index.encryptForContext p.cap ctx plaintext
 
-/-- Sign the empty payload for this box: the box ID and signature. Written with an empty payload,
-    it deletes the box. -/
+/-- Sign the empty payload for this box; returns (box ID, signature). -/
 def WritePosition.tombstone (p : WritePosition) (ctx : ByteArray) : PubBytes × SigBytes :=
   p.index.signBox p.cap ctx ByteArray.empty
 
@@ -381,7 +359,7 @@ theorem WritePosition.open_tombstone (p : WritePosition) (ctx : ByteArray)
       .ok ByteArray.empty :=
   openForContext_tombstone p.cap p.index ctx hz
 
-/-- **Positions can't mismatch.** Every position addresses a box on its cap's stream. -/
+/-- Every position addresses a box on its cap's stream. -/
 theorem ReadPosition.reaches (p : ReadPosition) : Reaches p.cap.messageBoxIndex p.index :=
   p.onStream
 

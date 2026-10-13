@@ -9,8 +9,7 @@ open CryptWalker.KEM
 open CryptWalker.KEM.KEM
 open CryptWalker.KEM.Adapter
 
-/-- Keys from one seed, encapsulation coins from another: with a single seed, a NIKE-based KEM's
-ephemeral key would equal its static key and the round trip would prove nothing. -/
+/-- Separate seeds for keys and encapsulation, so ephemeral and static keys differ. -/
 def kemRoundTrip (k : KEM) (keySeed encapSeed : Vector UInt8 32) : Except KEMError Bool :=
   haveI := k.plaintextEq
   match k.generate (k.stateFromSeed keySeed) with

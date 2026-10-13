@@ -7,41 +7,13 @@ import CryptWalker.KEM.MLKEM.Encoding
 import CryptWalker.KEM.KEM
 import LatticeCrypto.MLKEM.KPKE
 
-/-! # ML-KEM: our own `keygen`/`encaps`/`decaps`, and the `KEM.KEM` instance
+/-! # ML-KEM: `keygen`/`encaps`/`decaps` and the `KEM.KEM` instance
 
-`keygen`/`encaps`/`decaps` mirror FIPS 203 Algorithms 19-21 exactly (the same shape as
-VCVio's own `MLKEM.keygenInternal`/`encapsInternal`/`decapsInternal`, confirmed by reading
-`LatticeCrypto/MLKEM/Internal.lean`), but are our own code, built directly from `KPKE.keygenFromSeed`/
-`encrypt`/`decrypt` and `Primitives.primitives`'s hash fields — not a call into VCVio's
-`Internal.lean`. This is deliberate: this thin hash-composition layer is exactly where FIPS 203
-differs from round-3 Kyber (which hashed the freshly-sampled encapsulation message through itself,
-`m ← H(m)`, before deriving encryption coins — a hedge against weak/structured randomness that
-FIPS 203 dropped). Owning this layer means a future variant restoring that pre-hash is a small,
-local change here, not a fork of vendored code.
+`keygen`/`encaps`/`decaps` are FIPS 203 Algorithms 19-21, written against `Primitives.primitives`
+so that variants such as hedged encapsulation can change them locally.
 
-## `Reliable`, stated honestly
-
-`KPKE.decrypt`'s correctness depends on the accumulated noise (from both keygen's own secret/error
-vectors *and* encaps's own coins) staying under FIPS 203's decoding margin — and unlike a
-Diffie-Hellman KEM, this genuinely cannot be guaranteed for every possible draw: ML-KEM's CBD
-noise is individually bounded but *not* worst-case boundable in aggregate without also invoking
-just how unlikely a bad combination is (that's exactly why FIPS 203 publishes a nonzero, if
-negligible, decryption-failure probability rather than a hard bound). Deriving a checkable
-arithmetic characterization of exactly when the aggregate noise stays small enough is a serious,
-dedicated piece of lattice-cryptography formalization on its own (comparable to what a standalone
-paper establishes for Kyber's correctness bound) — well beyond this bridge's scope.
-
-So `Reliable` here is stated *operationally*: "the specific draw this state would produce
-decapsulates correctly against any keypair it's used with" — directly the round-trip property,
-not a lower-level noise bound. This is the same style VCVio's own `VCVio.CryptoFoundations.
-KeyEncapMech.PerfectlyCorrect` already uses (`Pr[CorrectExp] = 1`, an operational experiment, not
-an arithmetic characterization), just restated as a plain `Prop` to match this project's
-deterministic `EStateM` model rather than a probability space. It is not circular or vacuous —
-`Reliable s` is a genuine, checkable (in principle, by running the computation) fact about a
-specific state, it is simply not yet *characterized* here in terms of the underlying noise
-polynomials' coefficients. That characterization — and separately, bounding how often `Reliable`
-actually holds — is exactly the follow-on work this file's `Reliable` definition is designed to
-make room for, without blocking a working, honest ML-KEM `KEM.KEM` instance today. -/
+`Reliable s` states that the draw from `s` decapsulates correctly. It is not characterized in
+terms of the sampled noise. -/
 
 namespace CryptWalker.KEM.FIPS203
 
@@ -55,24 +27,21 @@ variable (ps : ParameterSet)
 
 /-! ## `keygen` / `encaps` / `decaps` -/
 
-/-- `ML-KEM.KeyGen_internal`, our own copy — see the module doc. -/
+/-- `ML-KEM.KeyGen_internal`. -/
 def keygen (d z : Seed32) :
     EncapsulationKey (params ps) (encoding ps) × DecapsulationKey (params ps) (encoding ps) :=
   let (ekPKE, dkPKE) := KPKE.keygenFromSeed ring (encoding ps) (primitives ps) d
   let ekHash := (primitives ps).hEncapsulationKey ekPKE.tHatEncoded ekPKE.rho
   (ekPKE, { dkPKE, ekPKE, ekHash, z })
 
-/-- `ML-KEM.Encaps_internal`, our own copy. -/
+/-- `ML-KEM.Encaps_internal`. -/
 def encaps (ek : EncapsulationKey (params ps) (encoding ps)) (m : Message) :
     SharedSecret × Ciphertext (params ps) (encoding ps) :=
   let ekHash := (primitives ps).hEncapsulationKey ek.tHatEncoded ek.rho
   let (k, r) := (primitives ps).gEncaps m ekHash
   (k, KPKE.encrypt ring (encoding ps) (primitives ps) ek m r)
 
-/-- `ML-KEM.Decaps_internal`, our own copy. Compares ciphertexts componentwise on their
-`ByteArray` encodings rather than via `DecidableEq (Ciphertext params encoding)` — sidesteps
-needing a `DecidableEq encoding.EncodedU`/`EncodedV` instance, which (like `++`) typeclass search
-won't derive by unfolding `encoding`'s definition. -/
+/-- `ML-KEM.Decaps_internal`. Compares ciphertexts by their `ByteArray` encodings. -/
 def decaps (dk : DecapsulationKey (params ps) (encoding ps)) (c : Ciphertext (params ps) (encoding ps)) :
     SharedSecret :=
   let m' := KPKE.decrypt ring (encoding ps) (primitives ps) dk.dkPKE c
@@ -84,26 +53,17 @@ def decaps (dk : DecapsulationKey (params ps) (encoding ps)) (c : Ciphertext (pa
 
 /-! ## FIPS 203 §7.2/§7.3 input-validation checks
 
-`keygen`/`encaps`/`decaps` above are the *internal* algorithms (Algorithms 19-21) — they
-never reject a malformed key, matching VCVio's own `keygenInternal`/`encapsInternal`/
-`decapsInternal`. FIPS 203's top-level `ML-KEM.Encaps`/`ML-KEM.Decaps` additionally run one input
-check each before calling into the internal algorithm; these are that check, exposed separately
-rather than folded into `encaps`/`decaps` themselves so a caller can still reach the
-internal algorithms directly (as `kem` does — see the module doc's discussion of `Reliable`,
-which is about noise, not malformed keys; a real deployment would call these checks first). -/
+The internal algorithms above do not validate keys; callers run these checks first. -/
 
-/-- FIPS 203 §7.2's encapsulation-key modulus check: decoding `tHatEncoded` and re-encoding it must
-reproduce the same bytes. Fails exactly when some coefficient in the encoded vector is not fully
-reduced mod `q` — i.e. genuinely represents a modulus violation, not an implementation defect. -/
+/-- FIPS 203 §7.2 modulus check: `tHatEncoded` survives a decode/encode round trip. -/
 def checkEncapsulationKey (ek : EncapsulationKey (params ps) (encoding ps)) : Bool :=
   (tBytes ps) ((encoding ps).byteEncode12Vec ((encoding ps).byteDecode12Vec ek.tHatEncoded)) == (tBytes ps) ek.tHatEncoded
 
-/-- FIPS 203 §7.3's decapsulation-key hash check: `dk.ekHash` must match a fresh
-`H(ekPKE)` recomputation. -/
+/-- FIPS 203 §7.3 hash check: `dk.ekHash = H(ekPKE)`. -/
 def checkDecapsulationKey (dk : DecapsulationKey (params ps) (encoding ps)) : Bool :=
   ofVector ((primitives ps).hEncapsulationKey dk.ekPKE.tHatEncoded dk.ekPKE.rho) == ofVector dk.ekHash
 
-/-! ## Size facts: `keygen`/`encaps`'s outputs are always well-formed -/
+/-! ## `keygen`/`encaps` outputs are well-formed -/
 
 theorem keygen_ek_wf (d z : Seed32) :
     ((tBytes ps) ((keygen ps) d z).1.tHatEncoded).size = 384 * (params ps).k := by
@@ -137,12 +97,7 @@ private theorem encaps_ct_wf (ek : EncapsulationKey (params ps) (encoding ps)) (
   · show ((encoding ps).byteEncodeDV _ : ByteArray).size = 32 * (params ps).dv
     exact concreteEncoding_byteEncodeDV_size (params ps) _
 
-/-! ## `State`: an expandable stream from one 32-byte seed
-
-`keygen` alone needs 64 bytes (`d`, `z`); `encaps` needs 32 more (`m`) — more than a single
-32-byte value can supply directly. Mirrors `Sphinx.Interface.SeedStream`'s "counter + inexhaustible
-stream" shape: seed a SHAKE-256-based expanding stream once, draw as many 32-byte blocks as
-needed. -/
+/-! ## `State`: a SHAKE-256 stream of 32-byte blocks from one 32-byte seed -/
 
 /-- The `i`-th 32-byte block derived from `seed`. -/
 def seedBlock (seed : Vector UInt8 32) (i : Nat) : Vector UInt8 32 :=
@@ -158,9 +113,7 @@ def stateFromSeed (seed : Vector UInt8 32) : State := (0, seed)
 
 /-! ## The `KEM.KEM` instance -/
 
-/-- `s` is `Reliable` when the draw it would next produce, encapsulated against any keypair,
-decapsulates back correctly — see the module doc for why this is stated operationally rather than
-via a checkable noise bound. -/
+/-- The next draw from `s`, encapsulated against any key pair, decapsulates correctly. -/
 def Reliable (s : State) : Prop :=
   ∀ (dk : DecapsulationKey (params ps) (encoding ps)) (ek : EncapsulationKey (params ps) (encoding ps)),
     ek = dk.ekPKE →
@@ -175,11 +128,8 @@ def decapM (sk : (PrivateKey ps)) (c : (CT ps)) : EStateM KEMError State (Vector
 
 def derivePublicKeyM (sk : (PrivateKey ps)) : (PublicKey ps) := ⟨sk.1.ekPKE, sk.2.2⟩
 
-/-- `injection`/`congrArg Subtype.val`-style extraction from `hc` here hits a pathological
-`maxRecDepth`/`whnf` blowup — the `CT` subtype's embedded well-formedness proof makes that
-machinery expensive to elaborate. A single `simp only [...]` unfolding `encapM` and splitting the
-`EStateM.Result`/`Prod` equality all at once avoids it entirely (confirmed: the `injection`-based
-version times out even at `maxRecDepth 65536`; this version is immediate). -/
+/-- Round trip from a `Reliable` state. Uses `simp only` on `hc`; `injection` times out on the
+`CT` subtype. -/
 theorem honestRoundTripM (sk : (PrivateKey ps)) (s : State) (hrel : (Reliable ps) s)
     (c : (CT ps)) (k : Vector UInt8 32) (s' : State)
     (hc : (encapM ps) ((derivePublicKeyM ps) sk) s = .ok (c, k) s') (t : State) :
@@ -206,7 +156,7 @@ def dummySk : (PrivateKey ps) := ⟨((keygen ps) dummySeed dummySeed).2, (keygen
 
 def dummyCt : (CT ps) := ⟨((encaps ps) (dummyPk ps).1 dummySeed).2, (encaps_ct_wf ps) _ _⟩
 
-/-- The assembled `KEM.KEM` instance for ML-KEM. -/
+/-- ML-KEM with the expanded FIPS 203 private key. -/
 def kem : KEM where
   State := State
   PublicKey := (PublicKey ps)
@@ -255,28 +205,17 @@ def kem : KEM where
 
   plaintextEq := inferInstance
 
-/-! ## A second instance, for wire compatibility with Go's `crypto/mlkem`
+/-! ## Seed-format private keys
 
-`kem`'s `PrivateKey` retains the FIPS 203 *expanded* key (`sHat`, `tHat`, `rho`, `ekHash`,
-`z`) and serializes exactly that — the right choice for the standalone registry entries, and
-what NIST's own ACVP vectors are stated in terms of. But `d` (`keygen`'s other seed half) is
-discarded once `dkPKE`/`ekPKE` are computed — it is nowhere in `PrivateKey`'s value — so this
-format cannot round-trip through the *compact* seed-based encoding Go's standard-library
-`crypto/mlkem` uses instead (`DecapsulationKey.Bytes()`: "the decapsulation key as a 64-byte seed
-in the 'd ‖ z' form", re-expanded on every operation rather than cached). Cross-checking real
-KEM-Sphinx packets against Go needs that compact format, since a packet's recorded private key is
-literal wire bytes a real Go node would hold — hence this second instance, `kemSeed`,
-whose `PrivateKey` is `(d, z)` directly and whose wire encoding is `ek ‖ d ‖ z` (`publicKeyBytes + 64`
-bytes), matching Go exactly. Everything else (`PublicKey`, `Ciphertext`, `State`, `Reliable`) is
-unchanged from `kem`; only the private-key type and everything that mentions it change. -/
+`kemSeed` stores the private key as the seed `(d, z)`, encoded `ek ‖ d ‖ z`, and re-expands it on
+use. Everything else is as in `kem`. -/
 
 abbrev SeedPrivateKey := Seed32 × Seed32
 
 def derivePublicKeyFromSeed (sk : SeedPrivateKey) : (PublicKey ps) :=
   ⟨((keygen ps) sk.1 sk.2).1, (keygen_ek_wf ps) sk.1 sk.2⟩
 
-/-- The full expanded decapsulation key `dk` this seed determines — recomputed on every call,
-exactly as Go's `Decapsulate` recomputes it from the stored seed rather than caching it. -/
+/-- The expanded decapsulation key for a seed, recomputed on every call. -/
 def expandSeed (sk : SeedPrivateKey) : (PrivateKey ps) :=
   ⟨((keygen ps) sk.1 sk.2).2, (keygen_dk_wf ps) sk.1 sk.2⟩
 
@@ -329,7 +268,7 @@ theorem decode_encode_privFromSeed (sk : SeedPrivateKey) :
     exact h
   rw [hpeel1, hpeel2, toVecN_ofVector, toVecN_ofVector]
 
-/-- The assembled `KEM.KEM` instance for ML-KEM, wire-compatible with Go's `crypto/mlkem`. -/
+/-- ML-KEM with the `ek ‖ d ‖ z` seed private key. -/
 def kemSeed : KEM where
   State := State
   PublicKey := (PublicKey ps)

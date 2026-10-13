@@ -17,8 +17,7 @@ open CryptWalker.Util.Bytes
 
 /-! # AES-256-GCM (NIST SP 800-38D), 96-bit nonces and 128-bit tags
 
-Unlike `AESGCMSIV`, a repeated nonce under one key is catastrophic here; callers that cannot
-guarantee unique nonces want GCM-SIV. -/
+Nonces must not repeat under one key. -/
 
 abbrev Key := Vector UInt8 32
 abbrev Nonce := Vector UInt8 12

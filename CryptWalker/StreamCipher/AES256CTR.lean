@@ -14,15 +14,13 @@ open CryptWalker.Util.Bytes
 
 /-! # AES-256-CTR
 
-Go's `crypto/cipher.NewCTR` treats the entire IV as one big-endian 128-bit counter, incrementing
-with wraparound once per block — unlike `Cipher.AESGCMSIV`'s RFC 8452 32-bit little-endian
-counter, so the two can't share code. -/
+The IV is a big-endian 128-bit counter, incremented once per block with wraparound. -/
 
 /-- 16 bytes read as a big-endian 128-bit natural number. -/
 private def toNat128 (v : Vector UInt8 16) : Nat :=
   v.toList.foldl (fun acc b => acc * 256 + b.toNat) 0
 
-/-- The inverse, wrapping modulo `2^128` (`crypto/cipher.NewCTR`'s counter overflow behavior). -/
+/-- A natural number as 16 big-endian bytes, modulo `2^128`. -/
 private def ofNat128 (n : Nat) : Vector UInt8 16 :=
   Vector.ofFn fun i : Fin 16 => UInt8.ofNat ((n % 2 ^ 128) >>> (8 * (15 - i.val)))
 
@@ -30,15 +28,14 @@ private def ofNat128 (n : Nat) : Vector UInt8 16 :=
 private def counterBlock (iv : Vector UInt8 16) (i : Nat) : Vector UInt8 16 :=
   ofNat128 (toNat128 iv + i)
 
-/-- `len` bytes of AES-256-CTR keystream. The key is scheduled once and reused across blocks. -/
+/-- `len` bytes of AES-256-CTR keystream. -/
 def keystream (key : Vector UInt8 32) (iv : Vector UInt8 16) (len : Nat) : ByteArray :=
   let rk := expandKey key
   ((List.range ((len + 15) / 16)).foldl
     (fun out i => out ++ ofVector (encryptBlock rk (counterBlock iv i)))
     ByteArray.empty).extract 0 len
 
-/-- Generic over the per-block function `f` — never needs to name `counterBlock`, which is
-private to this file; unification against the unfolded goal below supplies it. -/
+/-- Generic over the per-block function `f`, so it need not name the private `counterBlock`. -/
 private theorem fold16_size (f : Nat → Vector UInt8 16) (n : Nat) :
     ((List.range n).foldl (fun (out : ByteArray) i => out ++ ofVector (f i))
       ByteArray.empty).size = 16 * n := by
@@ -56,8 +53,7 @@ theorem keystream_size (key : Vector UInt8 32) (iv : Vector UInt8 16) (len : Nat
   have : len ≤ 16 * ((len + 15) / 16) := by omega
   omega
 
-/-- AES-256-CTR, as a `StreamCipher`: `keystream` reinterpreted at plain-`ByteArray` key/IV, via
-`Util.Bytes.toVecN`. -/
+/-- AES-256-CTR as a `StreamCipher`. -/
 def aes256CTR : CryptWalker.StreamCipher.StreamCipher where
   keySize := 32
   ivSize  := 16

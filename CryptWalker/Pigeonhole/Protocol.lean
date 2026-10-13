@@ -7,32 +7,11 @@ import CryptWalker.Pigeonhole.Replica
 import CryptWalker.MKEM.MKEM
 import CryptWalker.BACAP.Protocol
 
-/-! # Pigeonhole: a client talking to a replica, end to end
+/-! # Pigeonhole client-replica exchange
 
-The protocol, as `katzenpost/pigeonhole` and `courier` do it:
-
-1. **Writing.** The writer turns a message into a BACAP *box*: a box ID (a public key derived from
-   the root key), the AEAD ciphertext, and a signature. It wraps a `write` request in an MKEM
-   envelope addressed to the two replicas responsible for that box, and sends it through the mixnet
-   to a courier.
-2. **Courier and replica.** The courier gives each replica the ciphertext carrying only its own DEK
-   (`Ciphertext.forRecipient`), and the replica decrypts it, handles the request (`Replica.step`),
-   and seals its reply under the envelope's ephemeral key.
-3. **Reading.** A reader who holds only the root public key, an index and a context derives the same
-   box ID, sends a `read` the same way, checks the returned signature and decrypts.
-
-`rpc` is one such exchange, with the mixnet and courier abstracted to reliable delivery, over any
-`MKEM` (`MKEMAdapter.mkemOfNike` is one, and needs no CTIDH). The theorems:
-
-* `rpc_sound`: **if the exchange completes**, the client's result is exactly what the replica
-  computed. The request survives MKEM and the wire codec; so does the reply on the way back.
-* `write_then_read`: a message written by the holder of a write capability is read back, intact, by
-  a reader holding only the read capability.
-
-These are safety statements: an exchange may fail (an unsafe key, a degenerate shared secret), and
-nothing here says it cannot. **Assumed:** a faithful courier and honest replicas. **Not modelled:**
-the mixnet, retries and timing, copy commands, epochs, and what an adversarial replica or courier
-can do; that is the threat-model side. -/
+A client MKEM-encrypts a request to the replicas; the courier hands each replica its own share;
+the replica handles the request and seals its reply under the envelope's ephemeral key. Delivery
+is assumed reliable; courier and replicas honest. -/
 
 namespace CryptWalker.Pigeonhole.Protocol
 
@@ -41,8 +20,7 @@ open CryptWalker.MKEM.MKEM (MKEM MKEMError Ciphertext)
 open CryptWalker.Pigeonhole.Replica
 open CryptWalker.BACAP.Protocol (BACAPSpec)
 
-/-- How requests and replies are put on the wire. `katzenpost` uses trunnel; all the model needs is
-that decoding undoes encoding. -/
+/-- Request and reply codecs; decoding undoes encoding. -/
 structure Wire (Sg : Signature) where
   reqEnc : Request Sg → ByteArray
   reqDec : ByteArray → Option (Request Sg)
@@ -59,10 +37,7 @@ inductive RpcError where
 
 variable {Sg : Signature} [DecidableEq Sg.PublicKey] (M : MKEM) (W : Wire Sg)
 
-/-- One exchange. The client MKEM-encrypts `req` to the replicas' public keys `pubs`; the courier
-hands replica `i`, who holds `skj`, its own share of the ciphertext; the replica decrypts, handles
-the request, and seals its reply under the envelope's ephemeral key; the client, who kept the
-ephemeral private key, opens it. `cs` and `rs` are the client's and the replica's randomness.
+/-- One exchange with replica `i`, holding `skj`. `cs`, `rs` are client and replica randomness.
 Returns the replica's new store and the reply the client sees. -/
 def rpc (boxSize : Nat) (cs rs : M.State) (pubs : List {pk : M.PublicKey // M.Safe pk})
     (i : Nat) (skj : M.PrivateKey) (store : Store Sg) (req : Request Sg) :
@@ -88,9 +63,7 @@ def rpc (boxSize : Nat) (cs rs : M.State) (pubs : List {pk : M.PublicKey // M.Sa
               | some reply' => .ok ((step boxSize store req').1, reply')
         else .error (.mkem .unsafePublicKey)
 
-/-- **If the exchange completes, the client gets exactly what the replica computed.** Replica `i`
-must be the recipient the client addressed (`pubs[i]` is the public key of `skj`); nothing else is
-assumed of the MKEM beyond its laws. -/
+/-- If the exchange completes, the client gets exactly what the replica computed. -/
 theorem rpc_sound (boxSize : Nat) (cs rs : M.State) (pubs : List {pk : M.PublicKey // M.Safe pk})
     (i : Nat) (hi : i < pubs.length) (skj : M.PrivateKey)
     (hsk : pubs[i] = ⟨M.derivePublicKey skj, M.derive_safe skj⟩)
@@ -123,12 +96,9 @@ theorem rpc_sound (boxSize : Nat) (cs rs : M.State) (pubs : List {pk : M.PublicK
 
 /-! ### Writing a message and reading it back -/
 
-/-- **A written message is read back.** `sk` is the writer's root secret, `pk` its public key (what
-a reader holds, with the index and context). The writer BACAP-encrypts `pt` into a box and sends a
-`write`; the reader derives the box ID from `pk`, `idx` and `ctx` alone, sends a `read`, and decrypts
-what comes back. Over honest replicas with a valid store and a free box, whenever the exchanges
-complete: the replica's reply to the write is `success`, the read returns exactly the box that was
-written, and decrypting it gives `pt`. -/
+/-- A message the writer encrypts and writes to a free box is read back by a reader holding only
+`pk`, `idx` and `ctx`: the write succeeds, the read returns the written box, and it decrypts to
+`pt`. -/
 theorem write_then_read (B : BACAPSpec) [DecidableEq B.blindable.base.PublicKey]
     (W : Wire B.blindable.base) (boxSize : Nat)
     (sk : B.blindable.base.PrivateKey) (pk : B.blindable.base.PublicKey)

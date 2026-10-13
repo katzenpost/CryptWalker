@@ -13,22 +13,10 @@ import Mathlib.Tactic.Set
 
 /-! # The `Acks` field of a group chat message
 
-See "Rosters" (Layout, Parsing) in the group chat spec, and katzenqt's `ack_codec.py`, which this
-follows. A field names the acknowledged members by roster index, as a list of index bytes or a
-bitmap, whichever is shorter, and then carries one value of `v` bytes for each, in ascending order
-of roster index. Nothing frames the parts: a reader divides the field's length by `v`, and the
-quotient is the number of values and the remainder the length of the naming.
-
-Bytes are natural numbers here; `decode` is only ever handed real bytes (each `< 256`).
-
-* `decode_encode`: decoding undoes encoding whenever `v > 32`.
-* `decode_encode_iff`: and only then. For every `v ≤ 32` some acknowledgement set is misread,
-  which is the spec's "were a value ever made shorter than 33 bytes, the field would need an
-  explicit count".
-* `encode_decode`: with `strict`, a field that decodes is the encoding of what it decodes to, so
-  each set of acknowledgements has exactly one field.
-* `spec_decode_malleable`: the spec's parser (not `strict`) also accepts a list where the bitmap
-  is shorter, so one set of acknowledgements has two fields. -/
+Acknowledged members are named by roster index, as a list of index bytes or a bitmap, whichever
+is shorter, followed by one `v`-byte value each in ascending index order. Nothing frames the
+parts: the field length divided by `v` gives the value count, the remainder the naming length.
+See "Rosters" in the group chat spec. Bytes are natural numbers here, each `< 256`. -/
 
 namespace CryptWalker.GroupChat.AckCodec
 
@@ -189,8 +177,8 @@ theorem length_chunks {v : ℕ} : ∀ {n : ℕ} {l : List ℕ}, (chunks v l n).l
 theorem width_le {i : ℕ} (h : i < rosterMax) : width i ≤ maxNaming := by
   simp only [width, rosterMax, maxNaming] at *; omega
 
-/-- **Decoding undoes encoding**, under either parser, whenever a value is longer than the
-longest naming. -/
+/-- Decoding undoes encoding, under either parser, whenever a value is longer than the longest
+naming. -/
 theorem decode_encode (strict : Bool) {v : ℕ} (hv : maxNaming < v) {acks : List (ℕ × List ℕ)}
     (h : WF v acks) : decode strict v (encode acks) = some acks := by
   obtain ⟨hs, hlt, hsz⟩ := h
@@ -276,8 +264,7 @@ theorem decode_encode (strict : Bool) {v : ℕ} (hv : maxNaming < v) {acks : Lis
 
 /-! ## Only then: a value of 32 bytes or fewer is misread -/
 
-/-- **The layout needs values longer than 32 bytes.** Decoding undoes encoding for every set of
-acknowledgements exactly when it does. -/
+/-- Decoding undoes encoding for every acknowledgement set exactly when values exceed 32 bytes. -/
 theorem decode_encode_iff (strict : Bool) (v : ℕ) :
     (∀ acks, WF v acks → decode strict v (encode acks) = some acks) ↔ maxNaming < v := by
   refine ⟨fun h => ?_, fun hv acks hw => decode_encode strict hv hw⟩
@@ -392,8 +379,7 @@ theorem nameMembers_setBits {naming : List ℕ} (hbytes : ∀ b ∈ naming, b < 
     have h2 : 7 - (8 * j + (7 - t)) % 8 = t := by omega
     rw [h1, h2, hget j hj2]; exact ht
 
-/-- **One field per set of acknowledgements.** Under the strict parser, a field that decodes is
-exactly the encoding of what it decodes to, and what it decodes to is well formed. -/
+/-- Under the strict parser, a field that decodes is the encoding of its well-formed result. -/
 theorem encode_decode {v : ℕ} {field : List ℕ} {acks : List (ℕ × List ℕ)}
     (hbytes : ∀ b ∈ field, b < 256) (h : decode true v field = some acks) :
     WF v acks ∧ encode acks = field := by

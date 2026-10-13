@@ -13,8 +13,6 @@ import CryptWalker.Util.Bytes
 
 /-! # `MultiRecipientHybrid` from a KEM, an AEAD and a hash
 
-Builds a `MultiRecipientHybrid` over any `KEM`, `AEAD` and `Hash`, no particular KEM assumed.
-
 ```
 ENCAPSULATE(keys, payload):
     for pk in keys: ct_i, ss_i := KEM_ENCAP(pk)        -- independent per recipient
@@ -31,19 +29,9 @@ DECAPSULATE(sk, ct):                                    -- ct already filtered t
     return secret, AEAD_open(msgKey, ct.envelope)
 ```
 
-Randomness is drawn from `KEM.Adapter.St` (the same counter-over-a-seed-stream `MKEM.Adapter`
-uses), in this order: message key, envelope nonce, then one DEK nonce and one 32-byte KEM seed per
-recipient. The pure functions take an explicit `Rand`; the state functions build one from the
-stream. **The stream must be unpredictable, which nothing here can check.**
-
-## `Reliable`
-
-A general `KEM`'s decapsulation is not unconditionally correct — `KEM.Reliable` exists precisely
-because a lattice KEM's noise can (rarely) exceed its decoding margin. `RandReliable` lifts that
-condition to every KEM seed a `Rand` draws; `Reliable` (on the state stream) lifts it again to
-every draw a future `encapsulate` call could make from that state, whatever number of recipients
-it turns out to have — the same operational style `MLKEM768.Reliable` already uses, just quantified
-over the stream instead of one draw. -/
+The pure functions take explicit randomness (`Rand`); the instance draws it from a
+`KEM.Adapter.St` seed stream, which must be unpredictable. `Reliable` requires `KEM.Reliable` for
+every KEM seed the stream can yield. -/
 
 namespace CryptWalker.MultiRecipientHybrid.Adapter
 
@@ -61,9 +49,7 @@ structure Base where
   hash : Hash
   digest_eq_key : hash.digestSize = aead.keySize
 
-/-- The sender's randomness, explicit so the pure construction is a function. One `kemSeed` per
-recipient, turned into a `kem.State` via `kem.stateFromSeed` — there is no shared ephemeral value
-a `KEM` can supply, unlike `MKEM.Rand.seed`. -/
+/-- The sender's randomness, with one KEM seed per recipient. -/
 structure Rand (S : Base) where
   msgKey : Vector UInt8 S.aead.keySize
   envNonce : Vector UInt8 S.aead.nonceSize
@@ -74,19 +60,19 @@ namespace Base
 
 variable (S : Base)
 
-/-- A raw byte string as an AEAD key, if it is the right length — `MKEM.Adapter.Base.keyOfBytes`. -/
+/-- A raw byte string as an AEAD key, if it is the right length. -/
 def keyOfBytes (b : ByteArray) : Option S.aead.Key :=
   if b.size = S.aead.keySize then some (S.aead.keyFromBytes (toVecN _ b)) else none
 
-/-- A KEM's shared secret, hashed — the raw bytes exposed to the caller as the derived key. -/
+/-- The derived key: the hashed KEM shared secret. -/
 def deriveKeyBytes (ss : S.kem.Plaintext) : ByteArray :=
   ofVector (S.hash.hash (ofVector (S.kem.encodePlaintext ss)))
 
-/-- The same key, as an `AEAD.Key`, for sealing/unsealing internally. -/
+/-- The derived key as an `AEAD.Key`. -/
 def deriveKeyAead (ss : S.kem.Plaintext) : S.aead.Key :=
   S.aead.keyFromBytes (Vector.cast S.digest_eq_key (S.hash.hash (ofVector (S.kem.encodePlaintext ss))))
 
-/-! ### Sealing under a key: nonce, then AEAD ciphertext — `MKEM.Adapter.Base`, verbatim -/
+/-! ### Sealing under a key: nonce, then AEAD ciphertext -/
 
 theorem get!_eq_getElem (x : ByteArray) (i : Nat) (h : i < x.size) : x.get! i = x[i]'h := by
   obtain ⟨bs⟩ := x
@@ -135,9 +121,7 @@ theorem size_sealUnder (key : S.aead.Key) (nonce : Vector UInt8 S.aead.nonceSize
 
 /-! ### One KEM encapsulation, wrapped as `Option` -/
 
-/-- `kem.encap` against a seed-derived state, folding a `KEM.KEMError` into `none`. The resulting
-state is discarded: `decap` will later be run against an arbitrary state too (`KEM.honestRoundTrip`
-quantifies over any decap-side state), so nothing here depends on it. -/
+/-- `kem.encap` from a seed-derived state, `none` on error. -/
 def encapPair (pk : S.kem.PublicKey) (seed : Vector UInt8 32) :
     Option (S.kem.Ciphertext × S.kem.Plaintext) :=
   match S.kem.encap pk (S.kem.stateFromSeed seed) with
@@ -161,8 +145,7 @@ def encapsulateP (rand : Rand S) (keys : List S.kem.PublicKey) (payload : ByteAr
         (fun p => S.sealUnder p.1 p.2 (ofVector rand.msgKey))
       envelope := S.sealUnder msgKey rand.envNonce payload })
 
-/-- Open a ciphertext already filtered to one recipient: decapsulate the KEM ciphertext, open the
-one DEK it carries, then the envelope. -/
+/-- Open a single-recipient ciphertext: decapsulate, open the DEK, then the envelope. -/
 def decapsulateP (sk : S.kem.PrivateKey) (ct : Ciphertext S.kem.Ciphertext) :
     Option (ByteArray × ByteArray) :=
   match ct.kemCiphertexts.head?, ct.deks.head? with
@@ -193,11 +176,7 @@ theorem encapsulateP_spec (rand : Rand S) (keys : List S.kem.PublicKey) (payload
                (fun p => S.sealUnder p.1 p.2 (ofVector rand.msgKey))
              envelope := S.sealUnder (S.aead.keyFromBytes rand.msgKey) rand.envNonce payload } := by
   unfold encapsulateP at h
-  -- `cases`/`rcases` on this `Option` directly inside a proof whose goal is `∃ pairs, ... = some
-  -- pairs ∧ ...` corrupts elaboration of the final `⟨pairs, ...⟩` (a reproducible quirk, isolated
-  -- separately: providing the `cases`-bound variable as the existential witness makes the *first*
-  -- conjunct's expected type collapse to `some pairs = some pairs` instead of the real equation).
-  -- Isolating the `cases` inside a boring, non-existential `have` avoids it.
+  -- Casing on the `Option` directly under the existential goal breaks elaboration of the witness.
   have hsome : ((keys.zip rand.kemSeeds).mapM (fun p => S.encapPair p.1 p.2)).isSome := by
     rcases hm0 : (keys.zip rand.kemSeeds).mapM (fun p => S.encapPair p.1 p.2) with _ | pairs0
     · simp [hm0] at h
@@ -209,8 +188,8 @@ theorem encapsulateP_spec (rand : Rand S) (keys : List S.kem.PublicKey) (payload
   simp at h
   exact ⟨pairs, hm, h.1.symm, h.2.symm⟩
 
-/-- **Shape.** One KEM ciphertext, one DEK and one derived key per recipient, each DEK exactly
-`nonce + key + tag` bytes, and an envelope `nonce + tag` longer than the payload. -/
+/-- One KEM ciphertext, one `nonce + key + tag`-byte DEK and one derived key per recipient, and an
+envelope `nonce + tag` longer than the payload. -/
 theorem encapsulateP_shape (rand : Rand S) (keys : List S.kem.PublicKey) (payload : ByteArray)
     (hlen : rand.kemSeeds.length = keys.length) (hlen' : rand.dekNonces.length = keys.length)
     (derivedKeys : List ByteArray) (ct : Ciphertext S.kem.Ciphertext)
@@ -235,9 +214,8 @@ theorem encapsulateP_shape (rand : Rand S) (keys : List S.kem.PublicKey) (payloa
     rw [S.size_sealUnder]
     omega
 
-/-- **A recipient recovers the payload, and the derived key the sender used for it**, from the
-ciphertext carrying only its own KEM ciphertext and DEK. Needs `Reliable` on the KEM seed drawn for
-this recipient — a general `KEM`'s decapsulation is not unconditionally correct. -/
+/-- If its KEM seed is `Reliable`, recipient `i` recovers the payload and its derived key from the
+ciphertext carrying only its KEM ciphertext and DEK. -/
 theorem decapsulateP_forRecipient (rand : Rand S) (hrel : S.RandReliable rand)
     (keys : List S.kem.PublicKey) (payload : ByteArray)
     (hlen : rand.kemSeeds.length = keys.length) (hlen' : rand.dekNonces.length = keys.length)
@@ -325,14 +303,14 @@ theorem decryptEnvelopeP_envelopeReplyP (key : ByteArray) (nonce : Vector UInt8 
 
 end Base
 
-/-! ### The `MultiRecipientHybrid` instance: randomness from a seed stream, errors as `Except` -/
+/-! ### The `MultiRecipientHybrid` instance -/
 
 section Instance
 
 variable (S : Base)
 
-/-- The randomness for one encapsulation to `n` recipients, drawn from the stream at position `i`:
-message key, envelope nonce, then one DEK nonce and one KEM seed per recipient. -/
+/-- Randomness for encapsulating to `n` recipients, from stream position `i`: message key,
+envelope nonce, then one DEK nonce and one KEM seed per recipient. -/
 def randOf (i : Nat) (str : Nat → Bytes32) (n : Nat) : Rand S where
   msgKey := toVecN _ (ofVector (str i))
   envNonce := toVecN _ (ofVector (str (i + 1)))
@@ -345,8 +323,7 @@ theorem randOf_dekNonces_length (i : Nat) (str : Nat → Bytes32) (n : Nat) :
 theorem randOf_kemSeeds_length (i : Nat) (str : Nat → Bytes32) (n : Nat) :
     (randOf S i str n).kemSeeds.length = n := by simp [randOf]
 
-/-- Every draw a future call from this stream position could make is `Reliable` — quantified over
-every position, since the state doesn't know in advance how many recipients that call will have. -/
+/-- Every seed in the stream gives a `Reliable` KEM state. -/
 def Reliable (s : St) : Prop := ∀ j : Nat, S.kem.Reliable (S.kem.stateFromSeed (s.2 j))
 
 theorem Reliable_randReliable (s : St) (h : Reliable S s) (n : Nat) :
@@ -401,9 +378,7 @@ def generateM : EStateM MultiRecipientHybridError St (S.kem.PublicKey × S.kem.P
     | .ok ⟨pk, sk, _⟩ _ => EStateM.Result.ok (pk, sk) (i + 1, str)
     | .error _ _ => EStateM.Result.error .invalidKeySize (i + 1, str)
 
-/-- **`MultiRecipientHybrid` over the given `KEM`, `AEAD` and hash.** Every law is discharged, so
-nothing is assumed beyond the laws of the three primitives (plus, for `decapsulate_encapsulate`,
-the underlying `KEM`'s own `Reliable`). -/
+/-- `MultiRecipientHybrid` over the given `KEM`, `AEAD` and hash. -/
 def ofBase : MultiRecipientHybrid where
   PrivateKey := S.kem.PrivateKey
   PublicKey := S.kem.PublicKey
@@ -453,8 +428,7 @@ def ofBase : MultiRecipientHybrid where
 
 end Instance
 
-/-- `hybridOfKEM kem aead hash h`: `MultiRecipientHybrid` over any `KEM`, `AEAD` and hash whose
-digest is an AEAD key. -/
+/-- `MultiRecipientHybrid` over a `KEM`, an `AEAD`, and a hash whose digest is an AEAD key. -/
 def hybridOfKEM (kem : KEM) (aead : AEAD) (hash : Hash) (h : hash.digestSize = aead.keySize) :
     MultiRecipientHybrid :=
   ofBase ⟨kem, aead, hash, h⟩

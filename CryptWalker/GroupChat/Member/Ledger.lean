@@ -8,9 +8,8 @@ import CryptWalker.GroupChat.Member.Wire
 
 /-! # Acknowledgements
 
-katzenqt's `groupchat/ledger.py`: what this member has published, what others have acknowledged of
-its stream, and what others have acknowledged of every stream. An induction holds publishing
-back. See "Joining" in the group chat spec. -/
+What this member has acknowledged, and what others have acknowledged of each stream. An induction
+holds publishing back. See "Joining" in the group chat spec. -/
 
 namespace CryptWalker.GroupChat.Member
 

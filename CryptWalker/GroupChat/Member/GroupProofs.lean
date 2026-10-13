@@ -11,23 +11,7 @@ import CryptWalker.GroupChat.Member.ReaderProofs
 
 /-! # What a member guarantees
 
-The guarantees of "Opportunistic acknowledgements and backfill" in the group chat spec, about the
-member of `Member/Group.lean`.
-
-* `resolve_sound`: whoever a member names at an index of a roster is whoever the owner put there,
-  whenever what it holds is true of the world and no two members share a key prefix:
-  `Roster.lean`'s theorem, carried over to the member's rosters by `Rosters.toWatcher`.
-* `acksOf_runs`, `acksOf_safe`: every acknowledgement a member sends names the end of the unbroken
-  run its reader of that stream has read, so a box it read along with every box before it.
-* `takeAcks_credit`: an acknowledgement of our own stream counts only for a box the Sent-box check
-  finds.
-* `controlOf_consecutive`: a control message numbers members at consecutive indexes from the next
-  one free, counting what is composed and not yet written.
-* `introduction_index`: an `Introduction` gives the new member the index the reply promised it,
-  when nothing composed before it is still to be written (the spec's "Waiting"), and
-  `introduction_index_pending`: otherwise it gives a later one.
-* `retain_spec`: retention drops plaintext only once every member still read has acknowledged
-  it, or the policy has expired it; `backfill_once`: a box is rewritten at most once an epoch. -/
+See "Opportunistic acknowledgements and backfill" in the group chat spec. -/
 
 namespace CryptWalker.GroupChat.Member
 
@@ -104,8 +88,8 @@ theorem resolveAux_some (r : Rosters) :
         exact hf'
       · simp at h
 
-/-- **Whoever a member names is right**, whenever what it holds is true of the world and no two
-members share a key prefix. -/
+/-- Whoever a member names at a roster index is correct, if what it holds is true of the world and
+no two members share a key prefix. -/
 theorem resolve_sound {pre : Key → ByteArray} (hpre : Function.Injective pre) {r : Rosters}
     {W : Roster.World Key Index} (h : Roster.Sound pre r.toWatcher W)
     {x : Key} {k : Nat} {n : Key} (hr : r.resolve x k = some n) : W.roster x k = some n := by
@@ -158,12 +142,11 @@ theorem acksOf_fold (g : Group) :
             · simp at ho
             · next run hrun => split_ifs at ho; cases ho; exact hrun
 
-/-- **Every acknowledgement a member sends is the run of its reader of that stream.** -/
+/-- Every acknowledgement a member sends is the run of its reader of that stream. -/
 theorem acksOf_runs (g : Group) (p : Pending) : AcksTrue g (g.acksOf p).1 :=
   acksOf_fold g _ _ (fun _ h => h) (by simp [AcksTrue])
 
-/-- **What a member acknowledges it has read**, with every box before it, given each reader's
-history. -/
+/-- What a member acknowledges it has read, with every box before it. -/
 theorem acksOf_safe (g : Group) (p : Pending) (hist : Key → History)
     (inv : ∀ m r, g.readers.get? m = some r → Inv r (hist m)) :
     ∀ x ∈ (g.acksOf p).1, ∃ m, (x.1, some m) ∈ g.rosters.known g.me ∧ Safe (hist m) (some x.2) := by
@@ -201,9 +184,7 @@ theorem takeAck_credit (sender : Key) (g : Group) (a : Nat × Index) (m : Key) :
     · exact Or.inl rfl
   · exact Or.inl rfl
 
-/-- **An acknowledgement of our own stream counts only for a box we wrote**: how far a member is
-counted as having read changes only for the sender, and only by an acknowledgement the Sent-box
-check finds. -/
+/-- Acknowledgements change only the sender's count, and only for boxes the Sent-box check finds. -/
 theorem takeAcks_credit (sender : Key) :
     ∀ (acks : List (Nat × Index)) (g : Group) (m : Key),
       (acks.foldl (Group.takeAck sender) g).ledger.ackedBy.get? m = g.ledger.ackedBy.get? m ∨
@@ -253,8 +234,8 @@ theorem controlOf_fold (g : Group) :
       · exact h3
       · simp [h3]
 
-/-- **A control message numbers members at consecutive indexes from the next one free**, counting
-what is composed and not yet written, and its pending numbering assigns the same ones. -/
+/-- A control message numbers members at consecutive indexes from the next free one, counting
+composed messages, and its pending numbering assigns the same ones. -/
 theorem controlOf_consecutive (g : Group) :
     g.controlOf.1.numbers.map (·.1) = List.range' g.size g.controlOf.1.numbers.length ∧
       g.controlOf.2.1.numbers.map (·.1) = g.controlOf.1.numbers.map (·.1) := by
@@ -276,8 +257,8 @@ theorem size_eq (g : Group) (hp : ∀ p ∈ g.pending.values, p.numbers = []) :
 theorem reply_newcomer (g : Group) (s : Index) : (g.reply s).newcomer = g.rosters.size g.me := by
   unfold Group.reply Rosters.size; rfl
 
-/-- **An `Introduction` gives the new member the index the reply promised**, when everything
-composed before it has been written. -/
+/-- An `Introduction` gives the new member the index the reply promised, when everything composed
+before it has been written. -/
 theorem introduction_index (g : Group) (name : String) (readCap : ByteArray) (s : Index)
     (hp : ∀ p ∈ g.pending.values, p.numbers = []) (hn : g.numbered (keyOf readCap) = false) :
     (g.introductionOf name readCap).1.numbers = [((g.reply s).newcomer, none)] := by
@@ -301,8 +282,7 @@ theorem size_ge (g : Group) {p : Pending} (hp : p ∈ g.pending.values) {n : Nat
       exact le_trans (le_max_right _ _) (this xs _)
     · exact ih hmem _
 
-/-- **Without waiting, the promise breaks**: a reply built while a composed message still holds the
-index the reply promises makes the `Introduction` give the new member a later one. -/
+/-- If a composed message still holds the promised index, the `Introduction` gives a later one. -/
 theorem introduction_index_pending (g : Group) (name : String) (readCap : ByteArray) (s : Index)
     {p : Pending} (hp : p ∈ g.pending.values) {a : Option At} (hn : ((g.reply s).newcomer, a) ∈ p.numbers)
     (hnew : g.numbered (keyOf readCap) = false) :
@@ -313,10 +293,8 @@ theorem introduction_index_pending (g : Group) (name : String) (readCap : ByteAr
 
 /-! ## Retention and backfill -/
 
-/-- **Retention drops plaintext only when the spec allows**: every record after it was a record
-before, with the same box, order and kind, and its plaintext is unchanged, or gone because every
-member still read had acknowledged it or the policy expired it. Records older than the window are
-gone. -/
+/-- Retention keeps each record's box, order and kind, and drops plaintext only once every member
+has acknowledged it or the policy expired it. Records older than the window are gone. -/
 theorem retain_spec (s : SentBox) (epoch : Nat) (policy : Retention) (acked : Nat → Bool) :
     ∀ e ∈ (s.retain epoch policy acked).records.pairs, ∃ r0, (e.1, r0) ∈ s.records.pairs ∧
       epoch ≤ r0.written + policy.window ∧ e.2.seq = r0.seq ∧ e.2.control = r0.control ∧
@@ -347,7 +325,7 @@ theorem backfill_of {s : SentBox} {epoch : Nat} (h : s.backfilled = some epoch) 
     (s.backfill epoch).2 = [] := by
   unfold SentBox.backfill; simp [h]
 
-/-- **A box is rewritten at most once an epoch.** -/
+/-- A box is rewritten at most once an epoch. -/
 theorem backfill_once (s : SentBox) (epoch : Nat) : ((s.backfill epoch).1.backfill epoch).2 = [] := by
   apply backfill_of
   unfold SentBox.backfill

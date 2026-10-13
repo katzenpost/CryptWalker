@@ -8,12 +8,7 @@ import CryptWalker.GroupChat.Member.Wire
 
 /-! # The Numbers and IntroducedAt encodings round trip
 
-See "Numbers and IntroducedAt wire format" in the group chat spec.
-
-* `decodeNumbers_encodeNumbers`: whatever a `Numbers` field can carry decodes back to itself: the
-  single index an `Introduction` assigns, or members at consecutive indexes from a first one, each
-  named by a distinct 8-byte key prefix, all within the 256 a roster holds.
-* `decodeIntroducedAt_encodeIntroducedAt`: likewise for `IntroducedAt`. -/
+See "Numbers and IntroducedAt wire format" in the group chat spec. -/
 
 namespace CryptWalker.GroupChat.Member
 

@@ -7,11 +7,10 @@ import Lean.Data.Json
 import CryptWalker.Hash.Blake2b
 import CryptWalker.Util.newhex
 
-/-! # BLAKE2b XOF (BLAKE2Xb) known-answer tests, against `hpqc`
+/-! # BLAKE2Xb known-answer tests
 
-Checks `Blake2b.xof` against `testdata/blake2b_xof.json`, vendored from hpqc -- the primitive
-behind `KEM.Schemes.blake2bXOFPRF`. Each vector's `xof_size` is the configured size and `length`
-how many bytes are actually read back -- `xof`'s two separate parameters, by design. -/
+Checks `Blake2b.xof` against `testdata/blake2b_xof.json`, from hpqc. `xof_size` is the configured
+size and `length` the number of bytes read. -/
 
 open Lean
 open CryptWalker.Util.newhex

@@ -3,12 +3,10 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-/-! # What a group chat message says to the protocol
+/-! # Group chat messages
 
-See "Group chat message types" and "Numbers and IntroducedAt wire format" in the group chat spec,
-and katzenqt's `groupchat/wire.py`. A message is modelled after decoding: the CBOR envelope is
-the client's business, as `Codec` is in katzenqt. A box is named by its `MessageBoxIndex`, an
-opaque value compared only for equality. -/
+Messages are modelled after CBOR decoding. See "Group chat message types" and "Numbers and
+IntroducedAt wire format" in the group chat spec. -/
 
 namespace CryptWalker.GroupChat.Member
 
@@ -32,7 +30,7 @@ def prefixOf (key : Key) : ByteArray := key.extract 0 prefixSize
 /-- The index a read cap starts at. -/
 def startOf (readCap : ByteArray) : Index := readCap.extract keySize readCap.size
 
-/-- Python's ordering of `bytes`: lexicographic, a prefix first. -/
+/-- Lexicographic order on bytes, a proper prefix first. -/
 def bytesLt : List UInt8 → List UInt8 → Bool
   | [], [] => false
   | [], _ :: _ => true

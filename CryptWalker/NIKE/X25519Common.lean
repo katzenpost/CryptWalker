@@ -9,10 +9,7 @@ import Mathlib.Tactic.NormNum
 /-!
 # X25519 primitives shared by both implementations
 
-`X25519.lean` (the group formulation) and `X25519_montgomery_ladder.lean` (the byte-level
-Montgomery ladder) are otherwise-independent implementations of the same exchange. What they
-actually share, and nothing more: the field prime, RFC 7748's byte encoding and scalar
-clamping, the basepoint, and the shape of a private key. -/
+The field prime, RFC 7748 byte decoding and clamping, the basepoint, and the private key type. -/
 
 namespace CryptWalker.NIKE.X25519Common
 

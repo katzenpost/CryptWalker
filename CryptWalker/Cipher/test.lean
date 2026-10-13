@@ -10,26 +10,8 @@ import CryptWalker.Util.newhex
 /-!
 # AES-256-GCM-SIV known-answer tests
 
-What this executable is *not* for: round-trip testing. `Scheme.decrypt_encrypt` is a theorem,
-proved once for every input rather than sampled at three, and so are the ciphertext length and
-the fact that nothing under a tag's width is accepted. Running those here would test the
-kernel, not the cipher.
-
-What it is for is the two things no proof in this repository reaches:
-
-* **Interoperability.** The laws pin `decrypt` to `encrypt`, but nothing pins `encrypt` to RFC
-  8452 — a self-consistent cipher that agreed with nobody would satisfy every one of them. The
-  vectors in `testdata/aes_gcm_siv.json` come from Go's `github.com/agl/gcmsiv` via
-  `hpqc/testvectors/cmd/generate`, vendored because hpqc is a separate repository and cannot be
-  symlinked; `testdata/aes_gcm_siv.json.sha256` records which copy this is. They cover the RFC's
-  own Appendix C.2 example and two BACAP-shaped cases, one with a partial final block and one
-  with 512 bytes of plaintext across 32 counter blocks.
-* **Rejection.** Soundness says an accepted ciphertext re-encrypts to itself; it cannot say
-  that a *tampered* ciphertext is rejected, because that is unforgeability and no field of
-  `AEAD` can state it. The negative cases below are the smoke test for the tag comparison.
-
-The primitives underneath get their own vectors, for the reason hpqc's `testvectors/README.md`
-gives: when a composite fails, primitive-level vectors are what tell you which layer moved.
+Checks against `testdata/aes_gcm_siv.json` (including RFC 8452 Appendix C.2), plus tampered
+ciphertexts that must be rejected. The underlying primitives get their own vectors.
 -/
 
 open Lean
@@ -73,14 +55,13 @@ def parseFile (s : String) : Except String (Array SIVVector) := do
 
 def hexOf {n : Nat} (v : Vector UInt8 n) : String := byteArrayToHex ⟨v.toArray⟩
 
-/-- FIPS-197 C.3: AES-256 on one block, key `00 01 … 1f`, input `00 11 … ff`. Also the only
-check on `sboxByte`, which is computed from the field inverse rather than tabulated. -/
+/-- FIPS-197 C.3: AES-256 on one block, key `00 01 … 1f`, input `00 11 … ff`. -/
 def aesBlockOk : Bool :=
   let key   : Vector UInt8 32 := Vector.ofFn fun i : Fin 32 => UInt8.ofNat i.val
   let input : Vector UInt8 16 := Vector.ofFn fun i : Fin 16 => UInt8.ofNat (17 * i.val)
   hexOf (AES.encryptBlockWithKey key input) == "8ea2b7ca516745bfeafc49904b496089"
 
-/-- Hex in the test file itself, as opposed to hex in a vector file. -/
+/-- Decode an inline hex literal. -/
 def hex (s : String) : Except String ByteArray :=
   match hexStringToByteArray s with
   | some b => pure b
@@ -141,7 +122,7 @@ def main : IO UInt32 := do
     | none =>
       ok := false
       IO.println s!"  FAIL  open    {v.name}: rejected a valid ciphertext"
-    -- Rejection: unprovable here, so it is tested.
+    -- Rejection.
     if (AESGCMSIV.decrypt v.key v.nonce v.aad (tamper v.ciphertext)).isNone then
       IO.println s!"  ok    reject  flipped ciphertext bit  {v.name}"
     else

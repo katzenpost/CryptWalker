@@ -11,12 +11,7 @@ import CryptWalker.Util.Bytes
 
 /-! # Single-use reply blocks (SURB)
 
-`surb.go`'s `NewPacketFromSURB` (below) and `DecryptSURBPayload`, both shared between NIKE- and
-KEM-Sphinx (Go has them as plain `*Sphinx` methods needing only `s.geometry`, not which header
-variant built the SURB) — so they live here alongside `newNIKESURB`/`newKEMSURB` in
-`NIKESphinx.lean`/`KEMSphinx.lean`, the halves that *do* differ (each calls its own
-`createHeader`/`createKEMHeader`). Generic in the wide-block cipher, matching everything else
-under `Sphinx/`: neither function here references AEZ or any other concrete cipher by name. -/
+The SURB operations shared by NIKE- and KEM-Sphinx. -/
 
 namespace CryptWalker.Sphinx.SURB
 
@@ -26,10 +21,8 @@ open CryptWalker.Sphinx.Common (toVec32)
 open CryptWalker.WideBlockCipher (WideBlockCipher)
 open CryptWalker.Util.Bytes (ofVector)
 
-/-- **`DecryptSURBPayload`**. `keys` is `nrHops * sprpKeyMaterialLength` bytes: `nrHops`
-`(key[48] ++ iv[16])` chunks, in the reverse-hop order `surb.go` serializes them in. All but the
-last chunk *encrypts* (undoing one decrypt layer `Unwrap` applied while forwarding the reply);
-the last chunk decrypts, matching what the replier's own `NewPacketFromSURB` encrypted with. -/
+/-- Decrypt a SURB reply payload. `keys` holds `nrHops` `(key[48] ++ iv[16])` chunks in reverse
+hop order; all but the last encrypt, the last decrypts. -/
 def decryptSURBPayload (cipher : WideBlockCipher) (geom : Geometry) (keys payload : ByteArray) :
     Except String ByteArray := do
   if keys.size % sprpKeyMaterialLength ≠ 0 || keys.size / sprpKeyMaterialLength < 1 then
@@ -46,9 +39,8 @@ def decryptSURBPayload (cipher : WideBlockCipher) (geom : Geometry) (keys payloa
   if !tag.data.all (· == 0) then throw "sphinx: payload auth failed"
   pure (b.extract geom.payloadTagLength b.size)
 
-/-- **`NewPacketFromSURB`**: build a reply packet from a SURB and a payload. `surb` is
-`header ‖ firstHopID(32) ‖ sprpKey(48) ‖ sprpIV(16)` (`SURBLength = HeaderLength + 32 + 64`
-bytes) — `newNIKESURB`/`newKEMSURB`'s wire layout. Returns `(packet, firstHopID)`. -/
+/-- Build a reply packet from a SURB and a payload. `surb` is
+`header ‖ firstHopID(32) ‖ sprpKey(48) ‖ sprpIV(16)`. Returns `(packet, firstHopID)`. -/
 def newPacketFromSURB (cipher : WideBlockCipher) (geom : Geometry) (surb payload : ByteArray) :
     Except String (ByteArray × Vector UInt8 32) := do
   if surb.size ≠ geom.surbLength then throw "sphinx: invalid packet, truncated SURB"

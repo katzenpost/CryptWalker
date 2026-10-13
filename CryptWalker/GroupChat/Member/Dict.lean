@@ -5,10 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 /-! # A map that keeps insertion order
 
-katzenqt's state machine keeps its state in Python `dict`s, and the order it emits effects in
-follows their iteration order. This map behaves as a `dict` does: setting a key already present
-replaces its value in place, setting a new key appends it, and erasing keeps the order of the
-rest. -/
+Setting a present key replaces its value in place; setting a new key appends it. -/
 
 namespace CryptWalker.GroupChat.Member
 
@@ -34,7 +31,7 @@ def set (d : Dict K V) (k : K) (v : V) : Dict K V :=
   if d.contains k then ⟨d.pairs.map fun p => if p.1 = k then (k, v) else p⟩
   else ⟨d.pairs ++ [(k, v)]⟩
 
-/-- `dict.setdefault`: set `k` only if it is absent. -/
+/-- Set `k` only if it is absent. -/
 def setDefault (d : Dict K V) (k : K) (v : V) : Dict K V := if d.contains k then d else d.set k v
 
 def modify (d : Dict K V) (k : K) (f : V → V) : Dict K V :=
@@ -54,8 +51,7 @@ def filter (d : Dict K V) (p : K → V → Bool) : Dict K V := ⟨d.pairs.filter
 
 def mapValues {W : Type} (d : Dict K V) (f : V → W) : Dict K W := ⟨d.pairs.map fun e => (e.1, f e.2)⟩
 
-/-- Build a map from pairs in order, a later value for a key replacing an earlier one in place, as
-a Python dict comprehension does. -/
+/-- Build a map from pairs in order; a later value for a key replaces an earlier one in place. -/
 def ofList (l : List (K × V)) : Dict K V := l.foldl (fun d e => d.set e.1 e.2) empty
 
 end Dict

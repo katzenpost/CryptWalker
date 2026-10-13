@@ -8,17 +8,8 @@ import Mathlib.Data.List.Basic
 
 /-! # The walk to an acknowledged box
 
-See "Rewrite and scan" in the group chat spec, and the driver's walk in katzenqt's
-`groupchat/sim.py` (`walk`), which this follows. The reader itself, and the proof that what it
-acknowledges it has read, are in `Member/Reader.lean` and `Member/ReaderProofs.lean`.
-
-A box's index `I` is opaque: compared only for equality, and moved forward only by BACAP's
-`next`. So one index comes before another exactly when stepping forward from the first meets
-the second (`Before`), and a reader finds a box another member acknowledged by walking to it.
-
-* `walk_target`, `walk_skipped`, `walk_furthest`: a walk that finds a target says how many steps
-  it took, which proves the target comes after where it started; it keeps the last indexes it
-  stepped past, in order; and no target lies further within the walk's limit. -/
+Indexes are opaque and advance only by `next`, so `b` comes after `a` exactly when stepping
+forward from `a` reaches `b`. A reader finds an acknowledged box by walking to it. -/
 
 namespace CryptWalker.GroupChat.ReaderScan
 
@@ -91,8 +82,8 @@ theorem walkFrom_spec (targets : List I) (start : I) :
         · exact hnone j hj hjp
         · exact ht
 
-/-- **A walk proves order**: the target it finds is the start stepped forward exactly as many
-times as the walk reports, within its limit. -/
+/-- The target a walk finds is the start stepped forward by the reported step count, within the
+limit. -/
 theorem walk_target {targets : List I} {start : I} {limit keep : ℕ} {t : I} {skipped : List I}
     {steps : ℕ} (h : walk next targets start limit keep = some (t, skipped, steps)) :
     t ∈ targets ∧ next^[steps] start = t ∧ steps < limit ∧ (0 < steps → Before next start t) := by
@@ -116,7 +107,7 @@ theorem walk_skipped {targets : List I} {start : I} {limit keep : ℕ} {t : I} {
   obtain ⟨-, rfl, rfl⟩ := hf
   rw [← hpassed]
 
-/-- **A walk goes to the furthest target**: none lies between it and the walk's limit. -/
+/-- No target lies between the one a walk finds and the walk's limit. -/
 theorem walk_furthest {targets : List I} {start : I} {limit keep : ℕ} {t : I} {skipped : List I}
     {steps : ℕ} (h : walk next targets start limit keep = some (t, skipped, steps)) :
     ∀ j, steps < j → j < limit → next^[j] start ∉ targets := by

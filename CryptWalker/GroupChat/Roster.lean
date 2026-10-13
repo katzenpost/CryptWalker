@@ -8,27 +8,10 @@ import Mathlib.Logic.Function.Basic
 
 /-! # Rosters: following another member's numbering
 
-See "Rosters" in the group chat spec, and katzenqt's `groupchat/numbering.py` (`resolve`) and
-`groupchat/group.py` (`_ingest`, `_started`), which this follows. Every roster index is announced
-in the `Numbers` of a message: as the member its own `Introduction` introduces, or by a prefix of
-the member's key (`pre`). A watcher names a prefix by the member it knows with that key. A
-member's roster began as its introducer's, up to the index the introducer gave it, and a watcher
-learns which introducer from the member's `IntroducedAt`, which names the `Introduction` by its
-box `B`, an opaque value only compared for equality.
-
-A watcher holds, for each roster, the entries it has read, the members it knows, the
-Introductions it knows and where the roster began. The world holds each roster as its owner
-keeps it, and whom each Introduction introduced.
-
-* `resolve_sound`: whoever a watcher names at an index of a roster is whoever its owner put
-  there, however many messages it missed, for any group size, provided no two members share a
-  prefix (`Function.Injective pre`): what the spec's 8 bytes of key buy.
-* `ingest_sound`, `introduce_sound`, `begin_sound`: reading a truthful message, learning an
-  Introduction, and following an `IntroducedAt` each keep a watcher sound. So a watcher that
-  skips boxes leaves indexes unresolved, never misplaced.
-* `first_introduction_misplaces`: a watcher that takes the first Introduction of a member it
-  reads as where its roster began, without `IntroducedAt`, misplaces a member introduced twice.
-  This is the counterexample TLC finds in `tla/protocol/MC_GroupChat_NoIntroducedAt.cfg`. -/
+Every roster index is announced in a message's `Numbers`, by key prefix or as the member its own
+`Introduction` introduces. A member's roster begins as its introducer's, which a watcher learns
+from `IntroducedAt`. If no two members share a prefix, a watcher that misses messages leaves
+indexes unresolved but never misplaced. See "Rosters" in the group chat spec. -/
 
 namespace CryptWalker.GroupChat.Roster
 

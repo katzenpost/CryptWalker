@@ -10,15 +10,9 @@ import CryptWalker.GroupChat.Member.Ledger
 
 /-! # One member of one group chat
 
-katzenqt's `groupchat/group.py`, as a state machine over `Group`. It can be driven in two ways.
-`handle` takes an event and returns the effects to carry out, the member choosing every box to
-read and write. A client that does its own reading and writing instead tells it what it read
-(`observe`), asks it what to send (`compose`), and tells it where each message landed
-(`written`). Either way a message changes rosters only once it has a box on the member's stream.
-
-Where the spec leaves a choice open, this follows katzenqt: indexes are derived `poolSize` at a
-time, effects come in the order katzenqt emits them, and composed messages are numbered by a
-running token. -/
+A state machine over `Group`, driven either by events (`handle`, returning effects) or by a
+client that reads and writes itself (`observe`, `compose`, `written`). A message changes rosters
+only once it has a box on the member's stream. -/
 
 namespace CryptWalker.GroupChat.Member
 

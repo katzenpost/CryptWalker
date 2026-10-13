@@ -17,53 +17,31 @@ import CryptWalker.Util.Bytes
 
 namespace CryptWalker.Sphinx.Interface
 
--- `Sphinx` repeats the namespace, as `NIKE`/`KEM` do theirs; unlike them this file imports
--- Mathlib, so the linter actually sees it.
+-- `Sphinx` repeats the namespace name.
 set_option linter.dupNamespace false
 
 open CryptWalker.Util.Bytes (ofVector)
 
 /-! # The abstract Sphinx interface
 
-Reference for this whole directory: George Danezis and Ian Goldberg, *Sphinx: A Compact and
-Provably Secure Mix Format*, IEEE S&P 2009 — <https://eprint.iacr.org/2008/475> (PDF at that URL).
-Cited elsewhere here as "Danezis–Goldberg" or "the paper"; a bare `§n.m` is that paper's own
-section numbering. Not re-cited file by file.
+Reference: George Danezis and Ian Goldberg, *Sphinx: A Compact and Provably Secure Mix Format*,
+IEEE S&P 2009, <https://eprint.iacr.org/2008/475>. A bare `§n.m` in this directory refers to that
+paper's sections.
 
-The paper states four security properties for a mix format; this project formalizes all four:
+A packet scheme with completeness (`unwrap_complete`), integrity (§4.2) and indistinguishability
+(§4.4). Wrap-resistance (§4.3) is stated on `NIKESphinxScheme` only, since it needs a re-blindable
+group element. -/
 
-* **Completeness** — `unwrap_complete` below: any packet `wrap` builds, `unwrap` correctly undoes.
-* **Integrity** (§4.2) — the `integrity` field below, via `Integrity.integrity_bound`.
-* **Indistinguishability** (§4.4) — the `indistinguishable` field below, via
-  `Indistinguishability.advantage_le`.
-* **Wrap-resistance** (§4.3) — stated only on `NIKESphinxScheme.wrap_resistant` (`nike_sphinx.lean`),
-  not here on the base `Sphinx` structure: it needs a re-blindable public-key element a KEM-based
-  scheme has no analogue of. `NIKESphinx.uniformHit_eq` is its scheme-independent mathematical core.
-
-A packet scheme: private-key/command types, `wrap`/`unwrap`, `newSURB`/`newPacketFromSURB`, and
-a completeness law relating them.
-
-`unwrap`'s forwarded packet is `Vector UInt8 pkt.size` — same length as the input, by the type.
-`wrap`/`newSURB` draw randomness from `State` via `EStateM` (`SeedStream`/`nextSeed`/`initWith`
-below); `unwrap`/`newPacketFromSURB` are deterministic, so plain `Except`.
-
-`NIKESphinx`/`KEMSphinx` are the two witnesses, both proving `unwrap_complete` outright
-(generic over the abstract `NIKE`/`KEM`/`WideBlockCipher`/`MAC`/`KDF`/`StreamCipher` types) plus
-`newNIKEPacket_size` and friends (`wrap`/`newSURB` produce exactly `packetLength`/`surbLength`
-bytes). `unwrap_complete` covers only the forward payload, not `cmds`/`replayTag`/SURB
-completeness. -/
-
-/-- Counter plus an inexhaustible stream of 32-byte seeds — `wrap`'s randomness source. -/
+/-- Counter plus an infinite stream of 32-byte seeds. -/
 abbrev SeedStream := Nat × (Nat → Vector UInt8 32)
 
 def nextSeed : EStateM String SeedStream (Vector UInt8 32) :=
   fun (i, str) => .ok (str i) (i + 1, str)
 
-/-- The state an honest run starts from: counter zero over a caller-supplied seed stream, which
-must be unpredictable (unchecked here). -/
+/-- Initial state: counter zero over a seed stream, which must be unpredictable. -/
 def initWith (str : Nat → Vector UInt8 32) : SeedStream := (0, str)
 
-/-- `n` bytes read straight off the seed stream from seed `i`: byte `k` is byte `k % 32` of seed
+/-- `n` bytes from the seed stream starting at seed `i`: byte `k` is byte `k % 32` of seed
 `i + k / 32`. -/
 def seedBytes (str : Nat → Vector UInt8 32) (i n : Nat) : ByteArray :=
   ⟨Array.ofFn fun k : Fin n => (str (i + k.val / 32))[k.val % 32]'(Nat.mod_lt _ (by decide))⟩
@@ -76,16 +54,12 @@ theorem seedBytes_size (str : Nat → Vector UInt8 32) (i n : Nat) :
 def drawBytes (n : Nat) : EStateM String SeedStream ByteArray :=
   fun (i, str) => .ok (seedBytes str i n) (i + (n + 31) / 32, str)
 
-/-- Routing-info bytes a `nrHops`-hop path leaves unused. `wrap`/`newSURB` fill them with
-`drawBytes`, never zeros: a fixed pattern there tells the exit node the path length (Kuhn et al.,
-"Breaking and (Partially) Fixing Provably Secure Onion Routing", S&P 2020). -/
+/-- Routing-info bytes a `nrHops`-hop path leaves unused. These are filled with random bytes, not
+zeros, which would reveal the path length (Kuhn et al., S&P 2020). -/
 def fillerLength (geom : Geometry.Geometry) (nrHops : Nat) : Nat :=
   (geom.nrHops - nrHops) * geom.perHopRoutingInfoLength
 
-/-- Repeatedly `unwrap`, one key per hop, threading the forwarded packet through. Stops at the
-first hop with no forward packet. Free-standing since it only needs `unwrap`'s shape, not a full
-instance — generalizes what `nike_selftest.lean`/`kem_selftest.lean`'s `unwrapAll` checks
-concretely. -/
+/-- Repeatedly `unwrap`, one key per hop, stopping at the first hop with no forward packet. -/
 def unwrapChainAux {PrivateKey Command : Type}
     (unwrap : PrivateKey → (pkt : ByteArray) →
       Except String (Option ByteArray × Vector UInt8 32 × List Command × Option (Vector UInt8 pkt.size))) :
@@ -106,20 +80,17 @@ structure Sphinx where
 
   geometry : Geometry.Geometry
 
-  /-- The four cryptographic primitives every Sphinx instance needs besides its NIKE-or-KEM
-  (added by `NIKESphinxScheme`/`KEMSphinxScheme`): a wide-block cipher for the payload, a MAC for
-  header integrity, a KDF for per-hop keys, a stream cipher for routing-info encryption. Kept
-  abstract so swapping e.g. AEZ for another wide-block cipher needs no change below. -/
+  /-- Wide-block cipher for the payload, MAC for header integrity, KDF for per-hop keys, stream
+  cipher for routing-info encryption. -/
   cipher : CryptWalker.WideBlockCipher.WideBlockCipher
   mac    : CryptWalker.MAC.MAC
   kdf    : CryptWalker.KDF.KDF
   stream : CryptWalker.StreamCipher.StreamCipher
 
-  /-- Raw bytes — width depends on which NIKE/KEM this scheme wraps, not fixed here. -/
+  /-- Raw public key bytes. -/
   derivePublicKey : PrivateKey → ByteArray
 
-  /-- Unused routing-info slots are filled with `drawBytes` from `State`, not supplied by the
-  caller (see `fillerLength`). -/
+  /-- Unused routing-info slots are filled with random bytes drawn from `State`. -/
   wrap : List Types.PathHop → Vector UInt8 geometry.forwardPayloadLength →
     EStateM String State (Vector UInt8 geometry.packetLength)
 
@@ -133,18 +104,12 @@ structure Sphinx where
   newPacketFromSURB : Vector UInt8 geometry.surbLength → ByteArray →
     Except String (ByteArray × Vector UInt8 32)
 
-  /-- Which starting states are guaranteed not to run into the backing scheme's rare correctness
-  failure over an unbounded run. `True` for every perfect-correctness backing — every NIKE, and
-  any Diffie-Hellman-based KEM (`KEM.KEM.Reliable`'s own default, unchanged) — since neither has a
-  decoding step with a failure mode to name. A KEM-Sphinx instance backed by a lattice-based KEM
-  (e.g. ML-KEM) overrides this with the real per-draw guarantee its own `KEM.Reliable` needs. -/
+  /-- Starting states from which the backing scheme never hits a decryption failure. `True` for
+  perfectly correct schemes. -/
   unwrapReliable : State → Prop := fun _ => True
 
-  /-- **Completeness**: any packet `wrap` builds, `unwrap` can undo, given `path` is well-formed —
-  no hop's `commands` already contains `null` or `nextNodeHop` (both wire-level sentinels this
-  port only ever constructs itself, never something a caller supplies), and the last hop carries
-  no `surbReply` (a real command, just one that changes `unwrap`'s terminal-hop behavior — its own
-  completeness is tracked separately). -/
+  /-- Completeness: `unwrap` undoes `wrap` on the forward payload, given no hop's `commands`
+  contains `null` or `nextNodeHop` and the last hop carries no `surbReply`. -/
   unwrap_complete : ∀ (path : List Types.PathHop) (privKeys : List PrivateKey)
       (payload : Vector UInt8 geometry.forwardPayloadLength) (st : State)
       (pkt : Vector UInt8 geometry.packetLength) (st' : State),
@@ -156,9 +121,7 @@ structure Sphinx where
     wrap path payload st = .ok pkt st' →
     unwrapChainAux unwrap privKeys (ofVector pkt) = .ok (some (ofVector payload))
 
-  /-- **Indistinguishability** (§4.4): `Indistinguishability.advantage_le`, closed over every
-  scheme it's about. Free for every instance — see that theorem's own module doc for the games
-  and hardness assumptions it reduces to. -/
+  /-- Indistinguishability (§4.4). See `Indistinguishability.advantage_le`. -/
   indistinguishable : ∀ {F G Seed KeyMu KeyPi Beta Gamma Delta : Type}
       [Field F] [AddCommGroup G] [Module F G] [AddCommGroup Beta]
       [SampleableType F] [SampleableType Seed] [SampleableType KeyMu] [SampleableType KeyPi]
@@ -168,9 +131,7 @@ structure Sphinx where
       Indistinguishability.AdvantageLeType S :=
     fun S => Indistinguishability.advantage_le S
 
-  /-- **Integrity** (§4.2): `Integrity.integrity_bound`, closed over every scheme it's about.
-  Free for every instance — see that theorem's own module doc for `ProblemP`, its named hardness
-  hypothesis. -/
+  /-- Integrity (§4.2). See `Integrity.integrity_bound`. -/
   integrity : ∀ {F G Seed Idx Yy Kappa : Type} [Field F] [AddCommGroup G] [Module F G]
       [Nonempty Yy] (S : Integrity.Sys F G) (hρ : G → Seed) (ρhat0 : Seed → Kappa)
       (ρ0 : Seed → Idx) (f : Idx → Yy → Kappa),

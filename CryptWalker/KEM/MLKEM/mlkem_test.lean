@@ -9,10 +9,8 @@ import CryptWalker.Util.newhex
 
 /-! # ML-KEM known-answer tests: NIST ACVP vectors for ML-KEM-512, -768 and -1024
 
-KeyGen, encapsulation, decapsulation (including implicit rejection) and the FIPS 203 §7.2/§7.3
-input checks, run for each parameter set against `testdata/mlkem<N>_{keygen,encapdecap,keycheck}.json`
-(extracted from NIST ACVP-Server by `scripts/extract_acvp_mlkem.py`). The raw encode/decode helpers
-work on the unwrapped `EncapsulationKey`/`DecapsulationKey`/`Ciphertext` structures. -/
+Vectors in `testdata/mlkem<N>_{keygen,encapdecap,keycheck}.json`, extracted by
+`scripts/extract_acvp_mlkem.py`. -/
 
 open Lean
 open MLKEM

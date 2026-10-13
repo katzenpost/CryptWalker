@@ -8,11 +8,9 @@ import CryptWalker.GroupChat.Member.Wire
 
 /-! # Rosters with explicit numbering
 
-See "Rosters" in the group chat spec, and katzenqt's `groupchat/numbering.py`. Every roster index
-is announced, as the member it names or as the `Introduction` that introduced it, so a missed
-message leaves an index unresolved and never shifts the others. A roster that began as a copy of
-an introducer's is not copied: its early entries are read from the introducer's roster, up to the
-index it assigned the new member. -/
+Every roster index is announced explicitly, so a missed message leaves an index unresolved and
+never shifts others. A roster that began as its introducer's reads its early entries from that
+roster. See "Rosters" in the group chat spec. -/
 
 namespace CryptWalker.GroupChat.Member
 
@@ -39,7 +37,6 @@ namespace Rosters
 def learn (r : Rosters) (key : Key) : Rosters :=
   if r.keys.contains key then r else { r with keys := r.keys ++ [key] }
 
-/-- Python's `bytes.startswith`. -/
 def startsWith (key p : ByteArray) : Bool := p.data.toList.isPrefixOf key.data.toList
 
 /-- The one member known whose key starts with `p`. -/

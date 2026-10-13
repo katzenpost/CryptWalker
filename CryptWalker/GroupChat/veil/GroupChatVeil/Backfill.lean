@@ -3,11 +3,8 @@ module
 public import Veil
 
 /-!
-The safety half of `tla/protocol/Backfill.tla`, for any number of readers and positions. It
-allows more than the TLA+ model, so its safety properties hold there too: epochs are unbounded and
-a box is its current and previous slot, `Discard` may come at any time, polling, scans and jumps
-are always enabled, a reader keeps every position it skips, and a scan's jump is a separate `Jump`
-step.
+Backfill safety for any number of readers and positions. Epochs are unbounded, `Discard`, polls,
+scans and jumps may happen at any time, and a reader keeps every position it skips.
 -/
 
 veil module Backfill
@@ -168,9 +165,8 @@ action Read (r : reader) {
     atEnd r := true
 }
 
--- Jump to the furthest box another reader has acknowledged, keeping the
--- positions skipped for rechecking. The pick spells out `heard r t`: the model
--- checker cannot run a pick through a ghost relation.
+-- Jump to the furthest box another reader has acknowledged, keeping skipped positions. The pick
+-- spells out `heard r t` because the model checker cannot pick through a ghost relation.
 procedure jumpTo (r : reader) {
   let t :| (∃ o, o ≠ r ∧ ackd o t) ∧ ∀ o q, o ≠ r ∧ ackd o q → le q t
   holes r P := decide $ holes r P ∨ (le (cursor r) P ∧ lt P t)
@@ -194,8 +190,7 @@ action Poll (r : reader) (p : pos) {
   holes r p := false
 }
 
--- The user asks for a scan: everything kept is rechecked. The jump that
--- follows in `Backfill.tla` is a `Jump` step here.
+-- The user asks for a scan: everything kept is rechecked.
 action Scan (r : reader) {
   seen r P := decide $ seen r P ∨ (holes r P ∧ ¬ looksEmpty P)
   got r P := decide $ got r P ∨ (holes r P ∧ looksData P)
@@ -234,8 +229,7 @@ set_option veil.smt.trust false
 
 #gen_spec
 
--- Declare the verification conditions as theorems, so their axioms can be
--- checked below.
+-- Declare the verification conditions as theorems, so their axioms can be checked below.
 #gen_theorems
 
 #check_invariants
@@ -245,8 +239,7 @@ set_option veil.smt.trust false
 -- The assumptions are satisfiable.
 sat trace { }
 
--- Under the spec's rule an ack names a box its reader jumped over: the
--- counterexample TLC finds for `MC_Backfill_SpecAckRule.cfg`.
+-- Under the spec's ack rule, an ack can name a box its reader jumped over.
 sat trace [spec_ack_rule_loses] {
   Send
   Read
@@ -263,8 +256,7 @@ sat trace [spec_ack_rule_loses] {
 
 end Backfill
 
--- Every verification condition, proved with the solver's answers rebuilt in
--- Lean, rests on Lean's own axioms only.
+-- Every verification condition rests on Lean's own axioms only.
 open Lean in
 run_cmd do
   let env ← getEnv

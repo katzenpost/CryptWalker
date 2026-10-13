@@ -12,10 +12,9 @@ open CryptWalker.KEM.KEM
 /-!
 # Security preserving KEM combiner
 
-`splitPRF` is the standard-model PRF-then-XOR core function of Giacon, Heuer &
-Poettering (Lemma 8 of "KEM Combiners", https://eprint.iacr.org/2018/024.pdf).
-It works for any number of KEMs. Instantiated with BLAKE2b-256 in keyed mode as
-the per-component PRF `F`:
+`splitPRF` is the PRF-then-XOR core function of Giacon, Heuer & Poettering
+("KEM Combiners", https://eprint.iacr.org/2018/024.pdf, Lemma 8), for any number
+of KEMs. With BLAKE2b-256 as the PRF:
 
 ```
   key_i  := BLAKE2b-256(unkeyed)(ss_i)
@@ -29,19 +28,9 @@ the per-component PRF `F`:
   return hash_1 XOR hash_2 XOR ... XOR hash_n
 ```
 
-Two properties matter, and both differ from the naive `H(ss_i || cct)`:
-
-* **Key binding.** Each shared secret is used as the *key* of the PRF, never as
-  a message prefix. The pre-hash key derivation (`PRF.deriveKey`) handles
-  BLAKE2b's 64-byte keyed-mode cap, so shared secrets of any length work.
-* **Transcript binding.** The full ciphertext vector is bound into every
-  component hash under a length-prefixed, count-prefixed, domain-separated
-  encoding. Concatenating raw ciphertexts is ambiguous whenever a sub-KEM has a
-  variable-length ciphertext; the length prefixes make the transcript
-  unambiguous regardless of sub-KEM ciphertext sizes.
-
-By Theorem 1 of the paper the combined KEM retains IND-CCA2 security as long as
-at least one ingredient KEM is IND-CCA2 secure.
+Each shared secret keys the PRF, and every component hash binds the full,
+unambiguously encoded ciphertext vector. By Theorem 1 of the paper the combined
+KEM is IND-CCA2 if at least one component is.
 -/
 
 abbrev Bytes32 := Vector UInt8 32
@@ -71,7 +60,7 @@ theorem xorBytes_assoc (a b c : Bytes32) :
 
 /-! ### Split PRF -/
 
-/-- Domain-separation tag for this PRF construction. -/
+/-- Domain-separation tag. -/
 def splitPRFLabel : String := "splitprf-v1"
 
 def splitPRFLabelBytes : ByteArray := splitPRFLabel.toUTF8
@@ -79,42 +68,29 @@ def splitPRFLabelBytes : ByteArray := splitPRFLabel.toUTF8
 /-- Length in bytes of the value `splitPRF` returns. -/
 def splitPRFOutputSize : Nat := 32
 
-/-- Big-endian `u32`. Mirrors Go's `binary.BigEndian.PutUint32`, including the
-truncation of lengths at 2^32; no ciphertext is anywhere near that size. -/
+/-- Big-endian `u32`. -/
 def u32be (v : UInt32) : ByteArray :=
   ⟨#[(v >>> 24).toUInt8, (v >>> 16).toUInt8, (v >>> 8).toUInt8, v.toUInt8]⟩
 
-/-- The pair of hash functions the construction needs: an unkeyed hash for key
-derivation, and a keyed hash used as the per-component PRF. Instantiate both
-with BLAKE2b-256 to match hpqc. -/
+/-- An unkeyed hash for key derivation and a keyed hash as the per-component PRF. -/
 structure PRF where
-  /-- Unkeyed hash, e.g. `BLAKE2b-256(nil)`. -/
   hash : ByteArray → Bytes32
-  /-- Keyed hash, e.g. `BLAKE2b-256(key, ·)`. -/
   keyed : Bytes32 → ByteArray → Bytes32
 
-/-- Shrink an arbitrary-length shared secret to a 32-byte PRF key. Required
-because BLAKE2b's keyed mode caps the key at 64 bytes and sub-KEM shared
-secrets are not constrained to that. -/
+/-- Hash a shared secret of any length to a 32-byte PRF key. -/
 def PRF.deriveKey (F : PRF) (ss : ByteArray) : Bytes32 := F.hash ss
 
-/-- The message portion of the transcript: label, component count, then every
-ciphertext under a big-endian 32-bit length prefix. -/
+/-- Label, component count, then each ciphertext with a 32-bit length prefix. -/
 def transcript (cct : List ByteArray) : ByteArray :=
   cct.foldl (fun acc c => acc ++ u32be c.size.toUInt32 ++ c)
     (splitPRFLabelBytes ++ u32be cct.length.toUInt32)
 
-/-- XOR of the per-component keyed hashes. On the empty list this is `zero32`,
-which is why `splitPRF` below takes the first component separately. -/
+/-- XOR of the per-component keyed hashes; `zero32` on the empty list. -/
 def splitPRFCore (F : PRF) (parts : List (ByteArray × ByteArray)) : Bytes32 :=
   let msg := transcript (parts.map Prod.snd)
   parts.foldl (fun acc p => xorBytes acc (F.keyed (F.deriveKey p.1) msg)) zero32
 
-/-- Split PRF over one or more `(shared secret, ciphertext)` components.
-
-Non-emptiness and the pairing of secrets with ciphertexts are enforced by the
-type, so this total function has no error cases: Go's `ErrNoInputs` and
-`ErrMismatchedSlices` are unrepresentable here. -/
+/-- Split PRF over one or more `(shared secret, ciphertext)` components. -/
 def splitPRF (F : PRF) (p : ByteArray × ByteArray)
     (ps : List (ByteArray × ByteArray) := []) : Bytes32 :=
   splitPRFCore F (p :: ps)
@@ -125,8 +101,7 @@ inductive SplitPRFError where
   | emptyComponent
 deriving Repr, DecidableEq
 
-/-- Checked wrapper matching the Go signature `SplitPRF(ss, cct [][]byte)`, for
-callers that build the component lists dynamically. -/
+/-- `splitPRF` over separate secret and ciphertext lists, rejecting malformed input. -/
 def splitPRF? (F : PRF) (ss cct : List ByteArray) :
     Except SplitPRFError Bytes32 := do
   if ss.length ≠ cct.length then throw .mismatchedSlices
@@ -137,25 +112,17 @@ def splitPRF? (F : PRF) (ss cct : List ByteArray) :
       throw .emptyComponent
     pure (splitPRF F p ps)
 
-/-- Unfolding lemma for the two-component case used by the combiner below. -/
+/-- `splitPRF` on two components. -/
 theorem splitPRF_pair (F : PRF) (s₁ c₁ s₂ c₂ : ByteArray) :
     splitPRF F (s₁, c₁) [(s₂, c₂)] =
       xorBytes (F.keyed (F.deriveKey s₁) (transcript [c₁, c₂]))
                (F.keyed (F.deriveKey s₂) (transcript [c₁, c₂])) := by
   simp [splitPRF, splitPRFCore, zero_xorBytes]
 
-/-! ### The combined KEM, over one KEM plus a (possibly empty) list of more
+/-! ### The combined KEM
 
-`splitPRF` above is already `n`-ary, matching hpqc's `kem/combiner` (a plain `[]kem.Scheme`,
-rejected if empty). The shape here is the same one `splitPRF` itself takes — one required
-component plus a list of the rest — rather than a `List KEM` with a separate nonemptiness proof:
-`combineKEM F k₀ [k₁, k₂]` is the three-way combiner, `combineKEM F k₀ []` degenerates to `k₀`
-alone (`splitPRFCore [_]` already reduces to a single keyed hash, `zero_xorBytes`).
-
-The combined `State`/`PublicKey`/`PrivateKey`/`Ciphertext` for the tail list are nested products,
-one component per ingredient KEM, built by recursion on that list (`PUnit` closes an empty tail);
-the head component `k₀` is threaded alongside as a plain pair, not folded into the same recursion,
-since a nonempty list already needs no separate "at least one" apparatus once split this way. -/
+`combineKEM F k₀ ks` combines a head KEM with a possibly empty list of more. Combined keys,
+ciphertexts and states for `ks` are nested products ending in `PUnit`. -/
 
 open CryptWalker.Util.Bytes (ofVector toVecN size_ofVector ofVector_toVecN toVecN_ofVector
   extract_append_left extract_append_right)
@@ -216,9 +183,9 @@ def ReliableN : (ks : List KEM) → CombinedState ks → Prop
   | [], _ => True
   | k :: ks, (s, ss) => k.Reliable s ∧ ReliableN ks ss
 
-/-! #### Wire encoding: `ByteArray` throughout, converted to/from a fixed-width `Vector` only at
-the top-level `combineKEM` record (matching `MLKEM768Encoding.lean`'s convention) — avoids ever
-needing a size-indexed `Vector` append, which structural recursion on `ks` can't produce directly. -/
+/-! #### Wire encoding
+
+Components are concatenated as `ByteArray`s and converted to `Vector` only in `combineKEM`. -/
 
 def encodePublicKeyN : (ks : List KEM) → CombinedPublicKey ks → ByteArray
   | [], _ => ByteArray.empty
@@ -334,7 +301,7 @@ theorem decode_encode_ct_N : ∀ (ks : List KEM) (c : CombinedCiphertext ks),
       rw [hleft, hright, toVecN_ofVector, k.decode_encode_ct c, decode_encode_ct_N ks cs]
       rfl
 
-/-! #### Running the tail list's `encap`/`decap`, threading each component's own state -/
+/-! #### Encapsulation and decapsulation over the tail list -/
 
 def liftHead {k : KEM} {ks : List KEM} {α} (x : EStateM KEMError k.State α) :
     EStateM KEMError (k.State × CombinedState ks) α :=
@@ -348,8 +315,7 @@ def liftTail {k : KEM} {ks : List KEM} {α} (x : EStateM KEMError (CombinedState
     | .ok a rest'    => .ok a (s, rest')
     | .error e rest' => .error e (s, rest')
 
-/-- Each tail component's own `(shared secret, ciphertext)`, both encoded to `ByteArray` — the
-shape `splitPRF` needs. -/
+/-- Each tail component's encoded `(shared secret, ciphertext)`. -/
 def encapAllM : (ks : List KEM) → CombinedPublicKey ks →
     EStateM KEMError (CombinedState ks) (CombinedCiphertext ks × List (ByteArray × ByteArray))
   | [], _ => pure (⟨⟩, [])
@@ -384,9 +350,7 @@ def decapM (k₀ : KEM) (ks : List KEM) (sk : k₀.PrivateKey × CombinedPrivate
 
 /-! #### Correctness -/
 
-/-- Each tail component's own round-trip law, for a *specific* `(pk, sk)` pair per component —
-generic over any pairing, not just `pk = derivePublicKey sk`, matching what `generate`'s own
-embedded proof gives (a specific drawn `pk`, not necessarily syntactically `derivePublicKey sk`). -/
+/-- Every tail component round-trips for its `(pk, sk)` pair. -/
 def AllHonestFor : (ks : List KEM) → CombinedPublicKey ks → CombinedPrivateKey ks → Prop
   | [], _, _ => True
   | k :: ks, (pk, pks), (sk, sks) =>
@@ -398,9 +362,7 @@ theorem allHonestFor_derivePublicKey :
   | [], _ => trivial
   | k :: ks, (sk, sks) => ⟨k.honestRoundTrip sk, allHonestFor_derivePublicKey ks sks⟩
 
-/-- `decapAllM` recovers exactly the `(shared secret, ciphertext)` list `encapAllM` produced —
-the invariant that lets `combinedRoundTrip` avoid reasoning about `splitPRF` at all, since equal
-lists give an equal combined key for free. -/
+/-- `decapAllM` recovers the `(shared secret, ciphertext)` list `encapAllM` produced. -/
 theorem encapAllM_decapAllM :
     ∀ (ks : List KEM) (pks : CombinedPublicKey ks) (sks : CombinedPrivateKey ks),
       AllHonestFor ks pks sks →
@@ -444,9 +406,8 @@ theorem encapAllM_decapAllM :
           rw [← hcomps]
           rfl
 
-/-- Correctness: if the head KEM and every tail KEM round-trip for the given `(pk, sk)` pairs, so
-does the combination. Generic over `pk`/`pks`, not hardwired to `derivePublicKey` — `generate`
-below needs it at whatever `pk` it actually drew; `honestRoundTrip` needs it at `derivePublicKey`. -/
+/-- If the head and every tail KEM round-trip for the given `(pk, sk)` pairs, so does the
+combination. -/
 theorem combinedRoundTrip (k₀ : KEM) (ks : List KEM)
     (pk₀ : k₀.PublicKey) (pks : CombinedPublicKey ks)
     (sk₀ : k₀.PrivateKey) (sks : CombinedPrivateKey ks)
@@ -486,8 +447,7 @@ theorem combinedRoundTrip (k₀ : KEM) (ks : List KEM)
       rw [← hkey]
       rfl
 
-/-- `generate`, run for the tail list: each component's own keypair, plus each component's own
-`AllHonestFor` witness (its own `generate`'s embedded proof, threaded through unchanged). -/
+/-- Key pairs for the tail list, with their `AllHonestFor` witness. -/
 def generateN : (ks : List KEM) → EStateM KEMError (CombinedState ks)
     (Σ' (pk : CombinedPublicKey ks), {sk : CombinedPrivateKey ks // AllHonestFor ks pk sk})
   | [] => pure ⟨⟨⟩, ⟨⟩, trivial⟩
@@ -508,8 +468,7 @@ theorem decodePrivateKeyN_total : ∀ (ks : List KEM) (b : ByteArray), ∃ sk, d
       rw [hsk, hsks]
       rfl
 
-/-- One KEM plus a (possibly empty) list of more, combined via the split-PRF combiner. Matches
-hpqc's `kem/combiner.New(name, []kem.Scheme)`. -/
+/-- One KEM plus a possibly empty list of more, combined with the split PRF. -/
 def combineKEM (k₀ : KEM) (ks : List KEM) : KEM where
   State      := k₀.State × CombinedState ks
   PublicKey  := k₀.PublicKey × CombinedPublicKey ks
@@ -553,9 +512,7 @@ def combineKEM (k₀ : KEM) (ks : List KEM) : KEM where
 
   encap := encapM F k₀ ks
   decap := decapM F k₀ ks
-  -- Every component seeded from the *same* 32 bytes: adequate for distinct sub-KEMs (the
-  -- intended use of a combiner), but would correlate their ephemeral randomness if two components
-  -- happened to be the same scheme — not a case this combiner is meant for.
+  -- All components share one seed, which correlates them if two are the same scheme.
   stateFromSeed := fun seed => (k₀.stateFromSeed seed, stateFromSeedN ks seed)
   derivePublicKey := fun (sk0, sks) => (k₀.derivePublicKey sk0, derivePublicKeyN ks sks)
 

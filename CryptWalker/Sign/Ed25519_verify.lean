@@ -9,9 +9,8 @@ import CryptWalker.Sign.Sign
 
 /-! # Signature verification is correct
 
-`verify_of_parts` is hash-independent: a signature `R ‖ s`, where `R` encodes `r·B`, `pk` encodes
-`a·B`, and `s ≡ r + k·a (mod ℓ)` for the challenge `k` the verifier recomputes, always satisfies
-the cofactored check `8s·B = 8R + 8k·A`. Both signers' `verify_signNative` are instances. -/
+A signature `R ‖ s` with `R = r·B`, `A = a·B`, and `s ≡ r + k·a (mod ℓ)` satisfies the cofactored
+check `8s·B = 8R + 8k·A`. -/
 
 namespace CryptWalker.Sign.Ed25519Verify
 
@@ -77,7 +76,7 @@ lemma sig_eq (rBytes : Vector UInt8 32) (s : ℕ) :
     rw [Vector.getElem_ofFn]
 
 open CryptWalker.Sign.Ed25519Math (signNative publicKey scalarFromSeed) in
-/-- **RFC 8032 correctness of the native signer.** Was an axiom. -/
+/-- RFC 8032 correctness of the native signer. -/
 theorem verify_signNative (sk : Vector UInt8 32) (m : ByteArray) :
     verifyNative (publicKey sk) m (signNative sk m) = true := by
   have hell : 0 < ell := by unfold ell; norm_num
