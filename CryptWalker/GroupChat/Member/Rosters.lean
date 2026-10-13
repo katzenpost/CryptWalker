@@ -100,13 +100,14 @@ def indexOf (r : Rosters) (owner member : Key) : Option Nat :=
 def number (r : Rosters) (owner : Key) (index : Nat) (entry : Entry) : Rosters :=
   { r with entries := r.entries.set owner ((r.entries.getD owner {}).setDefault index entry) }
 
-/-- Forget `member`'s key, keeping every place it holds, under `token`. -/
+/-- Forget `member`'s key, keeping every place it holds, under `token`. A place named by a prefix
+is `member`'s only if the prefix names no other member known. -/
 def retire (r : Rosters) (member token : Key) : Rosters :=
   let renamed := fun (k : Key) => if k = member then token else k
   let entries := r.entries.mapValues fun roster => roster.mapValues fun e =>
     let hit := e.key = some member ||
       match e.prefix_ with
-      | some p => p.size ≠ 0 && startsWith member p
+      | some p => p.size ≠ 0 && r.named p = some member
       | none => false
     if hit then { key := some token, prefix_ := none } else e
   let entries := match entries.get? member with

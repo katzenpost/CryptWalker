@@ -30,6 +30,10 @@ def prefixOf (key : Key) : ByteArray := key.extract 0 prefixSize
 /-- The index a read cap starts at. -/
 def startOf (readCap : ByteArray) : Index := readCap.extract keySize readCap.size
 
+/-- The BACAP `Idx64` of `index`: its first 8 bytes, little-endian. -/
+def counter (index : Index) : Nat :=
+  (index.extract 0 8).toList.foldr (fun b n => b.toNat + 256 * n) 0
+
 /-- Lexicographic order on bytes, a proper prefix first. -/
 def bytesLt : List UInt8 → List UInt8 → Bool
   | [], [] => false
@@ -52,13 +56,14 @@ structure Introduction where
 `none` for the member the message's own `Introduction` introduces. -/
 abbrev Numbers := List (Nat × Option ByteArray)
 
-/-- A message carries content or control, never both. `acks` is in ascending roster index. -/
+/-- A message carries content or control, never both. `acks` pairs roster indexes, ascending, with
+the `Idx64` of the box acknowledged. -/
 structure Message where
   content : Option ByteArray := none
   introduction : Option Introduction := none
   numbers : Numbers := []
   introducedAt : Option IntroRef := none
-  acks : List (Nat × Index) := []
+  acks : List (Nat × Nat) := []
   deriving DecidableEq, Inhabited
 
 /-! ## Numbers and IntroducedAt -/

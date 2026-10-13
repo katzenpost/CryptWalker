@@ -31,8 +31,8 @@ structure Reader where
   /-- The first box passed unread and no longer kept; acknowledgements stop before it. -/
   lost : Option (Nat × Option Index) := none
   mode : Mode := .idle
-  /-- Acknowledged boxes a scan has already looked for. -/
-  tried : List Index := []
+  /-- The `Idx64` of each acknowledged box a scan has already looked for. -/
+  tried : List Nat := []
   deriving DecidableEq, Inhabited
 
 namespace Reader
@@ -42,13 +42,13 @@ def read (r : Reader) : Reader × List Effect :=
   else ({ r with mode := .reading }, [.readBox r.stream r.readCap r.next false])
 
 /-- Acknowledged boxes a scan has not looked for yet. -/
-def ahead (r : Reader) (heard : List Index) : List Index :=
-  heard.filter fun h => h ≠ r.next && !r.tried.contains h
+def ahead (r : Reader) (heard : List Nat) : List Nat :=
+  heard.filter fun h => h ≠ counter r.next && !r.tried.contains h
 
 def rechecks (r : Reader) : List Effect := r.kept.map fun e => .readBox r.stream r.readCap e.1 true
 
 /-- Recheck what was kept, then look for acknowledged boxes ahead, or probe forward from here. -/
-def scan (r : Reader) (heard : List Index) (window : Nat) : Reader × List Effect :=
+def scan (r : Reader) (heard : List Nat) (window : Nat) : Reader × List Effect :=
   if (r.ahead heard).isEmpty then
     ({ r with mode := .scanning }, r.rechecks ++ [.readBox r.stream r.readCap r.next false])
   else

@@ -9,11 +9,10 @@ import CryptWalker.BACAP.API
 import CryptWalker.GroupChat.Member.Json
 import CryptWalker.Util.Bytes
 
-/-! # Replaying katzenqt group chat traces
+/-! # Replay katzenqt group chat traces
 
 Each trace line is one call on a member. The replay makes the same call on the Lean `Group` and
-requires the same result and resulting state. It also checks every BACAP index step, derivation
-and walk in the trace against CryptWalker's BACAP.
+requires the same result and state, and checks the trace's BACAP steps against our BACAP.
 
 Usage: `lake exe CryptWalker.GroupChat.replay [trace.jsonl | dir]...`, by default every trace in
 `testdata/groupchat_traces/`. -/
@@ -29,25 +28,27 @@ def step (b : ByteArray) : Option ByteArray := do
   let n ← (unmarshalMessageBoxIndex (CryptWalker.Util.Bytes.toVecN _ b)).nextIndex
   pure (CryptWalker.Util.Bytes.ofVector (marshalMessageBoxIndex n))
 
-/-- How far a walk steps a stream forward looking for an index. -/
+/-- How far ahead a walk reaches. -/
 def walkLimit : Nat := 256
 
-/-- Step forward from `start` to the furthest of `targets` within `walkLimit`, keeping the last
-`keep` indexes passed (all of them for `keep = 0`), and the step count. -/
-def walk (start : ByteArray) (targets : List ByteArray) (keep : Nat) :
+/-- The box at the furthest of `targets` fewer than `walkLimit` boxes ahead of `start`, the last
+`keep` indexes before it (all for `keep = 0`), and the step count. -/
+def walk (start : ByteArray) (targets : List Nat) (keep : Nat) :
     Option (Option ByteArray × List ByteArray × Nat) := do
-  let mut index := start
-  let mut passed : Array ByteArray := #[]
-  let mut found : Option (ByteArray × Nat) := none
-  for _ in [0:walkLimit] do
-    if targets.contains index then found := some (index, passed.size)
-    passed := passed.push index
-    index ← step index
-  match found with
+  if start.size ≠ MessageBoxIndexSize then none
+  let s := unmarshalMessageBoxIndex (CryptWalker.Util.Bytes.toVecN _ start)
+  let here := s.idx64.toNat
+  match (targets.filter fun t => here ≤ t && t < here + walkLimit).max? with
   | none => pure (none, [], 0)
-  | some (t, n) =>
-    let p := passed.toList.take n
-    pure (some t, if keep = 0 then p else p.drop (n - keep), n)
+  | some target =>
+    let first := if keep = 0 then here else max here (target - keep)
+    let mut index ← s.advanceIndexTo first.toUInt64
+    let mut skipped : Array ByteArray := #[]
+    for _ in [first:target] do
+      skipped := skipped.push (CryptWalker.Util.Bytes.ofVector (marshalMessageBoxIndex index))
+      index ← index.nextIndex
+    pure (some (CryptWalker.Util.Bytes.ofVector (marshalMessageBoxIndex index)), skipped.toList,
+      target - here)
 
 /-- `count` indexes after `start`. -/
 def derive (start : ByteArray) : Nat → Option (List ByteArray)
@@ -59,9 +60,9 @@ def derive (start : ByteArray) : Nat → Option (List ByteArray)
 /-- What a member has asked BACAP for and not yet been told. -/
 structure Asked where
   derives : List (ByteArray × Nat) := []
-  walks : List (ByteArray × ByteArray × List ByteArray × Nat) := []
+  walks : List (ByteArray × ByteArray × List Nat × Nat) := []
 
-/-- Check the trace's BACAP results for this call. Returns the number of checks and what is still
+/-- Check the trace's BACAP steps for this call. Returns the number of checks and what is still
 asked. -/
 def checkBACAP (asked : Asked) (line : Json) (effects : List Effect) :
     Except String (Nat × Asked) := do

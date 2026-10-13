@@ -5,7 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 /-! # A map that keeps insertion order
 
-Setting a present key replaces its value in place; setting a new key appends it. -/
+Setting a present key replaces its value in place; setting a new key appends it; erasing keeps
+the order of the rest. -/
 
 namespace CryptWalker.GroupChat.Member
 
@@ -50,6 +51,9 @@ def size (d : Dict K V) : Nat := d.pairs.length
 def filter (d : Dict K V) (p : K → V → Bool) : Dict K V := ⟨d.pairs.filter fun e => p e.1 e.2⟩
 
 def mapValues {W : Type} (d : Dict K V) (f : V → W) : Dict K W := ⟨d.pairs.map fun e => (e.1, f e.2)⟩
+
+def mapWithKey {W : Type} (d : Dict K V) (f : K → V → W) : Dict K W :=
+  ⟨d.pairs.map fun e => (e.1, f e.1 e.2)⟩
 
 /-- Build a map from pairs in order; a later value for a key replaces an earlier one in place. -/
 def ofList (l : List (K × V)) : Dict K V := l.foldl (fun d e => d.set e.1 e.2) empty

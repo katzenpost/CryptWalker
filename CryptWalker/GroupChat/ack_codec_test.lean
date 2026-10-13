@@ -10,59 +10,67 @@ import CryptWalker.Util.newhex
 
 /-! # `Acks` field vectors
 
-Each case in `testdata/acks_vectors.json` must encode to exactly the field given and decode back
-under both the spec's parser and the strict one. -/
+Checks `testdata/acks_vectors.json`. Valid cases must encode exactly and decode under both
+parsers; lenient fields decode only under the spec's parser; malformed fields decode under
+neither. -/
 
 open Lean
 open CryptWalker.GroupChat.AckCodec
 open CryptWalker.Util.newhex
-
-/-- The contents of a CBOR byte string. -/
-def cborBytes (b : List ℕ) : Option (List ℕ) :=
-  match b with
-  | h :: rest =>
-    if 0x40 ≤ h ∧ h < 0x58 then some rest
-    else if h = 0x58 then some (rest.drop 1)
-    else if h = 0x59 then some (rest.drop 2)
-    else if h = 0x5a then some (rest.drop 4)
-    else none
-  | [] => none
 
 def hexNats (s : String) : Except String (List ℕ) :=
   match hexStringToByteArray s with
   | some b => pure (b.toList.map (·.toNat))
   | none => throw s!"not valid hex: {s}"
 
-def runCase (j : Json) : Except String String := do
-  let name ← (← j.getObjVal? "name").getStr?
-  let v ← (← j.getObjVal? "value_size").getNat?
+def readAcks (j : Json) : Except String (List (ℕ × ℕ)) := do
   let raw ← (← j.getObjVal? "acks").getArr?
-  let mut acks : List (ℕ × List ℕ) := []
-  for pair in raw do
+  let acks ← raw.toList.mapM fun pair => do
     let p ← pair.getArr?
-    let i ← (p[0]!).getNat?
-    let value ← hexNats (← (p[1]!).getStr?)
-    acks := acks ++ [(i, value)]
-  let sorted := acks.mergeSort (fun a b => a.1 ≤ b.1)
-  let some field := cborBytes (← hexNats (← (← j.getObjVal? "cbor").getStr?))
-    | throw s!"{name}: not a CBOR byte string"
-  if encode sorted != field then throw s!"{name}: encodes differently"
-  if decode false v field != some sorted then throw s!"{name}: the spec's parser misreads it"
-  if decode true v field != some sorted then throw s!"{name}: the strict parser misreads it"
-  pure s!"{name} ({sorted.length} acknowledged, {field.length} bytes)"
+    pure ((← (p[0]!).getNat?), (← (p[1]!).getNat?))
+  pure (acks.mergeSort (fun a b => a.1 ≤ b.1))
+
+def caseOf (j : Json) : Except String (String × List ℕ) := do
+  pure ((← (← j.getObjVal? "name").getStr?), ← hexNats (← (← j.getObjVal? "field").getStr?))
+
+def valid (j : Json) : Except String String := do
+  let (name, field) ← caseOf j
+  let acks ← readAcks j
+  if encodeIdx64 acks != field then throw s!"{name}: encodes differently"
+  if decodeIdx64 false field != some acks then throw s!"{name}: the spec's parser misreads it"
+  if decodeIdx64 true field != some acks then throw s!"{name}: the strict parser misreads it"
+  pure s!"{name} ({acks.length} acknowledged, {field.length} bytes)"
+
+def lenient (j : Json) : Except String String := do
+  let (name, field) ← caseOf j
+  let acks ← readAcks j
+  if decodeIdx64 false field != some acks then throw s!"{name}: the spec's parser misreads it"
+  if decodeIdx64 true field != none then throw s!"{name}: the strict parser accepts it"
+  pure s!"{name} (lenient, refused by the strict parser)"
+
+def malformed (j : Json) : Except String String := do
+  let (name, field) ← caseOf j
+  if decodeIdx64 false field != none then throw s!"{name}: the spec's parser accepts it"
+  if decodeIdx64 true field != none then throw s!"{name}: the strict parser accepts it"
+  pure s!"{name} (malformed)"
 
 def main : IO UInt32 := do
   let text ← IO.FS.readFile "testdata/acks_vectors.json"
-  let cases ← IO.ofExcept do
+  let groups ← IO.ofExcept do
     let j ← Json.parse text
-    (← j.getObjVal? "cases").getArr?
+    pure [((← (← j.getObjVal? "valid").getArr?), valid),
+      ((← (← j.getObjVal? "lenient").getArr?), lenient),
+      ((← (← j.getObjVal? "malformed").getArr?), malformed)]
   let mut ok := true
-  for c in cases do
-    match runCase c with
-    | .ok msg => IO.println s!"  ok    {msg}"
-    | .error e => ok := false; IO.println s!"  FAIL  {e}"
+  let mut n := 0
+  for (cases, check) in groups do
+    for c in cases do
+      n := n + 1
+      match check c with
+      | .ok msg => IO.println s!"  ok    {msg}"
+      | .error e => ok := false; IO.println s!"  FAIL  {e}"
   if ok then
-    IO.println s!"all {cases.size} Acks vectors passed"
+    IO.println s!"all {n} Acks vectors passed"
     pure 0
   else
     IO.eprintln "some Acks vectors FAILED"

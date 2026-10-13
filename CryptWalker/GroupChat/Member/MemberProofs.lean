@@ -111,7 +111,7 @@ theorem good_read {m : Key} {r : Reader} (h : Good m r) : Good m r.read.1 := by
   · exact h
   · exact h.congr rfl rfl rfl rfl rfl
 
-theorem good_scan {m : Key} {r : Reader} (h : Good m r) (heard : List Index) (w : Nat) :
+theorem good_scan {m : Key} {r : Reader} (h : Good m r) (heard : List Nat) (w : Nat) :
     Good m (r.scan heard w).1 := by
   unfold Reader.scan; split_ifs <;> exact h.congr rfl rfl rfl rfl rfl
 
@@ -175,7 +175,7 @@ theorem keeps_started (m : Key) (i : Index) : Keeps (Group.started m i) := by
 /-- `modify` of a function that leaves readers alone. -/
 macro "frame" : tactic => `(tactic| (apply Keeps.frame; intro _; rfl))
 
-theorem takeAck_readers (s : Key) (g : Group) (a : Nat × Index) : (g.takeAck s a).readers = g.readers := by
+theorem takeAck_readers (s : Key) (g : Group) (a : Nat × Nat) : (g.takeAck s a).readers = g.readers := by
   unfold Group.takeAck; split <;> (try split_ifs) <;> (try split) <;> rfl
 
 theorem keeps_followIfNew (rc : ByteArray) : Keeps (Group.followIfNew rc) := by
@@ -549,11 +549,11 @@ theorem Reachable.ok {g : Group} : Reachable g → ReadersOK g.readers
 /-- Every acknowledgement a reachable member sends names a box its reader of that stream read,
 along with every box before it. -/
 theorem acks_sent_safe {g : Group} (hg : Reachable g) (p : Pending) :
-    ∀ x ∈ (g.acksOf p).1, ∃ m r h, (x.1, some m) ∈ g.rosters.known g.me ∧
-      g.readers.get? m = some r ∧ r.stream = m ∧ Inv r h ∧ Safe h (some x.2) := by
+    ∀ x ∈ (g.acksOf p).1, ∃ m r h b, (x.1, some m) ∈ g.rosters.known g.me ∧
+      g.readers.get? m = some r ∧ r.stream = m ∧ Inv r h ∧ counter b = x.2 ∧ Safe h (some b) := by
   intro x hx
-  obtain ⟨m, r, hk, hr, hrun⟩ := acksOf_runs g p x hx
+  obtain ⟨m, r, b, hk, hr, hrun, hb⟩ := acksOf_runs g p x hx
   obtain ⟨hs, h, inv⟩ := hg.ok m r hr
-  exact ⟨m, r, h, hk, hr, hs, inv, hrun ▸ run_safe inv⟩
+  exact ⟨m, r, h, b, hk, hr, hs, inv, hb, hrun ▸ run_safe inv⟩
 
 end CryptWalker.GroupChat.Member

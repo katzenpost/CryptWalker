@@ -124,7 +124,7 @@ def joined (readCap : ByteArray) (reply : JoinReply) (policy : Retention := {})
 
 /-! ## Reading -/
 
-def heard (g : Group) (stream : Key) : List Index := (g.ledger.heard.getD stream {}).values
+def heard (g : Group) (stream : Key) : List Nat := (g.ledger.heard.getD stream {}).values
 
 def setReader (r : Reader) : GM Unit := modify fun g => { g with readers := g.readers.set r.stream r }
 
@@ -193,13 +193,11 @@ def introduced (introducer : Key) (index : Index) (intro : Introduction) : GM Un
 
 /-- Take one acknowledgement `sender` sent: of our own stream, it counts only for a box the
 Sent-box check finds; of another's, it is heard. -/
-def takeAck (sender : Key) (g : Group) (a : Nat × Index) : Group :=
+def takeAck (sender : Key) (g : Group) (a : Nat × Nat) : Group :=
   match g.rosters.resolve sender a.1 with
   | some acked =>
     if acked = g.me then
-      match g.sent.check a.2 with
-      | some seq => { g with ledger := g.ledger.acked sender seq }
-      | none => g
+      if g.sent.checkAt a.2 then { g with ledger := g.ledger.acked sender a.2 } else g
     else { g with ledger := g.ledger.hear acked a.2 sender }
   | none => g
 
@@ -296,18 +294,18 @@ def introduction (name : String) (readCap : ByteArray) : GM (Message × Pending)
   pure (g.introductionOf name readCap)
 
 /-- Acknowledge every stream we read whose run has moved on since we last did: the
-acknowledgements, keyed by our roster index, what the message does once written, and the ledger
-after. -/
-def acksOf (g : Group) (pending : Pending) : List (Nat × Index) × Pending × Ledger :=
+acknowledgements, keyed by our roster index and naming each box by its `Idx64`, what the message
+does once written, and the ledger after. -/
+def acksOf (g : Group) (pending : Pending) : List (Nat × Nat) × Pending × Ledger :=
   (g.rosters.known g.me).foldl
-    (fun (acc : List (Nat × Index) × Pending × Ledger) (e : Nat × Option Key) =>
+    (fun (acc : List (Nat × Nat) × Pending × Ledger) (e : Nat × Option Key) =>
       match e.2.bind g.readers.get? with
       | none => acc
       | some r =>
         match acc.2.2.owed r.stream r.run with
         | none => acc
         | some owed =>
-          (acc.1 ++ [(e.1, owed)],
+          (acc.1 ++ [(e.1, counter owed)],
             { acc.2.1 with acks := acc.2.1.acks.set r.stream (acc.2.2.published.get? r.stream, owed) },
             acc.2.2.publish r.stream owed))
     ([], pending, g.ledger)
@@ -457,9 +455,9 @@ def remove (member : Key) : GM Unit := modify fun g =>
   { g with rosters := rosters, readers := g.readers.erase member, ledger := g.ledger.forget member,
            unnumbered := g.unnumbered.filter fun at_ => rosters.introductions.get? at_ ≠ some token }
 
-def everyoneAcked (g : Group) (seq : Nat) : Bool :=
+def everyoneAcked (g : Group) (idx64 : Nat) : Bool :=
   g.readers.keys.all fun k => match g.ledger.ackedBy.get? k with
-    | some s => seq ≤ s
+    | some s => idx64 ≤ s
     | none => false
 
 def onEpoch (epoch : Nat) : GM (List Effect) := do
@@ -472,7 +470,7 @@ def onEpoch (epoch : Nat) : GM (List Effect) := do
   set { g with received := g.received.filter fun k _ => !expired.contains k }
   let effects := expired.map fun (sender, index) => Effect.expire sender index
   let g ← get
-  let (sent, backfill) := g.sent.backfill epoch
+  let (sent, backfill) := g.sent.backfill epoch g.everyoneAcked
   set { g with sent := sent }
   pure (effects ++ backfill)
 

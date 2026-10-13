@@ -290,7 +290,7 @@ theorem read_inv {r : Reader} {h : History} (inv : Inv r h) : Inv r.read.1 h := 
   · exact inv
   · exact inv.congr rfl rfl rfl rfl
 
-theorem scan_inv {r : Reader} {h : History} (inv : Inv r h) (heard : List Index) (window : Nat) :
+theorem scan_inv {r : Reader} {h : History} (inv : Inv r h) (heard : List Nat) (window : Nat) :
     Inv (r.scan heard window).1 h := by
   unfold Reader.scan; split_ifs <;> exact inv.congr rfl rfl rfl rfl
 

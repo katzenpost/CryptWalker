@@ -41,8 +41,8 @@ inductive Event
   /-- The result of `Effect.readBox`, with the index after it. -/
   | boxRead (stream : Key) (index : Index) (result : ReadResult) (next : Option Index)
   | indexesDerived (stream : Key) (indexes : List Index)
-  /-- The result of `Effect.walk`: the furthest target met, the indexes passed on the way (the
-  last `keep` of them), and how many steps it took. -/
+  /-- The result of `Effect.walk`: the box at the furthest target `Idx64` within reach, the
+  indexes before it (the last `keep` of them), and how many steps ahead it is. -/
   | walked (stream : Key) (target : Option Index) (skipped : List Index) (steps : Nat)
   | invite (name : String) (readCap : ByteArray)
   | introduce (name : String) (readCap : ByteArray)
@@ -63,7 +63,7 @@ inductive Effect
   | writeTombstone (index : Index)
   | readBox (stream : Key) (readCap : ByteArray) (index : Index) (recheck : Bool)
   | deriveIndexes (stream : Key) (start : Index) (count : Nat)
-  | walk (stream : Key) (start : Index) (targets : List Index) (keep : Nat)
+  | walk (stream : Key) (start : Index) (targets : List Nat) (keep : Nat)
   | deliver (sender : Key) (index : Index) (content : ByteArray)
   | expire (sender : Key) (index : Index)
   | sendJoinReply (to : ByteArray) (reply : JoinReply)

@@ -71,10 +71,6 @@ katzenpost_pairs=(
   "testdata/lean_kem_hybrid_vectors.json                     core/sphinx/testdata/lean_kem_hybrid_vectors.json"
 )
 
-# acks_vectors.json comes from katzenqt#108 until it merges.
-katzenqt_pairs=(
-  "testdata/acks_vectors.json                                tests/data/acks_vectors.json"
-)
 
 sha256_of() {
   if [ ! -f "$1" ]; then
@@ -116,7 +112,27 @@ check_group() {
 ok=1
 check_group "hpqc" "$HPQC_DIR" hpqc_pairs || ok=0
 check_group "katzenpost" "$KATZENPOST_DIR" katzenpost_pairs || ok=0
-check_group "katzenqt" "$KATZENQT_DIR" katzenqt_pairs || ok=0
+
+# acks_vectors.json is generated from katzenqt's Python codec, the only one that
+# implements the counted Idx64 layout: regenerate it and compare.
+check_acks() {
+  printf '\n== katzenqt (%s) ==\n' "$KATZENQT_DIR"
+  if [ ! -f "$KATZENQT_DIR/src/katzenqt/ack_codec.py" ]; then
+    printf '  SKIP  %s not found -- pass its path as an argument or set the env var\n' "$KATZENQT_DIR"
+    return 1
+  fi
+  local a b
+  a=$(sha256_of testdata/acks_vectors.json)
+  b=$(python3 -I scripts/gen_acks_vectors.py "$KATZENQT_DIR" | sha256sum | cut -d' ' -f1)
+  if [ "$a" = "$b" ]; then
+    printf '  MATCH     testdata/acks_vectors.json\n'
+  else
+    printf '  MISMATCH  testdata/acks_vectors.json\n'
+    printf '            CryptWalker: %s\n            regenerated: %s\n' "$a" "$b"
+    return 1
+  fi
+}
+check_acks || ok=0
 
 echo
 if [ "$ok" -eq 1 ]; then
