@@ -72,6 +72,7 @@ import CryptWalker.Pigeonhole.Protocol
 import CryptWalker.Pigeonhole.Semantics
 import CryptWalker.Sphinx.sphinx
 import CryptWalker.Sphinx.geometry
+import CryptWalker.Sphinx.geometry_cbor
 import CryptWalker.Sphinx.integrity
 import CryptWalker.Sphinx.indistinguishability
 import CryptWalker.Sphinx.wrap_resistance

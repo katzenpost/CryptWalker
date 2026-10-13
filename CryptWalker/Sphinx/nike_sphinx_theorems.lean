@@ -2856,12 +2856,13 @@ noncomputable def nikeSphinxSchemeOf (nike : NIKE) (cipher : WideBlockCipher) (m
         payload1 st pkt0 pkt1 st0' st1' hvalid hmactag h0 h1)
   nike := nike
 
-/-- `NIKESphinxScheme` for the NIKE named by `geom.scheme`, with AEZ, HMAC-SHA256,
+/-- `NIKESphinxScheme` for the NIKE named by `geom.nikeName`, with AEZ, HMAC-SHA256,
 HKDF-SHA256-Expand and AES-256-CTR. Rejects a `geom` not valid for that NIKE. -/
 noncomputable def nikeSphinxScheme (geom : Geometry) : Except String NIKESphinxScheme :=
-  match geom.scheme with
-  | .inr name => throw s!"sphinx: geometry scheme {name} is a KEM, not a NIKE"
-  | .inl name =>
+  if geom.nikeName.isEmpty then
+    throw s!"sphinx: geometry scheme {geom.kemName} is a KEM, not a NIKE"
+  else
+    let name := geom.nikeName
     match CryptWalker.NIKE.byName name with
     | none => throw s!"sphinx: NIKE scheme {name} not implemented"
     | some nike =>

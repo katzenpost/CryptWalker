@@ -2519,12 +2519,13 @@ def kemSphinxSchemeOf (kem : KEM) (cipher : WideBlockCipher) (macS : MAC) (kdfS 
     not_wrap_resistant := fun key iv target =>
       xorBytes_achieves_any_target (streamS.keystream key iv target.size) target }
 
-/-- A `KEMSphinxScheme` for the KEM `geom.scheme` names, with AEZ, HMAC-SHA256,
+/-- A `KEMSphinxScheme` for the KEM `geom.kemName` names, with AEZ, HMAC-SHA256,
 HKDF-SHA256-Expand and AES-256-CTR. Rejects a `geom` that fails the validity checks. -/
 def kemSphinxScheme (geom : Geometry) : Except String KEMSphinxScheme :=
-  match geom.scheme with
-  | .inl name => throw s!"sphinx: geometry scheme {name} is a NIKE, not a KEM"
-  | .inr name =>
+  if geom.kemName.isEmpty then
+    throw s!"sphinx: geometry scheme {geom.nikeName} is a NIKE, not a KEM"
+  else
+    let name := geom.kemName
     match CryptWalker.KEM.byName name with
     | none => throw s!"sphinx: KEM scheme {name} not implemented"
     | some kem =>

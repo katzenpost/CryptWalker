@@ -23,8 +23,7 @@ def schemeNames : List String :=
 
 /-- The Sphinx scheme a `Geometry` names. -/
 noncomputable def sphinxScheme (geom : Geometry) : Except String (NIKESphinxScheme ⊕ KEMSphinxScheme) :=
-  match geom.scheme with
-  | .inl _ => (nikeSphinxScheme geom).map Sum.inl
-  | .inr _ => (kemSphinxScheme geom).map Sum.inr
+  if geom.nikeName.isEmpty then (kemSphinxScheme geom).map Sum.inr
+  else (nikeSphinxScheme geom).map Sum.inl
 
 end CryptWalker.Sphinx.Schemes
