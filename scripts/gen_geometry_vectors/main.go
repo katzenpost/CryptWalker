@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Writes testdata/sphinx_geometry.json: Sphinx geometries built by katzenpost's
-// core/sphinx/geo, each with its canonical CBOR encoding and Hash().
+// core/sphinx/geo, each with its CBOR encoding, its canonical encoding and Hash().
 package main
 
 import (
@@ -25,6 +25,7 @@ type vector struct {
 	NrHops                   int           `json:"nr_hops"`
 	Geometry                 *geo.Geometry `json:"geometry"`
 	CBOR                     string        `json:"cbor"`
+	CanonicalCBOR            string        `json:"canonical_cbor"`
 	Hash                     string        `json:"hash"`
 }
 
@@ -56,12 +57,16 @@ func main() {
 		if err := g.Validate(); err != nil {
 			panic(err)
 		}
-		blob, err := enc.Marshal(g)
+		canonical, err := enc.Marshal(g)
+		if err != nil {
+			panic(err)
+		}
+		blob, err := cbor.Marshal(g)
 		if err != nil {
 			panic(err)
 		}
 		out = append(out, vector{name, isKEM, payload, withSURB, hops, g,
-			hex.EncodeToString(blob), hex.EncodeToString(g.Hash())})
+			hex.EncodeToString(blob), hex.EncodeToString(canonical), hex.EncodeToString(g.Hash())})
 	}
 	for _, payload := range []int{0, 2000, 30000} {
 		for _, withSURB := range []bool{false, true} {

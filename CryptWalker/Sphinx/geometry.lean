@@ -36,7 +36,7 @@ structure Geometry where
   nikeName                    : String
   /-- The KEM scheme name; empty for a NIKE geometry. -/
   kemName                     : String
-  deriving Repr, DecidableEq
+  deriving Repr, DecidableEq, Inhabited
 
 /-- The payload size a SURB-carrying packet needs to deliver `userForwardPayloadLength` bytes. -/
 private def deriveForwardPayloadLength (surbLen userForwardPayloadLength : Nat) : Nat :=

@@ -51,15 +51,18 @@ def checkVector (j : Json) : Except String Unit := do
   let hops ← natField j "nr_hops"
   let want ← geometryOfJson (← j.getObjVal? "geometry")
   let cbor ← hexField j "cbor"
+  let canonical ← hexField j "canonical_cbor"
   let hash ← hexField j "hash"
   let name := if isKEM then want.kemName else want.nikeName
   let built ← if isKEM then ofKEM name payload withSURB hops else ofNIKE name payload withSURB hops
   let label := s!"{name} payload={payload} surb={withSURB} hops={hops}"
   if built != want then throw s!"{label}: built geometry differs"
   if (serialise want).data != cbor.data then throw s!"{label}: encoding differs"
-  match deserialise (α := Geometry) cbor with
-  | .error e => throw s!"{label}: decode failed: {e.msg}"
-  | .ok g => if g != want then throw s!"{label}: decoded geometry differs"
+  if want.canonical.data != canonical.data then throw s!"{label}: canonical encoding differs"
+  for (which, bytes) in [("encoding", cbor), ("canonical encoding", canonical)] do
+    match deserialise (α := Geometry) bytes with
+    | .error e => throw s!"{label}: {which} decode failed: {e.msg}"
+    | .ok g => if g != want then throw s!"{label}: {which} decodes differently"
   if want.hash.toArray != hash.data then throw s!"{label}: hash differs"
   want.validate.mapError (s!"{label}: validate: " ++ ·)
 
