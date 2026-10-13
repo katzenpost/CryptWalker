@@ -28,6 +28,7 @@ TESTS := \
 	CryptWalker.Sphinx.crypto_test \
 	CryptWalker.WideBlockCipher.test \
 	CryptWalker.Sphinx.commands_test \
+	CryptWalker.Sphinx.geometry_test \
 	CryptWalker.Sphinx.nike_selftest \
 	CryptWalker.Sphinx.kem_selftest \
 	CryptWalker.Sphinx.nike_vectors_test \

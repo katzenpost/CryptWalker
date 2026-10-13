@@ -20,21 +20,23 @@ Every fixed byte offset of the header, routing-info, and packet layout, computed
 count, a payload size, and a NIKE or KEM. -/
 
 structure Geometry where
-  /-- The scheme name: `Sum.inl` for a NIKE, `Sum.inr` for a KEM. -/
-  scheme                       : String ⊕ String
   packetLength                : Nat
   nrHops                      : Nat
-  headerLength                 : Nat
-  routingInfoLength            : Nat
-  perHopRoutingInfoLength      : Nat
-  surbLength                   : Nat
-  sphinxPlaintextHeaderLength  : Nat
-  payloadTagLength             : Nat
-  forwardPayloadLength         : Nat
-  userForwardPayloadLength     : Nat
-  nextNodeHopLength            : Nat
-  sprpKeyMaterialLength        : Nat
-  deriving Repr
+  headerLength                : Nat
+  routingInfoLength           : Nat
+  perHopRoutingInfoLength     : Nat
+  surbLength                  : Nat
+  sphinxPlaintextHeaderLength : Nat
+  payloadTagLength            : Nat
+  forwardPayloadLength        : Nat
+  userForwardPayloadLength    : Nat
+  nextNodeHopLength           : Nat
+  sprpKeyMaterialLength       : Nat
+  /-- The NIKE scheme name; empty for a KEM geometry. -/
+  nikeName                    : String
+  /-- The KEM scheme name; empty for a NIKE geometry. -/
+  kemName                     : String
+  deriving Repr, DecidableEq, Inhabited
 
 /-- The payload size a SURB-carrying packet needs to deliver `userForwardPayloadLength` bytes. -/
 private def deriveForwardPayloadLength (surbLen userForwardPayloadLength : Nat) : Nat :=
@@ -49,8 +51,7 @@ private def buildNIKE (name : String) (nikePublicKeySize userForwardPayloadLengt
   let forwardPayload :=
     if withSURB then deriveForwardPayloadLength surb userForwardPayloadLength
     else userForwardPayloadLength
-  { scheme := .inl name
-    packetLength := header + payloadTagLength + forwardPayload
+  { packetLength := header + payloadTagLength + forwardPayload
     nrHops
     headerLength := header
     routingInfoLength := routingInfo
@@ -61,7 +62,9 @@ private def buildNIKE (name : String) (nikePublicKeySize userForwardPayloadLengt
     forwardPayloadLength := forwardPayload
     userForwardPayloadLength := userForwardPayloadLength
     nextNodeHopLength := nextNodeHopLength
-    sprpKeyMaterialLength := sprpKeyMaterialLength }
+    sprpKeyMaterialLength := sprpKeyMaterialLength
+    nikeName := name
+    kemName := "" }
 
 private def buildKEM (name : String) (kemCiphertextSize userForwardPayloadLength : Nat)
     (withSURB : Bool) (nrHops : Nat) : Geometry :=
@@ -72,8 +75,7 @@ private def buildKEM (name : String) (kemCiphertextSize userForwardPayloadLength
   let forwardPayload :=
     if withSURB then deriveForwardPayloadLength surb userForwardPayloadLength
     else userForwardPayloadLength
-  { scheme := .inr name
-    packetLength := header + payloadTagLength + forwardPayload
+  { packetLength := header + payloadTagLength + forwardPayload
     nrHops
     headerLength := header
     routingInfoLength := routingInfo
@@ -84,7 +86,9 @@ private def buildKEM (name : String) (kemCiphertextSize userForwardPayloadLength
     forwardPayloadLength := forwardPayload
     userForwardPayloadLength := userForwardPayloadLength
     nextNodeHopLength := nextNodeHopLength
-    sprpKeyMaterialLength := sprpKeyMaterialLength }
+    sprpKeyMaterialLength := sprpKeyMaterialLength
+    nikeName := ""
+    kemName := name }
 
 /-- Geometry for a NIKE named `nikeSchemeName`, with the given user payload length. -/
 def ofNIKE (nikeSchemeName : String) (userForwardPayloadLength : Nat) (withSURB : Bool)
@@ -131,6 +135,37 @@ def ofKEMTargetSize (kemSchemeName : String) (targetPacketLength : Nat) (withSUR
     else
       pure (buildKEM kemSchemeName scheme.ciphertextSize
         (targetPacketLength - probe.packetLength) withSURB nrHops)
+
+/-- Checks that exactly one scheme name is set, that it names a registered scheme, and that the
+header dimensions are nonzero. -/
+def Geometry.validate (g : Geometry) : Except String Unit := do
+  if g.nikeName.isEmpty && g.kemName.isEmpty then
+    throw "geometry NIKEName or KEMName must be set"
+  if !g.nikeName.isEmpty && !g.kemName.isEmpty then
+    throw "geometry NIKEName and KEMName must not both be set"
+  if !g.nikeName.isEmpty then
+    if (CryptWalker.NIKE.byName g.nikeName).isNone then
+      throw s!"geometry has invalid NIKE Scheme {g.nikeName}"
+  else if (CryptWalker.KEM.byName g.kemName).isNone then
+    throw s!"geometry has invalid KEM Scheme {g.kemName}"
+  if g.packetLength == 0 then throw "geometry has PacketLength of 0"
+  if g.nrHops == 0 then throw "geometry has NrHops of 0"
+  if g.headerLength == 0 then throw "geometry has HeaderLength of 0"
+  if g.routingInfoLength == 0 then throw "geometry has RoutingInfoLength of 0"
+  if g.perHopRoutingInfoLength == 0 then throw "geometry has PerHopRoutingInfoLength of 0"
+
+instance : ToString Geometry where
+  toString g :=
+    "sphinx_packet_geometry:\n" ++
+    s!"packet size: {g.packetLength}\n" ++
+    s!"number of hops: {g.nrHops}\n" ++
+    s!"header size: {g.headerLength}\n" ++
+    s!"forward payload size: {g.forwardPayloadLength}\n" ++
+    s!"user forward payload size: {g.userForwardPayloadLength}\n" ++
+    s!"payload tag size: {g.payloadTagLength}\n" ++
+    s!"routing info size: {g.routingInfoLength}\n" ++
+    s!"surb size: {g.surbLength}\n" ++
+    s!"sphinx plaintext header size: {g.sphinxPlaintextHeaderLength}\n"
 
 open CryptWalker.NIKE.NIKE (NIKE)
 open CryptWalker.KEM.KEM (KEM)

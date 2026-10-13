@@ -16,6 +16,11 @@ name = "VCVio"
 git = "https://github.com/dtumad/VCV-io.git"
 rev = "main"
 
+[[require]]
+name = "cborg"
+git = "https://github.com/katzenpost/cborg.git"
+rev = "main"
+
 # Declared last: VCVio pins mathlib v4.33.1, so this direct requirement (matching that pin)
 # must come after VCVio's for Lake's reverse-declaration-order precedence to keep it authoritative.
 [[require]]
@@ -81,6 +86,9 @@ name = "CryptWalker.WideBlockCipher.test"
 
 [[lean_exe]]
 name = "CryptWalker.Sphinx.commands_test"
+
+[[lean_exe]]
+name = "CryptWalker.Sphinx.geometry_test"
 
 [[lean_exe]]
 name = "CryptWalker.Sphinx.nike_selftest"
