@@ -42,6 +42,10 @@ one reader, or one replica's storage rule.
 | `Backfill.lean` | Protocol section vs implementation section | One box at one replica: the storage the spec assumes, against `katzenpost/replica/state.go`'s write rule |
 | `Member/` | Implementation | katzenqt's group member (`groupchat/group.py`, with `reader.py`, `numbering.py`, `sentbox.py`, `ledger.py`, `wire.py`, `events.py`), executable and replayed against katzenqt |
 | `Member/Wire.lean` | Protocol section, as katzenqt implements it | The `Numbers` and `IntroducedAt` wire formats |
+| `Member/Gcm.lean`, `Member/Cbor.lean` | Implementation section | katzenqt's `GroupChatMessage` CBOR and box framing (`models.py`), and its `GcmCodec` between a message and what a member reads of it (`acks.py`) |
+| `Member/AckBytes.lean` | Implementation section | The executable `Acks` codec, the same functions as `AckCodec.lean` without Mathlib |
+| `Member/Membership.lean`, `Member/ReplyWho.lean` | Implementation section | katzenqt's membership hash, and its reply to a new member (`GroupChatReplyWho`) with the `JoinReply` it carries |
+| `Member/Walk.lean`, `Member/Persist.lean` | For clients | A walk and index derivation over any way of stepping an index, and a member's state as CBOR |
 | `tla/protocol/Replica.tla` | Protocol section | One box at one replica, with the storage the spec assumes (`SpecStored`) |
 | `tla/protocol/Backfill.tla` | Protocol section | One member's stream: periodic rewrite, Sent-box retention, acknowledgements, and readers' jumps, rechecks and scans |
 | `tla/protocol/GroupChat.tla` | Protocol | Rosters across a whole group: explicit numbering, Introductions, `IntroducedAt`, the reply to a new member, and every member following every roster |
@@ -113,7 +117,12 @@ Proved of `Member/`, the model katzenqt's traces are replayed through.
 - **Names are right in the member too.** `Roster.resolve_sound`, carried to the member's rosters
   (`GroupProofs.resolve_sound`).
 - **The wire formats round trip.** `Numbers` and `IntroducedAt` decode back to what was encoded
-  (`decodeNumbers_encodeNumbers`, `decodeIntroducedAt_encodeIntroducedAt`).
+  (`decodeNumbers_encodeNumbers`, `decodeIntroducedAt_encodeIntroducedAt`). So does every
+  `GroupChatMessage` this client writes (`Gcm.decode_encode`), on CBOR headers that read back as
+  written (`Cbor.readHeader_header`).
+- **The executable `Acks` codec is the proved one.** `AckBytes` computes `AckCodec`'s encoding and
+  its spec parser (`AckBytes.encodeNat_eq`, `AckBytes.decodeNat_eq`), so `AckCodec`'s theorems
+  hold of the codec a client runs (`AckBytes.decodeNat_encodeNat`).
 
 ### Of the katzenpost replica
 
@@ -148,12 +157,18 @@ writes the same bytes, even for a box that points to a large message's own strea
 replays fresh random runs (`tests/test_groupchat_trace.py`, with `CRYPTWALKER` set).
 `ack_codec_test.lean` checks the `Acks` codec against vectors from katzenqt's Python codec, the
 only one that implements the counted `Idx64` layout: fields it writes, fields its parser accepts
-though it never writes them, and fields it refuses. `scripts/gen_acks_vectors.py` generates them,
-and `make verify-vectors` regenerates them and compares.
+though it never writes them, and fields it refuses, under both `AckCodec` and `AckBytes`.
+`scripts/gen_acks_vectors.py` generates them, and `make verify-vectors` regenerates them and
+compares. `wire_vectors_test.lean` checks `Gcm`, `Membership` and `ReplyWho` against vectors from
+katzenqt itself: each message reads as katzenqt reads it and is written back as katzenqt writes
+it, and each reply carries the `JoinReply` katzenqt takes from it. `make
+gen-groupchat-wire-vectors` regenerates them with katzenqt's Python. The replay also checks that
+every state it reaches loads as `Persist` saved it.
 
 ```
 lake exe CryptWalker.GroupChat.replay        # every trace in testdata/groupchat_traces/
 lake exe CryptWalker.GroupChat.ack_codec_test
+lake exe CryptWalker.GroupChat.wire_vectors_test
 make axioms
 ```
 

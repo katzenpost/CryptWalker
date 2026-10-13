@@ -7,12 +7,15 @@ import Lean.Data.Json
 
 import CryptWalker.BACAP.API
 import CryptWalker.GroupChat.Member.Json
+import CryptWalker.GroupChat.Member.Persist
+import CryptWalker.GroupChat.Member.Walk
 import CryptWalker.Util.Bytes
 
 /-! # Replay katzenqt group chat traces
 
 Each trace line is one call on a member. The replay makes the same call on the Lean `Group` and
-requires the same result and state, and checks the trace's BACAP steps against our BACAP.
+requires the same result and state, checks the trace's BACAP steps against our BACAP, and checks
+that each state loads as it was saved.
 
 Usage: `lake exe CryptWalker.GroupChat.replay [trace.jsonl | dir]...`, by default every trace in
 `testdata/groupchat_traces/`. -/
@@ -28,34 +31,13 @@ def step (b : ByteArray) : Option ByteArray := do
   let n ← (unmarshalMessageBoxIndex (CryptWalker.Util.Bytes.toVecN _ b)).nextIndex
   pure (CryptWalker.Util.Bytes.ofVector (marshalMessageBoxIndex n))
 
-/-- How far ahead a walk reaches. -/
-def walkLimit : Nat := 256
-
-/-- The box at the furthest of `targets` fewer than `walkLimit` boxes ahead of `start`, the last
-`keep` indexes before it (all for `keep = 0`), and the step count. -/
+/-- What BACAP says `Effect.walk` finds. -/
 def walk (start : ByteArray) (targets : List Nat) (keep : Nat) :
-    Option (Option ByteArray × List ByteArray × Nat) := do
-  if start.size ≠ MessageBoxIndexSize then none
-  let s := unmarshalMessageBoxIndex (CryptWalker.Util.Bytes.toVecN _ start)
-  let here := s.idx64.toNat
-  match (targets.filter fun t => here ≤ t && t < here + walkLimit).max? with
-  | none => pure (none, [], 0)
-  | some target =>
-    let first := if keep = 0 then here else max here (target - keep)
-    let mut index ← s.advanceIndexTo first.toUInt64
-    let mut skipped : Array ByteArray := #[]
-    for _ in [first:target] do
-      skipped := skipped.push (CryptWalker.Util.Bytes.ofVector (marshalMessageBoxIndex index))
-      index ← index.nextIndex
-    pure (some (CryptWalker.Util.Bytes.ofVector (marshalMessageBoxIndex index)), skipped.toList,
-      target - here)
+    Option (Option ByteArray × List ByteArray × Nat) :=
+  if start.size ≠ MessageBoxIndexSize then none else walkWith step start targets keep
 
 /-- `count` indexes after `start`. -/
-def derive (start : ByteArray) : Nat → Option (List ByteArray)
-  | 0 => pure []
-  | n + 1 => do
-    let next ← step start
-    pure (next :: (← derive next n))
+def derive (start : ByteArray) (count : Nat) : Option (List ByteArray) := deriveWith step start count
 
 /-- What a member has asked BACAP for and not yet been told. -/
 structure Asked where
@@ -190,6 +172,8 @@ def replay (path : System.FilePath) : IO (Nat × Nat × Option String) := do
         return ← fail s!"{who} {callName}: {d}"
       if let some d := diff "state" (group g) (line.getObjValD "state") then
         return ← fail s!"{who} {callName}: {d}"
+      unless Persist.load (Persist.save g) == some g do
+        return ← fail s!"{who} {callName}: the state does not load as it was saved"
       match checkBACAP asked line effects with
       | .error e => return ← fail s!"{who} {callName}: {e}"
       | .ok (c, asked) =>

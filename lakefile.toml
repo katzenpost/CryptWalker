@@ -155,3 +155,6 @@ name = "CryptWalker.GroupChat.ack_codec_test"
 
 [[lean_exe]]
 name = "CryptWalker.GroupChat.replay"
+
+[[lean_exe]]
+name = "CryptWalker.GroupChat.wire_vectors_test"

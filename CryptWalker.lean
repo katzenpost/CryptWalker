@@ -91,3 +91,10 @@ import CryptWalker.GroupChat.Member.DictProofs
 import CryptWalker.GroupChat.Member.ReaderProofs
 import CryptWalker.GroupChat.Member.GroupProofs
 import CryptWalker.GroupChat.Member.MemberProofs
+import CryptWalker.GroupChat.Member.Gcm
+import CryptWalker.GroupChat.Member.GcmProofs
+import CryptWalker.GroupChat.Member.AckBytesProofs
+import CryptWalker.GroupChat.Member.Membership
+import CryptWalker.GroupChat.Member.ReplyWho
+import CryptWalker.GroupChat.Member.Persist
+import CryptWalker.GroupChat.Member.Walk
