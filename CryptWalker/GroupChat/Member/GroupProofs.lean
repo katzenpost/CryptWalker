@@ -28,7 +28,8 @@ member of `Member/Group.lean`.
   when nothing composed before it is still to be written (the spec's "Waiting"), and
   `introduction_index_pending`: otherwise it gives a later one.
 * `retain_spec`: retention drops plaintext only once every member still read has acknowledged
-  it, or the policy has expired it; `backfill_once`: a box is rewritten at most once an epoch. -/
+  it, or the policy has expired it; `backfill_once`: a box is rewritten at most once an epoch;
+  `backfill_behind`: backfill writes content only to a box some member is behind on. -/
 
 namespace CryptWalker.GroupChat.Member
 
@@ -189,17 +190,15 @@ theorem acksOf_safe (g : Group) (p : Pending) (hist : Key → History)
 
 theorem takeAck_credit (sender : Key) (g : Group) (a : Nat × Nat) (m : Key) :
     (g.takeAck sender a).ledger.ackedBy.get? m = g.ledger.ackedBy.get? m ∨
-      (m = sender ∧ g.rosters.resolve sender a.1 = some g.me ∧ (g.sent.checkAt a.2).isSome) := by
+      (m = sender ∧ g.rosters.resolve sender a.1 = some g.me ∧ g.sent.checkAt a.2 = true) := by
   unfold Group.takeAck
   split
   · next acked hacked =>
-    split_ifs with hme
-    · split
-      · next seq hseq =>
-        by_cases hm : sender = m
-        · subst hm; exact Or.inr ⟨rfl, hme ▸ hacked, by simp [hseq]⟩
-        · left; simp [Ledger.acked, Dict.get?_set_ne _ _ hm]
-      · exact Or.inl rfl
+    split_ifs with hme hchk
+    · by_cases hm : sender = m
+      · subst hm; exact Or.inr ⟨rfl, hme ▸ hacked, hchk⟩
+      · left; simp [Ledger.acked, Dict.get?_set_ne _ _ hm]
+    · exact Or.inl rfl
     · exact Or.inl rfl
   · exact Or.inl rfl
 
@@ -209,7 +208,7 @@ check finds. -/
 theorem takeAcks_credit (sender : Key) :
     ∀ (acks : List (Nat × Nat)) (g : Group) (m : Key),
       (acks.foldl (Group.takeAck sender) g).ledger.ackedBy.get? m = g.ledger.ackedBy.get? m ∨
-        (m = sender ∧ ∃ a ∈ acks, g.rosters.resolve sender a.1 = some g.me ∧ (g.sent.checkAt a.2).isSome)
+        (m = sender ∧ ∃ a ∈ acks, g.rosters.resolve sender a.1 = some g.me ∧ g.sent.checkAt a.2 = true)
   | [], _, _ => Or.inl rfl
   | a :: as, g, m => by
     simp only [List.foldl_cons]
@@ -224,18 +223,54 @@ theorem takeAcks_credit (sender : Key) :
       rw [e2] at hchk
       exact Or.inr ⟨hm, b, List.mem_cons_of_mem _ hb, hres, hchk⟩
 
-theorem check_some {s : SentBox} {i : Index} {seq : Nat} (h : s.check i = some seq) :
-    ∃ r, (i, r) ∈ s.records.pairs ∧ r.seq = seq := by
+/-- Every record is kept under the `Idx64` of its own box. -/
+def SentBox.Keyed (s : SentBox) : Prop := ∀ k r, (k, r) ∈ s.records.pairs → counter r.index = k
+
+theorem keyed_record {s : SentBox} (hs : s.Keyed) (index : Index) (plaintext : Option Payload)
+    (control : Bool) (epoch : Nat) : (s.record index plaintext control epoch).Keyed := by
+  intro k r he
+  rcases Dict.mem_set he with he | he
+  · cases he; rfl
+  · exact hs k r he
+
+theorem keyed_retain {s : SentBox} (hs : s.Keyed) (epoch : Nat) (policy : Retention)
+    (acked : Nat → Bool) : (s.retain epoch policy acked).Keyed := by
+  intro k r he
+  unfold SentBox.retain at he
+  obtain ⟨r0, hr0, he2⟩ := Dict.mem_mapWithKey.1 he
+  have := hs k r0 (Dict.mem_filter.1 hr0).1
+  dsimp only at he2
+  rw [he2]
+  split_ifs <;> exact this
+
+theorem keyed_backfill {s : SentBox} (hs : s.Keyed) (epoch : Nat) (acked : Nat → Bool) :
+    (s.backfill epoch acked).1.Keyed := by
+  unfold SentBox.backfill
+  split_ifs
+  · exact hs
+  · intro k r he
+    obtain ⟨r0, hr0, he2⟩ := Dict.mem_mapWithKey.1 he
+    have := hs k r0 hr0
+    dsimp only at he2
+    rw [he2]
+    split_ifs <;> exact this
+
+/-- The Sent-box check finds a box the member wrote, and answers with its `Idx64`. -/
+theorem check_some {s : SentBox} {i : Index} {x : Nat} (h : s.check i = some x) :
+    ∃ r, (counter i, r) ∈ s.records.pairs ∧ r.index = i ∧ x = counter i := by
   unfold SentBox.check at h
-  obtain ⟨r, hr, rfl⟩ := Option.map_eq_some_iff.1 h
-  exact ⟨r, Dict.get?_eq_some hr, rfl⟩
+  split at h
+  · next r hr =>
+    split_ifs at h with hi
+    · cases h; exact ⟨r, Dict.get?_eq_some hr, hi, rfl⟩
+  · cases h
 
 /-- The Sent-box check by `Idx64` finds a box the member wrote, at that `Idx64`. -/
-theorem checkAt_some {s : SentBox} {idx64 seq : Nat} (h : s.checkAt idx64 = some seq) :
-    ∃ i r, (i, r) ∈ s.records.pairs ∧ counter i = idx64 ∧ r.seq = seq := by
+theorem checkAt_some {s : SentBox} (hs : s.Keyed) {idx64 : Nat} (h : s.checkAt idx64 = true) :
+    ∃ r, (idx64, r) ∈ s.records.pairs ∧ counter r.index = idx64 := by
   unfold SentBox.checkAt at h
-  obtain ⟨⟨i, r⟩, hf, rfl⟩ := Option.map_eq_some_iff.1 h
-  exact ⟨i, r, List.mem_of_find?_eq_some hf, by simpa using List.find?_some hf, rfl⟩
+  obtain ⟨r, hr⟩ := Dict.contains_iff.1 h
+  exact ⟨r, hr, hs idx64 r hr⟩
 
 /-! ## Numbering -/
 
@@ -323,21 +358,20 @@ theorem introduction_index_pending (g : Group) (name : String) (readCap : ByteAr
 /-! ## Retention and backfill -/
 
 /-- **Retention drops plaintext only when the spec allows**: every record after it was a record
-before, with the same box, order and kind, and its plaintext is unchanged, or gone because every
-member still read had acknowledged it or the policy expired it. Records older than the window are
-gone. -/
+before, with the same box and kind, and its plaintext is unchanged, or gone because every member
+still read had acknowledged it or the policy expired it. Records older than the window are gone. -/
 theorem retain_spec (s : SentBox) (epoch : Nat) (policy : Retention) (acked : Nat → Bool) :
     ∀ e ∈ (s.retain epoch policy acked).records.pairs, ∃ r0, (e.1, r0) ∈ s.records.pairs ∧
-      epoch ≤ r0.written + policy.window ∧ e.2.seq = r0.seq ∧ e.2.control = r0.control ∧
-      e.2.written = r0.written ∧
+      (∀ window, policy.window = some window → epoch ≤ r0.written + window) ∧
+      e.2.index = r0.index ∧ e.2.control = r0.control ∧ e.2.written = r0.written ∧
       (e.2.plaintext = r0.plaintext ∨ (e.2.plaintext = none ∧
         ((∃ keep, policy.keepSent = some keep ∧ r0.control = false ∧ r0.written + keep ≤ epoch) ∨
-          (policy.discardAcked = true ∧ acked r0.seq = true)))) := by
+          (policy.discardAcked = true ∧ acked e.1 = true)))) := by
   intro e he
   unfold SentBox.retain at he
-  obtain ⟨r0, hr0, he2⟩ := Dict.mem_mapValues.1 he
+  obtain ⟨r0, hr0, he2⟩ := Dict.mem_mapWithKey.1 he
   obtain ⟨hmem, hw⟩ := Dict.mem_filter.1 hr0
-  refine ⟨r0, hmem, by simpa using hw, ?_⟩
+  refine ⟨r0, hmem, fun window hwin => by simpa [hwin] using hw, ?_⟩
   rw [he2]
   dsimp only
   split_ifs with hx
@@ -352,14 +386,35 @@ theorem retain_spec (s : SentBox) (epoch : Nat) (policy : Retention) (acked : Na
     · exact Or.inr hx
   · exact ⟨rfl, rfl, rfl, Or.inl rfl⟩
 
-theorem backfill_of {s : SentBox} {epoch : Nat} (h : s.backfilled = some epoch) :
-    (s.backfill epoch).2 = [] := by
+theorem backfill_of {s : SentBox} {epoch : Nat} (acked : Nat → Bool) (h : s.backfilled = some epoch) :
+    (s.backfill epoch acked).2 = [] := by
   unfold SentBox.backfill; simp [h]
 
 /-- **A box is rewritten at most once an epoch.** -/
-theorem backfill_once (s : SentBox) (epoch : Nat) : ((s.backfill epoch).1.backfill epoch).2 = [] := by
+theorem backfill_once (s : SentBox) (epoch : Nat) (acked : Nat → Bool) :
+    ((s.backfill epoch acked).1.backfill epoch acked).2 = [] := by
   apply backfill_of
   unfold SentBox.backfill
   split_ifs with h <;> simp [h]
+
+/-- **Backfill writes a box every member has acknowledged only to erase it**: what it writes with
+content is a box some member is behind on. -/
+theorem backfill_behind (s : SentBox) (epoch : Nat) (acked : Nat → Bool) {i : Index} {p : Payload}
+    (h : Effect.writeBox i p ∈ (s.backfill epoch acked).2) :
+    ∃ k r, (k, r) ∈ s.records.pairs ∧ r.index = i ∧ r.plaintext = some p ∧ acked k = false := by
+  unfold SentBox.backfill at h
+  split_ifs at h
+  · simp at h
+  · obtain ⟨⟨k, r⟩, hmem, hf⟩ := List.mem_filterMap.1 h
+    have hmem := (List.mem_mergeSort.1 hmem)
+    dsimp only at hf
+    split_ifs at hf with hb hc
+    · cases hp : r.plaintext with
+      | none => simp [hp] at hf
+      | some q =>
+        simp only [hp, Option.some.injEq, Effect.writeBox.injEq] at hf
+        obtain ⟨rfl, rfl⟩ := hf
+        exact ⟨k, r, hmem, rfl, hp, by simpa using hb⟩
+    · simp at hf
 
 end CryptWalker.GroupChat.Member

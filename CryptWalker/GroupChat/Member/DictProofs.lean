@@ -126,6 +126,28 @@ theorem mem_mapValues {W : Type} {d : Dict K V} {f : V → W} {e : K × W} :
   · rintro ⟨⟨k', v⟩, hm, rfl, rfl⟩; exact ⟨v, hm, rfl⟩
   · rintro ⟨v, hm, rfl⟩; exact ⟨(k, v), hm, rfl, rfl⟩
 
+omit [DecidableEq K] in
+theorem mem_mapWithKey {W : Type} {d : Dict K V} {f : K → V → W} {e : K × W} :
+    e ∈ (d.mapWithKey f).pairs ↔ ∃ v, (e.1, v) ∈ d.pairs ∧ e.2 = f e.1 v := by
+  obtain ⟨k, w⟩ := e
+  unfold mapWithKey
+  simp only [List.mem_map, Prod.mk.injEq]
+  constructor
+  · rintro ⟨⟨k', v⟩, hm, rfl, rfl⟩; exact ⟨v, hm, rfl⟩
+  · rintro ⟨v, hm, rfl⟩; exact ⟨(k, v), hm, rfl, rfl⟩
+
+theorem mem_set {d : Dict K V} {k : K} {v : V} {e : K × V} (h : e ∈ (d.set k v).pairs) :
+    e = (k, v) ∨ e ∈ d.pairs := by
+  unfold set at h
+  split_ifs at h
+  · obtain ⟨p, hp, rfl⟩ := List.mem_map.1 h
+    split_ifs
+    · exact Or.inl rfl
+    · exact Or.inr hp
+  · rcases List.mem_append.1 h with h | h
+    · exact Or.inr h
+    · exact Or.inl (List.mem_singleton.1 h)
+
 theorem get?_setDefault_self (d : Dict K V) (k : K) (v : V) :
     (d.setDefault k v).get? k = some ((d.get? k).getD v) := by
   unfold setDefault contains

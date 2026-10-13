@@ -203,9 +203,7 @@ def takeAck (sender : Key) (g : Group) (a : Nat × Nat) : Group :=
   match g.rosters.resolve sender a.1 with
   | some acked =>
     if acked = g.me then
-      match g.sent.checkAt a.2 with
-      | some seq => { g with ledger := g.ledger.acked sender seq }
-      | none => g
+      if g.sent.checkAt a.2 then { g with ledger := g.ledger.acked sender a.2 } else g
     else { g with ledger := g.ledger.hear acked a.2 sender }
   | none => g
 
@@ -463,9 +461,9 @@ def remove (member : Key) : GM Unit := modify fun g =>
   { g with rosters := rosters, readers := g.readers.erase member, ledger := g.ledger.forget member,
            unnumbered := g.unnumbered.filter fun at_ => rosters.introductions.get? at_ ≠ some token }
 
-def everyoneAcked (g : Group) (seq : Nat) : Bool :=
+def everyoneAcked (g : Group) (idx64 : Nat) : Bool :=
   g.readers.keys.all fun k => match g.ledger.ackedBy.get? k with
-    | some s => seq ≤ s
+    | some s => idx64 ≤ s
     | none => false
 
 def onEpoch (epoch : Nat) : GM (List Effect) := do
@@ -478,7 +476,7 @@ def onEpoch (epoch : Nat) : GM (List Effect) := do
   set { g with received := g.received.filter fun k _ => !expired.contains k }
   let effects := expired.map fun (sender, index) => Effect.expire sender index
   let g ← get
-  let (sent, backfill) := g.sent.backfill epoch
+  let (sent, backfill) := g.sent.backfill epoch g.everyoneAcked
   set { g with sent := sent }
   pure (effects ++ backfill)
 

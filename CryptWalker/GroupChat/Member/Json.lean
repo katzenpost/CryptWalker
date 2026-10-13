@@ -99,13 +99,13 @@ def rosters (r : Rosters) : Json := Json.mkObj [
   ("keys", arr (r.keys.map hex))]
 
 def retention (p : Retention) : Json := Json.mkObj [
-  ("window", nat p.window), ("discard_acked", toJson p.discardAcked),
+  ("window", opt nat p.window), ("discard_acked", toJson p.discardAcked),
   ("keep_sent", opt nat p.keepSent), ("keep_received", opt nat p.keepReceived)]
 
 def sentBox (s : SentBox) : Json := Json.mkObj [
-  ("records", pairs hex (fun r => Json.mkObj [("seq", nat r.seq), ("plaintext", opt payload r.plaintext),
-    ("control", toJson r.control), ("written", nat r.written)]) s.records),
-  ("count", nat s.count),
+  ("records", pairs nat (fun r => Json.mkObj [("index", hex r.index),
+    ("plaintext", opt payload r.plaintext), ("control", toJson r.control),
+    ("written", nat r.written), ("settled", toJson r.settled)]) s.records),
   ("backfilled", match s.backfilled with
     | some e => nat e
     | none => toJson (-1 : Int))]
@@ -194,7 +194,7 @@ def readJoinReply (j : Json) : Parse JoinReply := do
 
 def readRetention (j : Json) : Parse Retention := do
   pure {
-    window := ← num (← field j "window")
+    window := ← optional num (← field j "window")
     discardAcked := ← (← field j "discard_acked").getBool?
     keepSent := ← optional num (← field j "keep_sent")
     keepReceived := ← optional num (← field j "keep_received") }

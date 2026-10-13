@@ -54,6 +54,9 @@ def filter (d : Dict K V) (p : K → V → Bool) : Dict K V := ⟨d.pairs.filter
 
 def mapValues {W : Type} (d : Dict K V) (f : V → W) : Dict K W := ⟨d.pairs.map fun e => (e.1, f e.2)⟩
 
+def mapWithKey {W : Type} (d : Dict K V) (f : K → V → W) : Dict K W :=
+  ⟨d.pairs.map fun e => (e.1, f e.1 e.2)⟩
+
 /-- Build a map from pairs in order, a later value for a key replacing an earlier one in place, as
 a Python dict comprehension does. -/
 def ofList (l : List (K × V)) : Dict K V := l.foldl (fun d e => d.set e.1 e.2) empty

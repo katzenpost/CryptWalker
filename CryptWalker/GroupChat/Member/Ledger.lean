@@ -20,8 +20,8 @@ inductive Induction | idle | catchingUp | inducting
 structure Ledger where
   /-- The last index acknowledged of each stream. -/
   published : Dict Key Index := {}
-  /-- How far each member has acknowledged our stream, in the order we wrote it, after the
-  Sent-box check. -/
+  /-- The `Idx64` of the last box of our stream each member has acknowledged, after the Sent-box
+  check. -/
   ackedBy : Dict Key Nat := {}
   /-- For each stream, the `Idx64` of the last box each other member acknowledged of it. -/
   heard : Dict Key (Dict Key Nat) := {}
@@ -50,10 +50,10 @@ def publish (l : Ledger) (stream : Key) (index : Index) : Ledger :=
 def hear (l : Ledger) (stream : Key) (idx64 : Nat) (by_ : Key) : Ledger :=
   { l with heard := l.heard.set stream ((l.heard.getD stream {}).set by_ idx64) }
 
-def acked (l : Ledger) (member : Key) (seq : Nat) : Ledger :=
+def acked (l : Ledger) (member : Key) (idx64 : Nat) : Ledger :=
   { l with ackedBy := l.ackedBy.set member (match l.ackedBy.get? member with
-    | some s => max s seq
-    | none => seq) }
+    | some s => max s idx64
+    | none => idx64) }
 
 def forget (l : Ledger) (member : Key) : Ledger :=
   { l with ackedBy := l.ackedBy.erase member
