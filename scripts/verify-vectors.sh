@@ -134,6 +134,13 @@ check_acks() {
 }
 check_acks || ok=0
 
+# katzenqt's group chat scenarios, which the Lean member runs as katzenqt's simulator does.
+katzenqt_pairs=()
+for f in testdata/groupchat_scenarios/*.txt; do
+  katzenqt_pairs+=("$f tests/data/groupchat/$(basename "$f")")
+done
+check_group "katzenqt" "$KATZENQT_DIR" katzenqt_pairs || ok=0
+
 echo
 if [ "$ok" -eq 1 ]; then
   echo "all vendored test vectors match their source repos"
