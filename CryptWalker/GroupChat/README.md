@@ -152,6 +152,16 @@ composed, which its client encodes, or the bytes a client that writes for itself
 which the member never looks into. The app hands over the box exactly as written, so a rewrite
 writes the same bytes, even for a box that points to a large message's own stream.
 
+`scenarios.lean` runs katzenqt's scenarios themselves (`tests/data/groupchat/*.txt`, copied
+unchanged to `testdata/groupchat_scenarios/`) through the Lean member, with a port of katzenqt's
+simulator: the replica's rules for epochs, rewrites and tombstones, the same seeded keys
+(`shake_256` draws into BACAP's `WriteCap` generation), and the same way of printing what each
+member read, wrote, acknowledged and resolved. A scenario passes when the Lean member prints
+exactly what katzenqt's does. Where the replay compares state after each call, this compares
+what a scenario's author wrote down as the protocol's behaviour, and a scenario katzenqt adds is
+checked by copying its file. `scripts/verify-vectors.sh` checks the copies against a katzenqt
+checkout.
+
 `testdata/groupchat_traces/` holds the traces of katzenqt's scenarios and the app's. Run
 `python tools/groupchat_traces.py DIR 0` in katzenqt to regenerate them. katzenqt's nightly job
 replays fresh random runs (`tests/test_groupchat_trace.py`, with `CRYPTWALKER` set).

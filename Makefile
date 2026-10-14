@@ -45,7 +45,8 @@ TESTS := \
 	CryptWalker.BACAP.primitive_vectors_test \
 	CryptWalker.GroupChat.ack_codec_test \
 	CryptWalker.GroupChat.wire_vectors_test \
-	CryptWalker.GroupChat.replay
+	CryptWalker.GroupChat.replay \
+	CryptWalker.GroupChat.scenarios
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 
