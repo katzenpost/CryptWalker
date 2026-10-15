@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 import CryptWalker.Pigeonhole.Replica
 import CryptWalker.MKEM.MKEM
-import CryptWalker.BACAP.Protocol
+import CryptWalker.Protocols.BACAP.Protocol
 
 /-! # Pigeonhole client-replica exchange
 
@@ -18,7 +18,7 @@ namespace CryptWalker.Pigeonhole.Protocol
 open CryptWalker.Sign.Sign (Signature)
 open CryptWalker.MKEM.MKEM (MKEM MKEMError Ciphertext)
 open CryptWalker.Pigeonhole.Replica
-open CryptWalker.BACAP.Protocol (BACAPSpec)
+open CryptWalker.Protocols.BACAP.Protocol (BACAPSpec)
 
 /-- Request and reply codecs; decoding undoes encoding. -/
 structure Wire (Sg : Signature) where
@@ -102,7 +102,7 @@ theorem rpc_sound (boxSize : Nat) (cs rs : M.State) (pubs : List {pk : M.PublicK
 theorem write_then_read (B : BACAPSpec) [DecidableEq B.blindable.base.PublicKey]
     (W : Wire B.blindable.base) (boxSize : Nat)
     (sk : B.blindable.base.PrivateKey) (pk : B.blindable.base.PublicKey)
-    (hpk : pk = B.blindable.base.pub sk) (idx : CryptWalker.BACAP.Types.MessageBoxIndex)
+    (hpk : pk = B.blindable.base.pub sk) (idx : CryptWalker.Protocols.BACAP.Types.MessageBoxIndex)
     (ctx pt : ByteArray) (store : Store B.blindable.base)
     (hfree : store (B.deriveBoxID pk idx ctx) = none)
     (hne : (B.encryptBox sk pk idx ctx pt).2.1.size ≠ 0)

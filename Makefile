@@ -24,15 +24,15 @@ TESTS := \
 	CryptWalker.Cipher.test \
 	CryptWalker.Sign.test \
 	CryptWalker.Sign.blinded_test \
-	CryptWalker.BACAP.test \
-	CryptWalker.Sphinx.crypto_test \
+	CryptWalker.Protocols.BACAP.test \
+	CryptWalker.Protocols.Sphinx.crypto_test \
 	CryptWalker.WideBlockCipher.test \
-	CryptWalker.Sphinx.commands_test \
-	CryptWalker.Sphinx.geometry_test \
-	CryptWalker.Sphinx.nike_selftest \
-	CryptWalker.Sphinx.kem_selftest \
-	CryptWalker.Sphinx.nike_vectors_test \
-	CryptWalker.Sphinx.kem_vectors_test \
+	CryptWalker.Protocols.Sphinx.commands_test \
+	CryptWalker.Protocols.Sphinx.geometry_test \
+	CryptWalker.Protocols.Sphinx.nike_selftest \
+	CryptWalker.Protocols.Sphinx.kem_selftest \
+	CryptWalker.Protocols.Sphinx.nike_vectors_test \
+	CryptWalker.Protocols.Sphinx.kem_vectors_test \
 	CryptWalker.KEM.MLKEM.mlkem_test \
 	CryptWalker.Hash.blake2b_256_test \
 	CryptWalker.Hash.blake2b_xof_test \
@@ -40,20 +40,20 @@ TESTS := \
 	CryptWalker.KEM.MLKEMHedged.mlkemhedged_test \
 	CryptWalker.KEM.mlkem768_hedged_test \
 	CryptWalker.MultiRecipientHybrid.multirecipient_hybrid_test \
-	CryptWalker.Sphinx.kem_hybrid_vectors_test \
-	CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test \
-	CryptWalker.BACAP.primitive_vectors_test \
-	CryptWalker.GroupChat.ack_codec_test \
-	CryptWalker.GroupChat.wire_vectors_test \
-	CryptWalker.GroupChat.replay \
-	CryptWalker.GroupChat.scenarios
+	CryptWalker.Protocols.Sphinx.kem_hybrid_vectors_test \
+	CryptWalker.Protocols.Sphinx.kem_hybrid_blake2bxof_vectors_test \
+	CryptWalker.Protocols.BACAP.primitive_vectors_test \
+	CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.ack_codec_test \
+	CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.wire_vectors_test \
+	CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.replay \
+	CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.scenarios
 
 TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 
 # Bare `lake build` builds only defaultTargets, which is the library. The
 # executables have to be named or the test targets run whatever binary was left
 # in .lake/build/bin by an earlier build.
-EXES := $(TESTS) CryptWalker.BACAP.gen_vectors CryptWalker.Bench.benchmark CryptWalker.Sphinx.gen_nike_vectors CryptWalker.Sphinx.gen_kem_vectors CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors CryptWalker.KEM.gen_mlkem768_hedged_vectors CryptWalker.MultiRecipientHybrid.gen_multirecipient_hybrid_vectors
+EXES := $(TESTS) CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Bench.benchmark CryptWalker.Protocols.Sphinx.gen_nike_vectors CryptWalker.Protocols.Sphinx.gen_kem_vectors CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors CryptWalker.KEM.gen_mlkem768_hedged_vectors CryptWalker.MultiRecipientHybrid.gen_multirecipient_hybrid_vectors
 
 .DEFAULT_GOAL := help
 
@@ -119,14 +119,14 @@ test-blinded: build ## blinded Ed25519 vectors from hpqc
 	@$(BIN)/CryptWalker-Sign-blinded_test
 
 test-bacap: build ## BACAP vectors from hpqc
-	@$(BIN)/CryptWalker-BACAP-test
+	@$(BIN)/CryptWalker-Protocols-BACAP-test
 
 test-sphinx-crypto: build ## Sphinx primitive-layer vectors (hash/MAC/stream/KDF) from katzenpost
-	@$(BIN)/CryptWalker-Sphinx-crypto_test
+	@$(BIN)/CryptWalker-Protocols-Sphinx-crypto_test
 
 gen-sphinx-vectors: build ## build Sphinx packets with the Lean port, for cross-checking against katzenpost's Unwrap
-	@$(BIN)/CryptWalker-Sphinx-gen_nike_vectors
-	@$(BIN)/CryptWalker-Sphinx-gen_kem_vectors
+	@$(BIN)/CryptWalker-Protocols-Sphinx-gen_nike_vectors
+	@$(BIN)/CryptWalker-Protocols-Sphinx-gen_kem_vectors
 
 gen-hybrid-vectors: build ## build X25519+ML-KEM-768 combiner vectors, for cross-checking against hpqc
 	@$(BIN)/CryptWalker-KEM-gen_mlkem768_x25519_combiner_vectors
@@ -155,8 +155,8 @@ gen-groupchat-wire-vectors: ## regenerate testdata/groupchat_wire_vectors.json f
 	@sha256sum testdata/groupchat_wire_vectors.json > testdata/groupchat_wire_vectors.json.sha256
 
 check-bacap-vectors: build ## generate hpqc's BACAP vectors with the Lean implementation and compare
-	@$(BIN)/CryptWalker-BACAP-gen_vectors --check
-	@$(BIN)/CryptWalker-BACAP-test
+	@$(BIN)/CryptWalker-Protocols-BACAP-gen_vectors --check
+	@$(BIN)/CryptWalker-Protocols-BACAP-test
 
 verify-vectors: ## sha256sum-compare vendored testdata/ files against their hpqc/katzenpost/katzenqt source copies
 	@./scripts/verify-vectors.sh "$(HPQC_DIR)" "$(KATZENPOST_DIR)" "$(KATZENQT_DIR)"
@@ -165,13 +165,13 @@ axioms: build ## fail if a group chat theorem rests on sorry, native_decide or a
 	@./scripts/check-axioms.sh
 
 tla: ## model-check every GroupChat/tla protocol and impl config against its EXPECT line (needs java and tla2tools.jar)
-	@./CryptWalker/GroupChat/tla/check.sh
+	@./CryptWalker/Protocols/GroupComm/GroupChatKatzenqt1/tla/check.sh
 
 veil: ## prove and model-check the GroupChat/veil Backfill model (its own Lake project, needs npm)
-	@cd CryptWalker/GroupChat/veil && $(LAKE) build
+	@cd CryptWalker/Protocols/GroupComm/GroupChatKatzenqt1/veil && $(LAKE) build
 
 test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer vectors
-	@$(BIN)/CryptWalker-Sphinx-kem_selftest
+	@$(BIN)/CryptWalker-Protocols-Sphinx-kem_selftest
 	@$(BIN)/CryptWalker-KEM-MLKEM-mlkem_test
 
 test-mlkem-kat: build ## ML-KEM-768: NIST ACVP known-answer vectors only
@@ -185,7 +185,7 @@ test-mrhybrid: build ## multi-recipient hybrid: hpqc cross-check vectors
 	@$(BIN)/CryptWalker-MultiRecipientHybrid-multirecipient_hybrid_test
 
 test-hybrid-sphinx: build ## KEM-Sphinx round-trip self-test for the X25519+ML-KEM-768 hybrid only
-	@$(BIN)/CryptWalker-Sphinx-kem_selftest MLKEM768X25519
+	@$(BIN)/CryptWalker-Protocols-Sphinx-kem_selftest MLKEM768X25519
 
 # Extra LeanBench flags, e.g. `make bench BENCH_ARGS='--match "unwrap MLKEM768" --samples 5'`.
 BENCH_ARGS ?=
