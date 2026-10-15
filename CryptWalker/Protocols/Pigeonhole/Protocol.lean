@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Pigeonhole.Replica
+import CryptWalker.Protocols.Pigeonhole.Replica
 import CryptWalker.MKEM.MKEM
 import CryptWalker.Protocols.BACAP.Protocol
 
@@ -13,11 +13,11 @@ A client MKEM-encrypts a request to the replicas; the courier hands each replica
 the replica handles the request and seals its reply under the envelope's ephemeral key. Delivery
 is assumed reliable; courier and replicas honest. -/
 
-namespace CryptWalker.Pigeonhole.Protocol
+namespace CryptWalker.Protocols.Pigeonhole.Protocol
 
 open CryptWalker.Sign.Sign (Signature)
 open CryptWalker.MKEM.MKEM (MKEM MKEMError Ciphertext)
-open CryptWalker.Pigeonhole.Replica
+open CryptWalker.Protocols.Pigeonhole.Replica
 open CryptWalker.Protocols.BACAP.Protocol (BACAPSpec)
 
 /-- Request and reply codecs; decoding undoes encoding. -/
@@ -140,4 +140,4 @@ theorem write_then_read (B : BACAPSpec) [DecidableEq B.blindable.base.PublicKey]
       if_neg hne]
   · rw [← hid]; exact hdec
 
-end CryptWalker.Pigeonhole.Protocol
+end CryptWalker.Protocols.Pigeonhole.Protocol

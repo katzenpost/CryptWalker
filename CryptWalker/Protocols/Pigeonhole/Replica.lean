@@ -17,7 +17,7 @@ Requests are handled by the state machine `step`:
 
 Not modelled: storage failures, read repair, epochs. -/
 
-namespace CryptWalker.Pigeonhole.Replica
+namespace CryptWalker.Protocols.Pigeonhole.Replica
 
 open CryptWalker.Sign.Sign (Signature)
 
@@ -219,4 +219,4 @@ theorem step_frame (boxSize : Nat) (s : Store Sg) (r : Request Sg) (x : Sg.Publi
       · subst hxid; exact ⟨payload, sig, rfl, hv⟩
       · exfalso; apply h; rw [hs, Store.put_other _ _ hxid]
 
-end CryptWalker.Pigeonhole.Replica
+end CryptWalker.Protocols.Pigeonhole.Replica

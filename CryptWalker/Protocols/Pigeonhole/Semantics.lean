@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Pigeonhole.Protocol
+import CryptWalker.Protocols.Pigeonhole.Protocol
 import Cslib.Foundations.Semantics.LTS.TraceEq
 
 /-! # Pigeonhole replica and wire-level exchange as labelled transition systems
@@ -11,13 +11,13 @@ import Cslib.Foundations.Semantics.LTS.TraceEq
 States are stores; labels are (request, reply) pairs. The wire-level system `rpcLTS` is simulated
 by the abstract replica `replicaLTS`. -/
 
-namespace CryptWalker.Pigeonhole.Semantics
+namespace CryptWalker.Protocols.Pigeonhole.Semantics
 
 open Cslib Cslib.LTS
 open CryptWalker.Sign.Sign (Signature)
 open CryptWalker.MKEM.MKEM (MKEM)
-open CryptWalker.Pigeonhole.Replica
-open CryptWalker.Pigeonhole.Protocol
+open CryptWalker.Protocols.Pigeonhole.Replica
+open CryptWalker.Protocols.Pigeonhole.Protocol
 
 variable {Sg : Signature} [DecidableEq Sg.PublicKey]
 
@@ -75,4 +75,4 @@ theorem rpcLTS_reachable_valid (boxSize : Nat) (s : Store Sg)
   obtain ⟨μs, hμ⟩ := h
   exact LTS.mtrInv_of_trInv (rpcLTS_trInv M W boxSize) Store.empty μs s hμ valid_empty
 
-end CryptWalker.Pigeonhole.Semantics
+end CryptWalker.Protocols.Pigeonhole.Semantics

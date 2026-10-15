@@ -67,9 +67,9 @@ import CryptWalker.Protocols.BACAP.API
 import CryptWalker.Protocols.BACAP.Unlinkability
 import CryptWalker.Protocols.BACAP.Ed25519Unlinkability
 import CryptWalker.Protocols.BACAP.test
-import CryptWalker.Pigeonhole.Replica
-import CryptWalker.Pigeonhole.Protocol
-import CryptWalker.Pigeonhole.Semantics
+import CryptWalker.Protocols.Pigeonhole.Replica
+import CryptWalker.Protocols.Pigeonhole.Protocol
+import CryptWalker.Protocols.Pigeonhole.Semantics
 import CryptWalker.Protocols.Sphinx.sphinx
 import CryptWalker.Protocols.Sphinx.geometry
 import CryptWalker.Protocols.Sphinx.geometry_cbor
