@@ -143,18 +143,18 @@ lake exe CryptWalker.Hash.hkdf_structured_test  # HKDF structured instance vecto
 lake exe CryptWalker.Cipher.test        # AES-256-GCM-SIV vectors from hpqc
 lake exe CryptWalker.Sign.test
 lake exe CryptWalker.Sign.blinded_test  # blinded Ed25519 vectors from hpqc
-lake exe CryptWalker.BACAP.test         # BACAP vectors from hpqc
-lake exe CryptWalker.Sphinx.crypto_test      # Sphinx Hash/MAC/Stream/KDF/ChaCha20 vectors from katzenpost
+lake exe CryptWalker.Protocols.BACAP.test         # BACAP vectors from hpqc
+lake exe CryptWalker.Protocols.Sphinx.crypto_test      # Sphinx Hash/MAC/Stream/KDF/ChaCha20 vectors from katzenpost
 lake exe CryptWalker.WideBlockCipher.test    # AEZ v5 (Sphinx's SPRP) vectors from katzenpost
-lake exe CryptWalker.Sphinx.commands_test    # Sphinx routing-command wire-format vectors from katzenpost
-lake exe CryptWalker.Sphinx.nike_selftest    # NIKE-Sphinx round-trip self-tests
-lake exe CryptWalker.Sphinx.kem_selftest     # KEM-Sphinx round-trip self-tests
-lake exe CryptWalker.Sphinx.nike_vectors_test  # NIKE-Sphinx full-packet vectors from katzenpost
-lake exe CryptWalker.Sphinx.kem_vectors_test   # KEM-Sphinx full-packet vectors from katzenpost
+lake exe CryptWalker.Protocols.Sphinx.commands_test    # Sphinx routing-command wire-format vectors from katzenpost
+lake exe CryptWalker.Protocols.Sphinx.nike_selftest    # NIKE-Sphinx round-trip self-tests
+lake exe CryptWalker.Protocols.Sphinx.kem_selftest     # KEM-Sphinx round-trip self-tests
+lake exe CryptWalker.Protocols.Sphinx.nike_vectors_test  # NIKE-Sphinx full-packet vectors from katzenpost
+lake exe CryptWalker.Protocols.Sphinx.kem_vectors_test   # KEM-Sphinx full-packet vectors from katzenpost
 lake exe CryptWalker.KEM.MLKEM.mlkem768_test   # ML-KEM-768 NIST ACVP known-answer vectors
 lake exe CryptWalker.Hash.blake2b_256_test     # BLAKE2b-256 (unkeyed and keyed) vectors from hpqc
 lake exe CryptWalker.KEM.mlkem768_x25519_combiner_test  # X25519+ML-KEM-768 hybrid vectors from hpqc
-lake exe CryptWalker.Sphinx.kem_hybrid_vectors_test     # KEM-Sphinx hybrid full-packet vectors from katzenpost
+lake exe CryptWalker.Protocols.Sphinx.kem_hybrid_vectors_test     # KEM-Sphinx hybrid full-packet vectors from katzenpost
 ```
 
 A few suites also have their own dedicated `make` target, for running just that piece:

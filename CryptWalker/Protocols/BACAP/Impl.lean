@@ -1,0 +1,157 @@
+/-
+SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
+SPDX-License-Identifier: AGPL-3.0-only
+-/
+
+import CryptWalker.Protocols.BACAP.Protocol
+import CryptWalker.Sign.Ed25519_blinded
+import CryptWalker.Cipher.AESGCMSIV
+
+namespace CryptWalker.Protocols.BACAP.Impl
+
+open CryptWalker.Protocols.BACAP.Types
+open CryptWalker.Protocols.BACAP.Ratchet
+open CryptWalker.Hash.HKDF
+open CryptWalker.Sign.Ed25519Blinded
+open CryptWalker.Sign.Blindable
+open CryptWalker.Cipher.AESGCMSIV
+open CryptWalker.Protocols.BACAP.Protocol
+
+@[simp] private theorem Scheme_nonceSize : Scheme.nonceSize = 12 := rfl
+@[simp] private theorem Scheme_tagSize : Scheme.tagSize = 16 := rfl
+@[simp] private theorem Scheme_keySize : Scheme.keySize = 32 := rfl
+
+@[simp] private theorem implEncrypt_size (k : Scheme.Key) (n : Vector UInt8 12)
+    (ad pt : ByteArray) :
+    (Scheme.encrypt k n ad pt).size = pt.size + 16 :=
+  Scheme.size_encrypt k n ad pt
+
+def getBlindScalar (m : MessageBoxIndex) (ctx : ByteArray) : Scalar :=
+  let kICtx := deriveKForContext m blake2b512_hkdf ctx
+  scalarOfBytes ⟨kICtx.toArray⟩
+
+def getEncKey (m : MessageBoxIndex) (ctx : ByteArray) : Scheme.Key :=
+  let eICtx := deriveEForContext m blake2b512_hkdf ctx
+  Scheme.keyFromBytes eICtx
+
+/-- The root public key blinded by `K_i^ctx`. -/
+def implDeriveBoxID (rootPub : PubBytes) (m : MessageBoxIndex)
+    (ctx : ByteArray) : PubBytes :=
+  blindPub rootPub (getBlindScalar m ctx)
+
+/-- The root public key blinded by `K_i`, with no context. -/
+def implDeriveMessageBoxID (rootPub : PubBytes) (m : MessageBoxIndex) : PubBytes :=
+  blindPub rootPub (scalarOfBytes ⟨m.curBlindingFactor.toArray⟩)
+
+def implSignBox (rootPriv : Scalar) (m : MessageBoxIndex)
+    (ctx : ByteArray) (ct : ByteArray) : PubBytes × SigBytes :=
+  let s := getBlindScalar m ctx
+  (blindPub (publicKey rootPriv) s, signNative (blindPriv rootPriv s) ct)
+
+def implVerifyBox (boxId : PubBytes) (ct : ByteArray)
+    (sig : SigBytes) : Bool :=
+  verifyNative boxId ct sig
+
+def implEncryptBox (rootPriv : Scalar) (rootPub : PubBytes)
+    (m : MessageBoxIndex) (ctx : ByteArray) (pt : ByteArray) :
+    PubBytes × ByteArray × SigBytes :=
+  let boxId := implDeriveBoxID rootPub m ctx
+  let key := getEncKey m ctx
+  let nonce := Vector.ofFn fun i : Fin 12 => boxId[i]!
+  let ad := ⟨boxId.toArray⟩
+  let ct := Scheme.encrypt key nonce ad pt
+  let sig := (implSignBox rootPriv m ctx ct).2
+  (boxId, ct, sig)
+
+def implDecryptBox (boxId : PubBytes) (m : MessageBoxIndex)
+    (ctx : ByteArray) (ct : ByteArray) (sig : SigBytes) : Option ByteArray :=
+  if !implVerifyBox boxId ct sig then none
+  else if ct.size == 0 then some ByteArray.empty
+  else
+    let key := getEncKey m ctx
+    let nonce := Vector.ofFn fun i : Fin 12 => boxId[i]!
+    let ad := ⟨boxId.toArray⟩
+    Scheme.decrypt key nonce ad ct
+
+/-- Decrypting a box produced by `implEncryptBox` returns the plaintext. -/
+theorem implDecrypt_implEncrypt (sk : Scalar) (pk : PubBytes) (idx : MessageBoxIndex)
+    (ctx pt : ByteArray) (hpk : pk = publicKey sk) :
+    implDecryptBox (implEncryptBox sk pk idx ctx pt).1 idx ctx
+      (implEncryptBox sk pk idx ctx pt).2.1
+      (implEncryptBox sk pk idx ctx pt).2.2 = some pt := by
+  unfold implEncryptBox implDecryptBox implDeriveBoxID
+  dsimp only [implSignBox, implVerifyBox]
+  rw [hpk, ← blind_hom]
+  simp only [verify_signNative]
+  rw [if_neg (by decide)]
+  simp [implEncrypt_size]
+  exact Scheme.decrypt_encrypt _ _ _ _
+
+/-- A non-tombstone ciphertext that decrypts to `pt` is the one `implEncryptBox` produces. -/
+theorem implDecrypt_sound (sk : Scalar) (pk boxId : PubBytes) (idx : MessageBoxIndex)
+    (ctx ct : ByteArray) (sig : SigBytes) (pt : ByteArray)
+    (hid : implDeriveBoxID pk idx ctx = boxId)
+    (hdec : implDecryptBox boxId idx ctx ct sig = some pt)
+    (hct : ct.size > 0) :
+    (implEncryptBox sk pk idx ctx pt).2.1 = ct := by
+  subst hid
+  unfold implEncryptBox
+  unfold implDecryptBox at hdec
+  dsimp only at hdec ⊢
+  split at hdec
+  · exact absurd hdec (by simp)
+  · split at hdec
+    · rename_i hz
+      rw [beq_iff_eq] at hz
+      exact absurd hct (by omega)
+    · exact Scheme.decrypt_sound _ _ _ _ _ hdec
+
+/-- `noncomputable` so the compiler does not build `List.finRange ℓ` at program start. -/
+@[instance_reducible] noncomputable def scalarFintypeInst : Fintype Scalar := inferInstance
+@[instance_reducible] noncomputable def scalarSampleableInst : SampleableType Scalar := SampleableType.ofFintype Scalar
+@[instance_reducible] noncomputable def pubDecEqInst : DecidableEq PubBytes := inferInstance
+
+noncomputable def bacapSpec : BACAPSpec where
+  blindable := blindable
+  hkdf      := blake2b512_hkdf
+  aead      := Scheme
+
+  scalarFintype    := scalarFintypeInst
+  scalarSampleable := scalarSampleableInst
+  pubDecEq         := pubDecEqInst
+
+  deriveBoxID := implDeriveBoxID
+  signBox     := implSignBox
+  verifyBox   := implVerifyBox
+  encryptBox  := implEncryptBox
+  decryptBox  := implDecryptBox
+
+  sign_verify    := fun (sk : Scalar) (idx : MessageBoxIndex) (ctx ct : ByteArray) => by
+    show implVerifyBox (implSignBox sk idx ctx ct).1 ct (implSignBox sk idx ctx ct).2 = true
+    unfold implSignBox implVerifyBox
+    dsimp only []
+    rw [← blind_hom]
+    exact verify_signNative (blindPriv sk (getBlindScalar idx ctx)) ct
+
+  encrypt_boxid := fun _ _ _ _ _ => rfl
+
+  encrypt_verify := fun (sk : Scalar) (pk : PubBytes) (idx : MessageBoxIndex)
+      (ctx pt : ByteArray) (hpk : pk = publicKey sk) => by
+    show verifyNative (implEncryptBox sk pk idx ctx pt).1 (implEncryptBox sk pk idx ctx pt).2.1
+      (implEncryptBox sk pk idx ctx pt).2.2 = true
+    unfold implEncryptBox implDeriveBoxID implSignBox
+    dsimp only []
+    rw [hpk, ← blind_hom]
+    exact verify_signNative _ _
+
+  decrypt_encrypt := fun (sk : Scalar) (pk : PubBytes) (idx : MessageBoxIndex)
+      (ctx pt : ByteArray) (hpk : pk = publicKey sk) => by
+    show implDecryptBox (implEncryptBox sk pk idx ctx pt).1 idx ctx
+          (implEncryptBox sk pk idx ctx pt).2.1
+          (implEncryptBox sk pk idx ctx pt).2.2 = some pt
+    exact implDecrypt_implEncrypt sk pk idx ctx pt hpk
+
+  decrypt_sound := fun sk pk boxId idx ctx ct sig pt _hpk hid hdec hct =>
+    implDecrypt_sound sk pk boxId idx ctx ct sig pt hid hdec hct
+
+end CryptWalker.Protocols.BACAP.Impl

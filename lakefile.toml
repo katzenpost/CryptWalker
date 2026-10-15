@@ -76,37 +76,37 @@ name = "CryptWalker.Sign.blinded_test"
 name = "CryptWalker.Hash.hkdf_structured_test"
 
 [[lean_exe]]
-name = "CryptWalker.BACAP.test"
+name = "CryptWalker.Protocols.BACAP.test"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.crypto_test"
+name = "CryptWalker.Protocols.Sphinx.crypto_test"
 
 [[lean_exe]]
 name = "CryptWalker.WideBlockCipher.test"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.commands_test"
+name = "CryptWalker.Protocols.Sphinx.commands_test"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.geometry_test"
+name = "CryptWalker.Protocols.Sphinx.geometry_test"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.nike_selftest"
+name = "CryptWalker.Protocols.Sphinx.nike_selftest"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.kem_selftest"
+name = "CryptWalker.Protocols.Sphinx.kem_selftest"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.nike_vectors_test"
+name = "CryptWalker.Protocols.Sphinx.nike_vectors_test"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.kem_vectors_test"
+name = "CryptWalker.Protocols.Sphinx.kem_vectors_test"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.gen_nike_vectors"
+name = "CryptWalker.Protocols.Sphinx.gen_nike_vectors"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.gen_kem_vectors"
+name = "CryptWalker.Protocols.Sphinx.gen_kem_vectors"
 
 [[lean_exe]]
 name = "CryptWalker.KEM.MLKEM.mlkem_test"
@@ -124,10 +124,10 @@ name = "CryptWalker.KEM.mlkem768_x25519_combiner_test"
 name = "CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.kem_hybrid_vectors_test"
+name = "CryptWalker.Protocols.Sphinx.kem_hybrid_vectors_test"
 
 [[lean_exe]]
-name = "CryptWalker.Sphinx.kem_hybrid_blake2bxof_vectors_test"
+name = "CryptWalker.Protocols.Sphinx.kem_hybrid_blake2bxof_vectors_test"
 
 [[lean_exe]]
 name = "CryptWalker.KEM.MLKEMHedged.mlkemhedged_test"
@@ -145,19 +145,19 @@ name = "CryptWalker.MultiRecipientHybrid.multirecipient_hybrid_test"
 name = "CryptWalker.MultiRecipientHybrid.gen_multirecipient_hybrid_vectors"
 
 [[lean_exe]]
-name = "CryptWalker.BACAP.primitive_vectors_test"
+name = "CryptWalker.Protocols.BACAP.primitive_vectors_test"
 
 [[lean_exe]]
-name = "CryptWalker.BACAP.gen_vectors"
+name = "CryptWalker.Protocols.BACAP.gen_vectors"
 
 [[lean_exe]]
-name = "CryptWalker.GroupChat.ack_codec_test"
+name = "CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.ack_codec_test"
 
 [[lean_exe]]
-name = "CryptWalker.GroupChat.replay"
+name = "CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.replay"
 
 [[lean_exe]]
-name = "CryptWalker.GroupChat.wire_vectors_test"
+name = "CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.wire_vectors_test"
 
 [[lean_exe]]
-name = "CryptWalker.GroupChat.scenarios"
+name = "CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.scenarios"

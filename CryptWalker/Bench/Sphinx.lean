@@ -3,10 +3,10 @@ SPDX-FileCopyrightText: Copyright (C) 2026 David Stainton
 SPDX-License-Identifier: AGPL-3.0-only
 -/
 
-import CryptWalker.Sphinx.bench_registry
-import CryptWalker.Sphinx.types
-import CryptWalker.Sphinx.nike_sphinx_theorems
-import CryptWalker.Sphinx.kem_sphinx_theorems
+import CryptWalker.Protocols.Sphinx.bench_registry
+import CryptWalker.Protocols.Sphinx.types
+import CryptWalker.Protocols.Sphinx.nike_sphinx_theorems
+import CryptWalker.Protocols.Sphinx.kem_sphinx_theorems
 import CryptWalker.Util.Bytes
 import LeanBench
 
@@ -17,12 +17,12 @@ Node and path generation run outside the timed region. -/
 
 namespace CryptWalker.Bench.Sphinx
 
-open CryptWalker.Sphinx.Geometry (Geometry ofNIKE ofKEM)
-open CryptWalker.Sphinx.Types
-open CryptWalker.Sphinx.Commands
-open CryptWalker.Sphinx.NIKESphinx (newNIKEPacket unwrapNIKE)
-open CryptWalker.Sphinx.KEMSphinx (newKEMPacket unwrapKEM)
-open CryptWalker.Sphinx.BenchRegistry
+open CryptWalker.Protocols.Sphinx.Geometry (Geometry ofNIKE ofKEM)
+open CryptWalker.Protocols.Sphinx.Types
+open CryptWalker.Protocols.Sphinx.Commands
+open CryptWalker.Protocols.Sphinx.NIKESphinx (newNIKEPacket unwrapNIKE)
+open CryptWalker.Protocols.Sphinx.KEMSphinx (newKEMPacket unwrapKEM)
+open CryptWalker.Protocols.Sphinx.BenchRegistry
 open CryptWalker.NIKE.NIKE (NIKE)
 open CryptWalker.KEM.KEM (KEM)
 open CryptWalker.Util.Bytes (ofVector toVecN)

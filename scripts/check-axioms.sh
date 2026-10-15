@@ -2,11 +2,11 @@
 # Fail if any theorem in the given Lean files depends on an axiom beyond Lean's own
 # (propext, Classical.choice, Quot.sound): no sorry, no native_decide, no declared axiom.
 #
-# Usage: scripts/check-axioms.sh [FILE...]   (default: CryptWalker/GroupChat/**/*.lean)
+# Usage: scripts/check-axioms.sh [FILE...]   (default: every Lean file under CryptWalker/Protocols/GroupComm/)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 files=("$@")
-[ ${#files[@]} -eq 0 ] && files=(CryptWalker/GroupChat/*.lean CryptWalker/GroupChat/Member/*.lean)
+[ ${#files[@]} -eq 0 ] && mapfile -t files < <(find CryptWalker/Protocols/GroupComm -name "*.lean" -not -path "*/veil/*" | sort)
 tmp=$(mktemp --suffix=.lean)
 trap 'rm -f "$tmp"' EXIT
 for f in "${files[@]}"; do
