@@ -45,7 +45,7 @@ one reader, or one replica's storage rule.
 | `Member/Gcm.lean`, `Member/Cbor.lean` | Implementation section | katzenqt's `GroupChatMessage` CBOR and box framing (`models.py`), and its `GcmCodec` between a message and what a member reads of it (`acks.py`) |
 | `Member/AckBytes.lean` | Implementation section | The executable `Acks` codec, the same functions as `AckCodec.lean` without Mathlib |
 | `Member/Membership.lean`, `Member/ReplyWho.lean` | Implementation section | katzenqt's membership hash, and its reply to a new member (`GroupChatReplyWho`) with the `JoinReply` it carries |
-| `Member/Walk.lean`, `Member/Persist.lean` | For clients | A walk and index derivation over any way of stepping an index, and a member's state as CBOR |
+| `Member/Walk.lean` | For clients | A walk and index derivation over any way of stepping an index |
 | `tla/protocol/Replica.tla` | Protocol section | One box at one replica, with the storage the spec assumes (`SpecStored`) |
 | `tla/protocol/Backfill.tla` | Protocol section | One member's stream: periodic rewrite, Sent-box retention, acknowledgements, and readers' jumps, rechecks and scans |
 | `tla/protocol/GroupChat.tla` | Protocol | Rosters across a whole group: explicit numbering, Introductions, `IntroducedAt`, the reply to a new member, and every member following every roster |
@@ -172,8 +172,7 @@ though it never writes them, and fields it refuses, under both `AckCodec` and `A
 compares. `wire_vectors_test.lean` checks `Gcm`, `Membership` and `ReplyWho` against vectors from
 katzenqt itself: each message reads as katzenqt reads it and is written back as katzenqt writes
 it, and each reply carries the `JoinReply` katzenqt takes from it. `make
-gen-groupchat-wire-vectors` regenerates them with katzenqt's Python. The replay also checks that
-every state it reaches loads as `Persist` saved it.
+gen-groupchat-wire-vectors` regenerates them with katzenqt's Python.
 
 ```
 lake exe CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.replay        # every trace in testdata/groupchat_traces/

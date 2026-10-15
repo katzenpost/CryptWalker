@@ -81,7 +81,6 @@ import CryptWalker.Protocols.Sphinx.kem_sphinx_theorems
 import CryptWalker.Protocols.Sphinx.schemes
 import CryptWalker.Protocols.Sphinx.bench_registry
 import CryptWalker.Protocols.GroupComm
-import CryptWalker.Protocols.GroupComm.Common.Persist
 import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.AckCodec
 import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Roster
 import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Backfill
@@ -98,5 +97,4 @@ import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Member.GcmProofs
 import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Member.AckBytesProofs
 import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Member.Membership
 import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Member.ReplyWho
-import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Member.Persist
 import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Member.Walk

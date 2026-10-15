@@ -7,15 +7,13 @@ import Lean.Data.Json
 
 import CryptWalker.Protocols.BACAP.API
 import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Member.Json
-import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Member.Persist
 import CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.Member.Walk
 import CryptWalker.Util.Bytes
 
 /-! # Replay katzenqt group chat traces
 
 Each trace line is one call on a member. The replay makes the same call on the Lean `Group` and
-requires the same result and state, checks the trace's BACAP steps against our BACAP, and checks
-that each state loads as it was saved.
+requires the same result and state, and checks the trace's BACAP steps against our BACAP.
 
 Usage: `lake exe CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.replay [trace.jsonl | dir]...`, by default every trace in
 `testdata/groupchat_traces/`. -/
@@ -173,8 +171,6 @@ def replay (path : System.FilePath) : IO (Nat × Nat × Option String) := do
         return ← fail s!"{who} {callName}: {d}"
       if let some d := diff "state" (group g) (line.getObjValD "state") then
         return ← fail s!"{who} {callName}: {d}"
-      unless Persist.load (Persist.save g) == some g do
-        return ← fail s!"{who} {callName}: the state does not load as it was saved"
       match checkBACAP asked line effects with
       | .error e => return ← fail s!"{who} {callName}: {e}"
       | .ok (c, asked) =>
