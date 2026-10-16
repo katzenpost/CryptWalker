@@ -1,0 +1,77 @@
+name: Website
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/website.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DART_SASS_VERSION: "1.105.2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Fetch prebuilt Mathlib
+        run: lake exe cache get
+      - name: Generate the API reference
+        working-directory: docs/docbuild
+        run: lake build CryptWalker:docs
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: docs/go.mod
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - name: Install Dart Sass
+        run: |
+          curl -sSfL "https://github.com/sass/dart-sass/releases/download/${DART_SASS_VERSION}/dart-sass-${DART_SASS_VERSION}-linux-x64.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/dart-sass" >> "$GITHUB_PATH"
+      - name: Build the site
+        working-directory: docs
+        env:
+          HUGO_PARAMS_VERSION: ${{ github.head_ref || github.ref_name }}
+        run: |
+          npm ci
+          npx hugo --minify
+          cp -r docbuild/.lake/build/doc public/api
+
+      - uses: actions/configure-pages@v5
+        if: startsWith(github.ref, 'refs/tags/v')
+      - uses: actions/upload-pages-artifact@v3
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          path: docs/public
+
+  deploy:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

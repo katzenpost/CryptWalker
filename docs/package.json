@@ -1,0 +1,12 @@
+{
+  "name": "cryptwalker-website",
+  "private": true,
+  "scripts": {
+    "hugo": "hugo"
+  },
+  "devDependencies": {
+    "@fortawesome/fontawesome-free": "7.3.1",
+    "bootstrap": "5.3.8",
+    "hugo-extended": "0.166.0"
+  }
+}
