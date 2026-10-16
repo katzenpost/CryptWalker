@@ -95,6 +95,7 @@ Classical NIKEs, two independent implementations of the same exchange:
 |:---:|
 * HKDF-BLAKE2b-512 (RFC 5869 with BLAKE2b-512 as the hash)
 * HKDF-SHA256 (RFC 5869, Expand-only), Sphinx's `PacketKeys` derivation
+* Argon2d, Argon2i and Argon2id (RFC 9106), the memory-hard password hash; Argon2id is the one to use
 
 | PRF: Pseuodo Random Function |
 |:---:|
@@ -140,6 +141,7 @@ lake exe CryptWalker.KEM.vectors        # NIKE-to-KEM adapter vectors from hpqc
 lake exe CryptWalker.Hash.test          # SHA-512 vectors from hpqc
 lake exe CryptWalker.Hash.hkdf_test     # HKDF-BLAKE2b raw function vectors
 lake exe CryptWalker.Hash.hkdf_structured_test  # HKDF structured instance vectors
+lake exe CryptWalker.KDF.argon2_test    # Argon2 vectors from RFC 9106 and x/crypto/argon2
 lake exe CryptWalker.Cipher.test        # AES-256-GCM-SIV vectors from hpqc
 lake exe CryptWalker.Sign.test
 lake exe CryptWalker.Sign.blinded_test  # blinded Ed25519 vectors from hpqc
@@ -190,6 +192,10 @@ vectors — the `Source` column below is each file's canonical path in its own r
 | `sphinx_commands_vectors.json` | Sphinx routing-command wire format | `katzenpost/core/sphinx/commands/testdata/sphinx_commands_vectors.json` |
 | `sphinx_nike_vectors.json` | NIKE-Sphinx full packets (10: every hop count × `withSURB`) | `katzenpost/core/sphinx/testdata/sphinx_vectors.json` |
 | `sphinx_kem_vectors.json` | KEM-Sphinx full packets (10: every hop count × `withSURB`) | `katzenpost/core/sphinx/testdata/kemsphinx_vectors.json` |
+
+`argon2.json` has no upstream file to compare against. It holds the three RFC 9106 §5 vectors
+(Argon2d, Argon2i and Argon2id with a secret and associated data), and Argon2i and Argon2id tags
+from Go's `golang.org/x/crypto/argon2` v0.58.0 across memory sizes, lane counts and tag lengths.
 | `sphinx_kem_hybrid_vectors.json` | KEM-Sphinx full packets, X25519+ML-KEM-768 hybrid (10: every hop count × `withSURB`) | `katzenpost/core/sphinx/testdata/kemsphinx_mlkem768x25519_vectors.json` |
 | `mlkem768_keygen.json`, `mlkem768_encapdecap.json`, `mlkem768_keycheck.json` | ML-KEM-768 (FIPS 203) — NIST's own official ACVP known-answer vectors, not from hpqc or katzenpost | [NIST's `usnistgov/ACVP-Server`](https://github.com/usnistgov/ACVP-Server) |
 

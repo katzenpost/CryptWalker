@@ -19,6 +19,7 @@ TESTS := \
 	CryptWalker.Hash.hkdf_test \
 	CryptWalker.MAC.hmac_hkdf_test \
 	CryptWalker.Hash.blake2s_test \
+	CryptWalker.KDF.argon2_test \
 	CryptWalker.Cipher.aead_vectors_test \
 	CryptWalker.Hash.hkdf_structured_test \
 	CryptWalker.Cipher.test \
@@ -58,7 +59,7 @@ EXES := $(TESTS) CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Bench.bench
 .DEFAULT_GOAL := help
 
 .PHONY: all build test bench bench-nike bench-kem bench-sphinx sorries clean help
-.PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf
+.PHONY: test-data test-nike test-kem test-kem-vectors test-hash test-hkdf test-argon2
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors gen-mrhybrid-vectors test-mrhybrid test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
 .PHONY: verify-vectors gen-acks-vectors gen-groupchat-wire-vectors check-bacap-vectors axioms tla veil
@@ -105,6 +106,9 @@ test-hash: build ## SHA-512 vectors from hpqc
 
 test-hkdf: build ## HKDF-BLAKE2b raw function vectors
 	@$(BIN)/CryptWalker-Hash-hkdf_test
+
+test-argon2: build ## Argon2d/i/id vectors from RFC 9106 and x/crypto/argon2
+	@$(BIN)/CryptWalker-KDF-argon2_test
 
 test-hkdf-structured: build ## HKDF structured instance vectors
 	@$(BIN)/CryptWalker-Hash-hkdf_structured_test

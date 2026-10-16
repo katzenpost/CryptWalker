@@ -61,6 +61,9 @@ name = "CryptWalker.MAC.hmac_hkdf_test"
 name = "CryptWalker.Hash.blake2s_test"
 
 [[lean_exe]]
+name = "CryptWalker.KDF.argon2_test"
+
+[[lean_exe]]
 name = "CryptWalker.Cipher.aead_vectors_test"
 
 [[lean_exe]]

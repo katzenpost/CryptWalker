@@ -111,6 +111,10 @@ def hash256 (msg : ByteArray) : Vector UInt8 32 :=
 def hash256Keyed (key msg : ByteArray) : Vector UInt8 32 :=
   extractDigest (digestArray key 32 msg) 32
 
+/-- BLAKE2b, unkeyed, with an `n`-byte digest for `1 ≤ n ≤ 64` (RFC 7693 §2.1). -/
+def hashN (n : Nat) (msg : ByteArray) : ByteArray :=
+  ⟨(extractDigest (digestArray ByteArray.empty n msg) n).toArray⟩
+
 private def toBytes {n : Nat} (v : Vector UInt8 n) : ByteArray := ⟨v.toArray⟩
 
 /-- BLAKE2Xb (https://www.blake2.net/blake2x.pdf). `size` is the configured stream length, bound
