@@ -220,8 +220,12 @@ sorries: ## list every declaration still standing on sorry
 API_DOCS := docs/_api
 SITE_OUT := docs/public
 
-api-docs: ## generate the API reference with doc-gen4 into docs/_api
-	cd docs/docbuild && $(LAKE) build CryptWalker:docs
+# Each doc-gen4 step loads a large part of Mathlib, peaking near 2.5 GB, and
+# Lake runs one per thread. Cap the threads at one per 3 GB of RAM.
+DOCS_JOBS ?= $(shell awk '/MemTotal/ { j = int($$2 / 3000000); print (j < 1) ? 1 : j }' /proc/meminfo 2>/dev/null || echo 2)
+
+api-docs: ## generate the API reference with doc-gen4 into docs/_api (DOCS_JOBS caps parallelism)
+	cd docs/docbuild && LEAN_NUM_THREADS=$(DOCS_JOBS) $(LAKE) build CryptWalker:docs
 	rm -rf $(API_DOCS)
 	cp -r docs/docbuild/.lake/build/doc $(API_DOCS)
 	python3 -I docs/scripts/prune-api.py $(API_DOCS)
