@@ -63,6 +63,7 @@ EXES := $(TESTS) CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Bench.bench
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors gen-mrhybrid-vectors test-mrhybrid test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
 .PHONY: verify-vectors gen-acks-vectors gen-groupchat-wire-vectors check-bacap-vectors axioms tla veil
+.PHONY: api-docs website website-serve website-tools
 
 all: build ## build everything, library and executables
 
@@ -212,6 +213,35 @@ bench-sphinx: ## benchmark Sphinx packet creation and unwrap for every scheme
 
 sorries: ## list every declaration still standing on sorry
 	@$(LAKE) build 2>&1 | grep 'declaration uses' | sort -u || echo "no sorries"
+
+# The website is a Hugo/Docsy site in docs/. doc-gen4 renders every module
+# CryptWalker imports, Mathlib included; prune-api.py keeps only our pages and
+# links the rest to their hosted docs. The result goes in docs/static/api, which
+# Hugo publishes at /api/.
+API_DOCS := docs/static/api
+
+api-docs: ## generate the API reference with doc-gen4 into docs/static/api
+	cd docs/docbuild && $(LAKE) build CryptWalker:docs
+	rm -rf $(API_DOCS) && mkdir -p $(dir $(API_DOCS))
+	cp -r docs/docbuild/.lake/build/doc $(API_DOCS)
+	python3 -I docs/scripts/prune-api.py $(API_DOCS)
+
+website-tools:
+	@missing=; for t in node npm go sass; do command -v $$t >/dev/null || missing="$$missing $$t"; done; \
+	if [ -n "$$missing" ]; then \
+	  echo "the website build needs these on PATH:$$missing"; \
+	  echo "(sass is Dart Sass: https://github.com/sass/dart-sass/releases)"; \
+	  exit 1; \
+	fi
+
+docs/node_modules/.package-lock.json: docs/package-lock.json
+	cd docs && npm ci
+
+website: website-tools api-docs docs/node_modules/.package-lock.json ## build the whole website into docs/public
+	cd docs && npx hugo --minify
+
+website-serve: website-tools docs/node_modules/.package-lock.json ## preview the website at localhost:1313 (run api-docs first for /api/)
+	cd docs && npx hugo server
 
 clean: ## remove all build artefacts
 	$(LAKE) clean
