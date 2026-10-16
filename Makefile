@@ -220,19 +220,18 @@ sorries: ## list every declaration still standing on sorry
 	@$(LAKE) build 2>&1 | grep 'declaration uses' | sort -u || echo "no sorries"
 
 # The website: Verso pages from docs/site plus the doc-gen4 API reference.
-# doc-gen4 renders every module CryptWalker imports, Mathlib included;
-# prune-api.py keeps only our pages and links the rest to their hosted docs.
+# gen-api.py documents CryptWalker's modules and Lean's core libraries;
+# prune-api.py keeps only our pages and links core to its hosted docs.
 API_DOCS := docs/_api
 SITE_OUT := docs/public
 
-# Each doc-gen4 step loads a large part of Mathlib, peaking near 2.5 GB, and
-# Lake runs one per thread. Cap the threads at one per 3 GB of RAM.
+# doc-gen4 jobs run at once; each loads Lean plus the imported part of Mathlib.
 DOCS_JOBS ?= $(shell awk '/MemTotal/ { j = int($$2 / 3000000); print (j < 1) ? 1 : j }' /proc/meminfo 2>/dev/null || echo 2)
 
 api-docs: mathlib-cache ## generate the API reference with doc-gen4 into docs/_api (DOCS_JOBS caps parallelism)
-	cd docs/docbuild && LEAN_NUM_THREADS=$(DOCS_JOBS) $(LAKE) build CryptWalker:docs
+	python3 -I docs/scripts/gen-api.py . $(DOCS_JOBS)
 	rm -rf $(API_DOCS)
-	cp -r docs/docbuild/.lake/build/doc $(API_DOCS)
+	cp -r docs/docbuild/.lake/apidocs/doc $(API_DOCS)
 	python3 -I docs/scripts/prune-api.py $(API_DOCS)
 
 website-pages: ## render the Verso pages into docs/public, keeping any API docs already there
