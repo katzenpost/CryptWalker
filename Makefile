@@ -63,11 +63,16 @@ EXES := $(TESTS) CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Bench.bench
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors gen-mrhybrid-vectors test-mrhybrid test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
 .PHONY: verify-vectors gen-acks-vectors gen-groupchat-wire-vectors check-bacap-vectors axioms tla veil
-.PHONY: api-docs website website-pages website-serve
+.PHONY: api-docs website website-pages website-serve mathlib-cache
 
 all: build ## build everything, library and executables
 
-build: ## build everything, library and executables
+# Prebuilt Mathlib. `lake clean` deletes it along with every other package's
+# build directory, and rebuilding it from source takes hours.
+mathlib-cache: ## download prebuilt Mathlib (fast when already present)
+	$(LAKE) exe cache get
+
+build: mathlib-cache ## build everything, library and executables
 	$(LAKE) build --log-level=warning CryptWalker $(EXES)
 
 # A suite counts as failed if it exits non-zero or prints anything matching
@@ -224,7 +229,7 @@ SITE_OUT := docs/public
 # Lake runs one per thread. Cap the threads at one per 3 GB of RAM.
 DOCS_JOBS ?= $(shell awk '/MemTotal/ { j = int($$2 / 3000000); print (j < 1) ? 1 : j }' /proc/meminfo 2>/dev/null || echo 2)
 
-api-docs: ## generate the API reference with doc-gen4 into docs/_api (DOCS_JOBS caps parallelism)
+api-docs: mathlib-cache ## generate the API reference with doc-gen4 into docs/_api (DOCS_JOBS caps parallelism)
 	cd docs/docbuild && LEAN_NUM_THREADS=$(DOCS_JOBS) $(LAKE) build CryptWalker:docs
 	rm -rf $(API_DOCS)
 	cp -r docs/docbuild/.lake/build/doc $(API_DOCS)
