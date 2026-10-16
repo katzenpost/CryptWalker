@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@v1
         with:
-          build-args: "CryptWalker CryptWalker.Data.test CryptWalker.NIKE.test CryptWalker.KEM.test CryptWalker.KEM.vectors CryptWalker.Hash.test CryptWalker.Hash.hkdf_test CryptWalker.Cipher.test CryptWalker.Bench.benchmark CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.ack_codec_test CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.wire_vectors_test CryptWalker.Protocols.BACAP.primitive_vectors_test CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Protocols.BACAP.test CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.replay CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.scenarios"
+          build-args: "CryptWalker CryptWalker.Data.test CryptWalker.NIKE.test CryptWalker.KEM.test CryptWalker.KEM.vectors CryptWalker.Hash.test CryptWalker.Hash.hkdf_test CryptWalker.KDF.argon2_test CryptWalker.Cipher.test CryptWalker.Bench.benchmark CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.ack_codec_test CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.wire_vectors_test CryptWalker.Protocols.BACAP.primitive_vectors_test CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Protocols.BACAP.test CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.replay CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.scenarios"
       - name: Run tests
         env:
           # panics in compiled Lean print a message but exit 0 unless this is set
@@ -25,6 +25,7 @@ jobs:
           ./.lake/build/bin/CryptWalker-KEM-vectors
           ./.lake/build/bin/CryptWalker-Hash-test
           ./.lake/build/bin/CryptWalker-Hash-hkdf_test
+          ./.lake/build/bin/CryptWalker-KDF-argon2_test
           ./.lake/build/bin/CryptWalker-Cipher-test
           ./.lake/build/bin/CryptWalker-Protocols-BACAP-primitive_vectors_test
           ./.lake/build/bin/CryptWalker-Protocols-BACAP-test

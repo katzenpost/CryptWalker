@@ -9,6 +9,7 @@ import CryptWalker.Hash.HKDF
 import CryptWalker.Hash.Blake2s
 import CryptWalker.MAC.HMAC
 import CryptWalker.KDF.HKDF
+import CryptWalker.KDF.Argon2
 import CryptWalker.Util.newnat
 import CryptWalker.Util.newhex
 import CryptWalker.Util.Hex

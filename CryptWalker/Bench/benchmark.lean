@@ -9,6 +9,7 @@ import CryptWalker.Bench.Sphinx
 import CryptWalker.Bench.MLKEMSteps
 import CryptWalker.Bench.Field25519
 import CryptWalker.Bench.Cipher
+import CryptWalker.Bench.KDF
 
 /-! # Benchmark driver for all registered schemes and suites -/
 
@@ -21,4 +22,5 @@ def main (args : List String) : IO UInt32 := do
   (← CryptWalker.Bench.MLKEMSteps.benches).forM LeanBench.register
   (← CryptWalker.Bench.Field25519.benches).forM LeanBench.register
   (← CryptWalker.Bench.Cipher.benches).forM LeanBench.register
+  (← CryptWalker.Bench.KDF.benches).forM LeanBench.register
   LeanBench.runMain args
