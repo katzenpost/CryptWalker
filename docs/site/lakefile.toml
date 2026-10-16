@@ -1,0 +1,17 @@
+name = "cryptlib"
+version = "0.1.0"
+reservoir = false
+defaultTargets = ["cryptlib"]
+
+[[require]]
+name = "verso"
+git = "https://github.com/leanprover/verso"
+rev = "v4.33.0"
+
+[[lean_lib]]
+name = "CryptLib"
+
+[[lean_exe]]
+name = "cryptlib"
+root = "Main"
+supportInterpreter = true

@@ -63,6 +63,7 @@ EXES := $(TESTS) CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Bench.bench
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors gen-mrhybrid-vectors test-mrhybrid test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
 .PHONY: verify-vectors gen-acks-vectors gen-groupchat-wire-vectors check-bacap-vectors axioms tla veil
+.PHONY: api-docs website website-pages website-serve
 
 all: build ## build everything, library and executables
 
@@ -212,6 +213,28 @@ bench-sphinx: ## benchmark Sphinx packet creation and unwrap for every scheme
 
 sorries: ## list every declaration still standing on sorry
 	@$(LAKE) build 2>&1 | grep 'declaration uses' | sort -u || echo "no sorries"
+
+# The website: Verso pages from docs/site plus the doc-gen4 API reference.
+# doc-gen4 renders every module CryptWalker imports, Mathlib included;
+# prune-api.py keeps only our pages and links the rest to their hosted docs.
+API_DOCS := docs/_api
+SITE_OUT := docs/public
+
+api-docs: ## generate the API reference with doc-gen4 into docs/_api
+	cd docs/docbuild && $(LAKE) build CryptWalker:docs
+	rm -rf $(API_DOCS)
+	cp -r docs/docbuild/.lake/build/doc $(API_DOCS)
+	python3 -I docs/scripts/prune-api.py $(API_DOCS)
+
+website-pages: ## render the Verso pages into docs/public, keeping any API docs already there
+	cd docs/site && $(LAKE) exe cryptlib --output ../public
+
+website: api-docs website-pages ## build the whole website, API reference included, into docs/public
+	rm -rf $(SITE_OUT)/api
+	cp -r $(API_DOCS) $(SITE_OUT)/api
+
+website-serve: website-pages ## serve docs/public at localhost:8000 (run make website once for /api/)
+	python3 -m http.server -d $(SITE_OUT) 8000
 
 clean: ## remove all build artefacts
 	$(LAKE) clean
