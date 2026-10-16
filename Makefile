@@ -227,21 +227,31 @@ api-docs: ## generate the API reference with doc-gen4 into docs/static/api
 	python3 -I docs/scripts/prune-api.py $(API_DOCS)
 
 website-tools:
-	@missing=; for t in node npm go sass; do command -v $$t >/dev/null || missing="$$missing $$t"; done; \
-	if [ -n "$$missing" ]; then \
-	  echo "the website build needs these on PATH:$$missing"; \
-	  echo "(sass is Dart Sass: https://github.com/sass/dart-sass/releases)"; \
-	  exit 1; \
-	fi
+	@missing=; for t in node npm go; do command -v $$t >/dev/null || missing="$$missing $$t"; done; \
+	if [ -n "$$missing" ]; then echo "the website build needs these on PATH:$$missing"; exit 1; fi
 
 docs/node_modules/.package-lock.json: docs/package-lock.json
 	cd docs && npm ci
 
-website: website-tools api-docs docs/node_modules/.package-lock.json ## build the whole website into docs/public
-	cd docs && npx hugo --minify
+# Docsy compiles its SCSS with Dart Sass, which Hugo runs as an external
+# program. Fetch a pinned release for this OS and CPU into docs/.tools.
+DART_SASS_VERSION := 1.105.2
+DART_SASS := docs/.tools/dart-sass-$(DART_SASS_VERSION)
+DART_SASS_OS := $(subst Darwin,macos,$(subst Linux,linux,$(shell uname -s)))
+DART_SASS_ARCH := $(subst aarch64,arm64,$(subst x86_64,x64,$(shell uname -m)))
 
-website-serve: website-tools docs/node_modules/.package-lock.json ## preview the website at localhost:1313 (run api-docs first for /api/)
-	cd docs && npx hugo server
+$(DART_SASS)/sass:
+	mkdir -p $(DART_SASS)
+	curl -sSfL https://github.com/sass/dart-sass/releases/download/$(DART_SASS_VERSION)/dart-sass-$(DART_SASS_VERSION)-$(DART_SASS_OS)-$(DART_SASS_ARCH).tar.gz \
+	  | tar -xz -C $(DART_SASS) --strip-components=1
+
+HUGO := PATH="$(abspath $(DART_SASS)):$$PATH" npx hugo
+
+website: website-tools api-docs docs/node_modules/.package-lock.json $(DART_SASS)/sass ## build the whole website into docs/public
+	cd docs && $(HUGO) --minify
+
+website-serve: website-tools docs/node_modules/.package-lock.json $(DART_SASS)/sass ## preview the website at localhost:1313 (run api-docs first for /api/)
+	cd docs && $(HUGO) server
 
 clean: ## remove all build artefacts
 	$(LAKE) clean

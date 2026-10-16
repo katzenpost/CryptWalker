@@ -21,8 +21,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      DART_SASS_VERSION: "1.105.2"
     steps:
       - uses: actions/checkout@v4
 
@@ -42,10 +40,6 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: docs/package-lock.json
-      - name: Install Dart Sass
-        run: |
-          curl -sSfL "https://github.com/sass/dart-sass/releases/download/${DART_SASS_VERSION}/dart-sass-${DART_SASS_VERSION}-linux-x64.tar.gz" | tar -xz -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/dart-sass" >> "$GITHUB_PATH"
       - name: Build the site
         env:
           HUGO_PARAMS_VERSION: ${{ github.head_ref || github.ref_name }}
