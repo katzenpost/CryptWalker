@@ -5,7 +5,7 @@ open Verso Genre Blog
 
 # Proof obligations as structure fields
 
-In CryptWalker, every kind of primitive (NIKE, KEM, signature scheme and so on) is a Lean
+In Cryptlib, every kind of primitive (NIKE, KEM, signature scheme and so on) is a Lean
 structure. The structure holds the primitive's types and operations, and also propositions about
 those operations. To give an instance, you have to supply proofs of those propositions, so every
 instance satisfies them by construction.

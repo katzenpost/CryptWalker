@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Verify that CryptWalker's vendored test-vector files are byte-identical to their source copies
+# Verify that Cryptlib's vendored test-vector files are byte-identical to their source copies
 # in hpqc and katzenpost, by comparing sha256sum output side by side. Nothing in this script is
-# specific to CryptWalker's tooling -- it is deliberately plain enough that a human can re-run the
+# specific to Cryptlib's tooling -- it is deliberately plain enough that a human can re-run the
 # same check by hand with two `sha256sum` invocations per file listed below.
 #
 # Usage:
@@ -21,7 +21,7 @@ HPQC_DIR="${1:-${HPQC_DIR:-../hpqc}}"
 KATZENPOST_DIR="${2:-${KATZENPOST_DIR:-../katzenpost}}"
 KATZENQT_DIR="${3:-${KATZENQT_DIR:-../katzenqt}}"
 
-# Each entry: "CryptWalker path" "source repo path, relative to HPQC_DIR or KATZENPOST_DIR".
+# Each entry: "Cryptlib path" "source repo path, relative to HPQC_DIR or KATZENPOST_DIR".
 # The source path's own repo root is substituted at comparison time.
 hpqc_pairs=(
   "testdata/adapter_test_vectors.json                        testvectors/kem/adapter_test_vectors.json"
@@ -43,16 +43,16 @@ hpqc_pairs=(
   "testdata/sha512_256.json                                  testvectors/primitives/sha512_256.json"
   "testdata/blake2b_512.json                                 testvectors/primitives/blake2b_512.json"
   "testdata/ed25519.json                                     testvectors/primitives/ed25519.json"
-  "CryptWalker/testdata/hkdf_blake2b.json                    testvectors/primitives/hkdf_blake2b.json"
-  "CryptWalker/testdata/message_box_index.json               testvectors/bacap/message_box_index.json"
-  "CryptWalker/testdata/box_id.json                          testvectors/bacap/box_id.json"
-  "CryptWalker/testdata/encrypt.json                         testvectors/bacap/encrypt.json"
-  "CryptWalker/testdata/mutate_kdf_state.json                testvectors/bacap/mutate_kdf_state.json"
-  "CryptWalker/testdata/layout.json                          testvectors/bacap/layout.json"
-  "CryptWalker/testdata/tombstone.json                       testvectors/bacap/tombstone.json"
-  "CryptWalker/testdata/position.json                        testvectors/bacap/position.json"
-  "CryptWalker/testdata/negative.json                        testvectors/bacap/negative.json"
-  "CryptWalker/testdata/bacap_inputs.json                    testvectors/bacap/inputs.json"
+  "Cryptlib/testdata/hkdf_blake2b.json                    testvectors/primitives/hkdf_blake2b.json"
+  "Cryptlib/testdata/message_box_index.json               testvectors/bacap/message_box_index.json"
+  "Cryptlib/testdata/box_id.json                          testvectors/bacap/box_id.json"
+  "Cryptlib/testdata/encrypt.json                         testvectors/bacap/encrypt.json"
+  "Cryptlib/testdata/mutate_kdf_state.json                testvectors/bacap/mutate_kdf_state.json"
+  "Cryptlib/testdata/layout.json                          testvectors/bacap/layout.json"
+  "Cryptlib/testdata/tombstone.json                       testvectors/bacap/tombstone.json"
+  "Cryptlib/testdata/position.json                        testvectors/bacap/position.json"
+  "Cryptlib/testdata/negative.json                        testvectors/bacap/negative.json"
+  "Cryptlib/testdata/bacap_inputs.json                    testvectors/bacap/inputs.json"
 )
 
 katzenpost_pairs=(
@@ -103,7 +103,7 @@ check_group() {
       group_ok=0
     fi
     printf '  %s  %s\n' "$status" "$cw"
-    printf '            CryptWalker: %s  %s\n' "$a" "$cw"
+    printf '            Cryptlib: %s  %s\n' "$a" "$cw"
     printf '            %-11s: %s  %s/%s\n' "$label" "$b" "$base" "$src"
   done
   return $((1 - group_ok))
@@ -128,7 +128,7 @@ check_acks() {
     printf '  MATCH     testdata/acks_vectors.json\n'
   else
     printf '  MISMATCH  testdata/acks_vectors.json\n'
-    printf '            CryptWalker: %s\n            regenerated: %s\n' "$a" "$b"
+    printf '            Cryptlib: %s\n            regenerated: %s\n' "$a" "$b"
     return 1
   fi
 }

@@ -26,7 +26,7 @@ This library is also a mix of Lean code written by humans and by LLM agents.
 We mitigate LLM slop code by means of test vector based unit tests. 
 For example when implementing BACAP and Sphinx, we first ensured all the necessary test vectors
 were present in the hpqc golang cryptography library, here: https://github.com/katzenpost/hpqc
-Then we copied those test vectors into the CryptWalker git repo and used them in our verification
+Then we copied those test vectors into the Cryptlib git repo and used them in our verification
 step to ensure every cryptographic primitive was implemented correctly.
 
 TODO: we should probably include all the KAT test vectors for every cryptographic primitive implemented
@@ -122,7 +122,7 @@ lake build
 
 ## testing: how to run the unit tests
 
-Some tests load known-answer test vectors from `CryptWalker/testdata/`, vendored from
+Some tests load known-answer test vectors from `Cryptlib/testdata/`, vendored from
 [hpqc](https://github.com/katzenpost/hpqc) and [katzenpost](https://github.com/katzenpost/katzenpost)
 to ensure binary compatibility.
 
@@ -134,29 +134,29 @@ make help   # list every make target, including one per suite
 Or run any suite directly:
 
 ```bash
-lake exe CryptWalker.Data.test
-lake exe CryptWalker.NIKE.test
-lake exe CryptWalker.KEM.test
-lake exe CryptWalker.KEM.vectors        # NIKE-to-KEM adapter vectors from hpqc
-lake exe CryptWalker.Hash.test          # SHA-512 vectors from hpqc
-lake exe CryptWalker.Hash.hkdf_test     # HKDF-BLAKE2b raw function vectors
-lake exe CryptWalker.Hash.hkdf_structured_test  # HKDF structured instance vectors
-lake exe CryptWalker.KDF.argon2_test    # Argon2 vectors from RFC 9106 and x/crypto/argon2
-lake exe CryptWalker.Cipher.test        # AES-256-GCM-SIV vectors from hpqc
-lake exe CryptWalker.Sign.test
-lake exe CryptWalker.Sign.blinded_test  # blinded Ed25519 vectors from hpqc
-lake exe CryptWalker.Protocols.BACAP.test         # BACAP vectors from hpqc
-lake exe CryptWalker.Protocols.Sphinx.crypto_test      # Sphinx Hash/MAC/Stream/KDF/ChaCha20 vectors from katzenpost
-lake exe CryptWalker.WideBlockCipher.test    # AEZ v5 (Sphinx's SPRP) vectors from katzenpost
-lake exe CryptWalker.Protocols.Sphinx.commands_test    # Sphinx routing-command wire-format vectors from katzenpost
-lake exe CryptWalker.Protocols.Sphinx.nike_selftest    # NIKE-Sphinx round-trip self-tests
-lake exe CryptWalker.Protocols.Sphinx.kem_selftest     # KEM-Sphinx round-trip self-tests
-lake exe CryptWalker.Protocols.Sphinx.nike_vectors_test  # NIKE-Sphinx full-packet vectors from katzenpost
-lake exe CryptWalker.Protocols.Sphinx.kem_vectors_test   # KEM-Sphinx full-packet vectors from katzenpost
-lake exe CryptWalker.KEM.MLKEM.mlkem768_test   # ML-KEM-768 NIST ACVP known-answer vectors
-lake exe CryptWalker.Hash.blake2b_256_test     # BLAKE2b-256 (unkeyed and keyed) vectors from hpqc
-lake exe CryptWalker.KEM.mlkem768_x25519_combiner_test  # X25519+ML-KEM-768 hybrid vectors from hpqc
-lake exe CryptWalker.Protocols.Sphinx.kem_hybrid_vectors_test     # KEM-Sphinx hybrid full-packet vectors from katzenpost
+lake exe Cryptlib.Data.test
+lake exe Cryptlib.Primitives.NIKE.test
+lake exe Cryptlib.Primitives.KEM.test
+lake exe Cryptlib.Primitives.KEM.vectors        # NIKE-to-KEM adapter vectors from hpqc
+lake exe Cryptlib.Primitives.Hash.test          # SHA-512 vectors from hpqc
+lake exe Cryptlib.Primitives.Hash.hkdf_test     # HKDF-BLAKE2b raw function vectors
+lake exe Cryptlib.Primitives.Hash.hkdf_structured_test  # HKDF structured instance vectors
+lake exe Cryptlib.Primitives.KDF.argon2_test    # Argon2 vectors from RFC 9106 and x/crypto/argon2
+lake exe Cryptlib.Primitives.Cipher.test        # AES-256-GCM-SIV vectors from hpqc
+lake exe Cryptlib.Primitives.Sign.test
+lake exe Cryptlib.Primitives.Sign.blinded_test  # blinded Ed25519 vectors from hpqc
+lake exe Cryptlib.Protocols.BACAP.test         # BACAP vectors from hpqc
+lake exe Cryptlib.Protocols.Sphinx.crypto_test      # Sphinx Hash/MAC/Stream/KDF/ChaCha20 vectors from katzenpost
+lake exe Cryptlib.Primitives.WideBlockCipher.test    # AEZ v5 (Sphinx's SPRP) vectors from katzenpost
+lake exe Cryptlib.Protocols.Sphinx.commands_test    # Sphinx routing-command wire-format vectors from katzenpost
+lake exe Cryptlib.Protocols.Sphinx.nike_selftest    # NIKE-Sphinx round-trip self-tests
+lake exe Cryptlib.Protocols.Sphinx.kem_selftest     # KEM-Sphinx round-trip self-tests
+lake exe Cryptlib.Protocols.Sphinx.nike_vectors_test  # NIKE-Sphinx full-packet vectors from katzenpost
+lake exe Cryptlib.Protocols.Sphinx.kem_vectors_test   # KEM-Sphinx full-packet vectors from katzenpost
+lake exe Cryptlib.Primitives.KEM.MLKEM.mlkem768_test   # ML-KEM-768 NIST ACVP known-answer vectors
+lake exe Cryptlib.Primitives.Hash.blake2b_256_test     # BLAKE2b-256 (unkeyed and keyed) vectors from hpqc
+lake exe Cryptlib.Primitives.KEM.mlkem768_x25519_combiner_test  # X25519+ML-KEM-768 hybrid vectors from hpqc
+lake exe Cryptlib.Protocols.Sphinx.kem_hybrid_vectors_test     # KEM-Sphinx hybrid full-packet vectors from katzenpost
 ```
 
 A few suites also have their own dedicated `make` target, for running just that piece:
@@ -169,7 +169,7 @@ make test-mlkem          # both of the above, together
 
 ### test vector files
 
-These JSON files in `CryptWalker/testdata/` are vendored from hpqc's or katzenpost's own
+These JSON files in `Cryptlib/testdata/` are vendored from hpqc's or katzenpost's own
 `testvectors/cmd/generate` tools, and are binary-compatible with the corresponding upstream test
 vectors — the `Source` column below is each file's canonical path in its own repo (what
 `scripts/verify-vectors.sh` actually compares against, not a symlink or a consuming test file):
@@ -216,7 +216,7 @@ make verify-vectors                                          # expects ../hpqc, 
 make verify-vectors HPQC_DIR=~/hpqc KATZENPOST_DIR=~/katzenpost
 ```
 
-This is nothing CryptWalker-specific — it is the same check anyone can run by hand with two
+This is nothing Cryptlib-specific — it is the same check anyone can run by hand with two
 `sha256sum` invocations per file; the script just automates going through the whole list and
 reports a clean pass/fail.
 
@@ -234,7 +234,7 @@ make bench BENCH_ARGS='--match "kem MLKEM768 decap"'    # one specific bench
 
 Any LeanBench flag works in `BENCH_ARGS`: e.g. `--samples 5`, `--tags unwrap`, or
 `--save baseline.json` then `--compare baseline.json`. To call Lake directly, use
-`lake -q --log-level=error exe CryptWalker.Bench.benchmark ...`; without those flags Lake replays
+`lake -q --log-level=error exe Cryptlib.Bench.benchmark ...`; without those flags Lake replays
 build warnings from our dependencies first. No numbers here — they depend entirely on the machine.
 
 ## licensing

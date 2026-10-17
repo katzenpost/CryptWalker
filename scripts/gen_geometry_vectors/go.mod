@@ -1,4 +1,4 @@
-module github.com/katzenpost/CryptWalker/scripts/gen_geometry_vectors
+module github.com/katzenpost/cryptlib/scripts/gen_geometry_vectors
 
 go 1.26.9
 

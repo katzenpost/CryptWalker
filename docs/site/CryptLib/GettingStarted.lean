@@ -5,11 +5,11 @@ open Verso Genre Blog
 
 # Build
 
-CryptWalker builds with Lake, using the toolchain pinned in `lean-toolchain`:
+Cryptlib builds with Lake, using the toolchain pinned in `lean-toolchain`:
 
 ```
-git clone https://github.com/katzenpost/CryptWalker
-cd CryptWalker
+git clone https://github.com/katzenpost/cryptlib
+cd Cryptlib
 lake exe cache get   # fetch prebuilt Mathlib
 lake build
 ```
@@ -18,8 +18,8 @@ lake build
 
 ```
 [[require]]
-name = "CryptWalker"
-git = "https://github.com/katzenpost/CryptWalker"
+name = "Cryptlib"
+git = "https://github.com/katzenpost/cryptlib"
 rev = "main"
 ```
 
