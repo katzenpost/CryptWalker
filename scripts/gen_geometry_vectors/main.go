@@ -29,7 +29,7 @@ type vector struct {
 	Hash                     string        `json:"hash"`
 }
 
-// Schemes whose names CryptWalker's NIKE and KEM registries resolve.
+// Schemes whose names Cryptlib's NIKE and KEM registries resolve.
 var nikes = []string{"X25519"}
 var kems = []string{"MLKEM768"}
 

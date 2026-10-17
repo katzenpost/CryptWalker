@@ -1,4 +1,4 @@
-"""Reduce doc-gen4 output to CryptWalker's own modules.
+"""Reduce doc-gen4 output to Cryptlib's own modules.
 
 doc-gen4 renders every module the library imports. This deletes the pages of
 other packages, points links into them at their hosted documentation where it
@@ -14,7 +14,7 @@ import shutil
 import sys
 from pathlib import Path
 
-KEEP = "CryptWalker"
+KEEP = "Cryptlib"
 
 MATHLIB_DOCS = "https://leanprover-community.github.io/mathlib4_docs/"
 HOSTED = {

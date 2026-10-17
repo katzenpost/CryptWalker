@@ -1,8 +1,8 @@
-"""Generate CryptWalker's API reference with doc-gen4.
+"""Generate Cryptlib's API reference with doc-gen4.
 
 doc-gen4's Lake facet processes every module the library imports, about 3,600
 of them from Mathlib, before rendering anything. This runs doc-gen4's commands
-directly instead: one `single` per CryptWalker module, `genCore` for Lean's
+directly instead: one `single` per Cryptlib module, `genCore` for Lean's
 own libraries, then `fromDb`. Declarations from Mathlib and other packages
 render as plain text instead of links. The core libraries depend only on the
 toolchain, so their database is kept and reused until the toolchain changes.
@@ -19,7 +19,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-LIB = "CryptWalker"
+LIB = "Cryptlib"
 CORE = ["Init", "Std", "Lean", "Lake"]
 IMPORT = re.compile(r"^(?:public |private )?(?:meta )?import (?:all )?([A-Za-z0-9_.]+)", re.M)
 

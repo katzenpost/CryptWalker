@@ -4,7 +4,7 @@ import CryptLib
 open Verso Genre Blog Site Syntax
 open Verso.Output Html Template Theme
 
-def repo := "https://github.com/katzenpost/CryptWalker"
+def repo := "https://github.com/katzenpost/cryptlib"
 
 def logo : Html := {{
   <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
@@ -24,14 +24,14 @@ def primary (version : String) : Template := do
         <meta charset="utf-8"/>
         <meta name="viewport" content="width=device-width, initial-scale=1"/>
         <meta name="color-scheme" content="light dark"/>
-        <title>{{s!"{← param (α := String) "title"} · CryptWalker"}}</title>
+        <title>{{s!"{← param (α := String) "title"} · Cryptlib"}}</title>
         {{← builtinHeader}}
         <link rel="icon" href="static/favicon.svg"/>
         <link rel="stylesheet" href="static/style.css"/>
       </head>
       <body>
         <header class="site">
-          <a class="brand" href=".">{{logo}}<span>"CryptWalker"</span></a>
+          <a class="brand" href=".">{{logo}}<span>"Cryptlib"</span></a>
           <nav>
             <ol>
               {{← dirLinks (← read).site}}
@@ -46,7 +46,7 @@ def primary (version : String) : Template := do
         </main>
         <footer class="site">
           <p>
-            "CryptWalker is free software under the AGPLv3, part of the "
+            "Cryptlib is free software under the AGPLv3, part of the "
             <a href="https://katzenpost.network/">"Katzenpost"</a>
             " project. "
             "Documentation for " <a href={{repo}}>{{version}}</a> "."
@@ -60,7 +60,7 @@ def front : Template := do
   pure {{
     <section class="hero">
       {{logo}}
-      <h1>"CryptWalker"</h1>
+      <h1>"Cryptlib"</h1>
       <p class="tagline">"Cryptography for Lean 4, where a primitive's type says what must be proved about it."</p>
       <p class="buttons">
         <a class="button" href="overview/">"Overview"</a>

@@ -13,27 +13,27 @@ jobs:
       - uses: actions/checkout@v4
       - uses: leanprover/lean-action@v1
         with:
-          build-args: "CryptWalker CryptWalker.Data.test CryptWalker.NIKE.test CryptWalker.KEM.test CryptWalker.KEM.vectors CryptWalker.Hash.test CryptWalker.Hash.hkdf_test CryptWalker.KDF.argon2_test CryptWalker.Cipher.test CryptWalker.Bench.benchmark CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.ack_codec_test CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.wire_vectors_test CryptWalker.Protocols.BACAP.primitive_vectors_test CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Protocols.BACAP.test CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.replay CryptWalker.Protocols.GroupComm.GroupChatKatzenqt1.scenarios"
+          build-args: "Cryptlib Cryptlib.Data.test Cryptlib.Primitives.NIKE.test Cryptlib.Primitives.KEM.test Cryptlib.Primitives.KEM.vectors Cryptlib.Primitives.Hash.test Cryptlib.Primitives.Hash.hkdf_test Cryptlib.Primitives.KDF.argon2_test Cryptlib.Primitives.Cipher.test Cryptlib.Bench.benchmark Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.ack_codec_test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.wire_vectors_test Cryptlib.Protocols.BACAP.primitive_vectors_test Cryptlib.Protocols.BACAP.gen_vectors Cryptlib.Protocols.BACAP.test Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.replay Cryptlib.Protocols.GroupComm.GroupChatKatzenqt1.scenarios"
       - name: Run tests
         env:
           # panics in compiled Lean print a message but exit 0 unless this is set
           LEAN_ABORT_ON_PANIC: "1"
         run: |
-          ./.lake/build/bin/CryptWalker-Data-test
-          ./.lake/build/bin/CryptWalker-NIKE-test
-          ./.lake/build/bin/CryptWalker-KEM-test
-          ./.lake/build/bin/CryptWalker-KEM-vectors
-          ./.lake/build/bin/CryptWalker-Hash-test
-          ./.lake/build/bin/CryptWalker-Hash-hkdf_test
-          ./.lake/build/bin/CryptWalker-KDF-argon2_test
-          ./.lake/build/bin/CryptWalker-Cipher-test
-          ./.lake/build/bin/CryptWalker-Protocols-BACAP-primitive_vectors_test
-          ./.lake/build/bin/CryptWalker-Protocols-BACAP-test
-          ./.lake/build/bin/CryptWalker-Protocols-BACAP-gen_vectors --check
-          ./.lake/build/bin/CryptWalker-Protocols-GroupComm-GroupChatKatzenqt1-ack_codec_test
-          ./.lake/build/bin/CryptWalker-Protocols-GroupComm-GroupChatKatzenqt1-wire_vectors_test
-          ./.lake/build/bin/CryptWalker-Protocols-GroupComm-GroupChatKatzenqt1-replay
-          ./.lake/build/bin/CryptWalker-Protocols-GroupComm-GroupChatKatzenqt1-scenarios
+          ./.lake/build/bin/Cryptlib-Data-test
+          ./.lake/build/bin/Cryptlib-Primitives-NIKE-test
+          ./.lake/build/bin/Cryptlib-Primitives-KEM-test
+          ./.lake/build/bin/Cryptlib-Primitives-KEM-vectors
+          ./.lake/build/bin/Cryptlib-Primitives-Hash-test
+          ./.lake/build/bin/Cryptlib-Primitives-Hash-hkdf_test
+          ./.lake/build/bin/Cryptlib-Primitives-KDF-argon2_test
+          ./.lake/build/bin/Cryptlib-Primitives-Cipher-test
+          ./.lake/build/bin/Cryptlib-Protocols-BACAP-primitive_vectors_test
+          ./.lake/build/bin/Cryptlib-Protocols-BACAP-test
+          ./.lake/build/bin/Cryptlib-Protocols-BACAP-gen_vectors --check
+          ./.lake/build/bin/Cryptlib-Protocols-GroupComm-GroupChatKatzenqt1-ack_codec_test
+          ./.lake/build/bin/Cryptlib-Protocols-GroupComm-GroupChatKatzenqt1-wire_vectors_test
+          ./.lake/build/bin/Cryptlib-Protocols-GroupComm-GroupChatKatzenqt1-replay
+          ./.lake/build/bin/Cryptlib-Protocols-GroupComm-GroupChatKatzenqt1-scenarios
       - name: Check the group chat theorems use no axioms beyond Lean's own
         run: ./scripts/check-axioms.sh
 
@@ -46,11 +46,11 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Fetch TLC
-        run: curl -sSL -o CryptWalker/Protocols/GroupComm/GroupChatKatzenqt1/tla/tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+        run: curl -sSL -o Cryptlib/Protocols/GroupComm/GroupChatKatzenqt1/tla/tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
       - name: Model-check the group chat specs
         env:
           FAST: "1"
-        run: ./CryptWalker/Protocols/GroupComm/GroupChatKatzenqt1/tla/check.sh
+        run: ./Cryptlib/Protocols/GroupComm/GroupChatKatzenqt1/tla/check.sh
 
   veil:
     runs-on: ubuntu-latest
@@ -64,5 +64,5 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Prove and model-check the Veil Backfill model
-        working-directory: CryptWalker/Protocols/GroupComm/GroupChatKatzenqt1/veil
+        working-directory: Cryptlib/Protocols/GroupComm/GroupChatKatzenqt1/veil
         run: lake build
