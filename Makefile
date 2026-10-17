@@ -39,7 +39,7 @@ TESTS := \
 	CryptWalker.Hash.blake2b_xof_test \
 	CryptWalker.KEM.mlkem768_x25519_combiner_test \
 	CryptWalker.KEM.MLKEMHedged.mlkemhedged_test \
-	CryptWalker.KEM.mlkem768_hedged_test \
+	CryptWalker.KEM.mlkem_hedged_test \
 	CryptWalker.MultiRecipientHybrid.multirecipient_hybrid_test \
 	CryptWalker.Protocols.Sphinx.kem_hybrid_vectors_test \
 	CryptWalker.Protocols.Sphinx.kem_hybrid_blake2bxof_vectors_test \
@@ -54,7 +54,7 @@ TEST_BINS := $(foreach t,$(TESTS),$(BIN)/$(subst .,-,$(t)))
 # Bare `lake build` builds only defaultTargets, which is the library. The
 # executables have to be named or the test targets run whatever binary was left
 # in .lake/build/bin by an earlier build.
-EXES := $(TESTS) CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Bench.benchmark CryptWalker.Protocols.Sphinx.gen_nike_vectors CryptWalker.Protocols.Sphinx.gen_kem_vectors CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors CryptWalker.KEM.gen_mlkem768_hedged_vectors CryptWalker.MultiRecipientHybrid.gen_multirecipient_hybrid_vectors
+EXES := $(TESTS) CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Bench.benchmark CryptWalker.Protocols.Sphinx.gen_nike_vectors CryptWalker.Protocols.Sphinx.gen_kem_vectors CryptWalker.KEM.gen_mlkem768_x25519_combiner_vectors CryptWalker.KEM.gen_mlkem_hedged_vectors CryptWalker.MultiRecipientHybrid.gen_multirecipient_hybrid_vectors
 
 .DEFAULT_GOAL := help
 
@@ -135,8 +135,8 @@ gen-sphinx-vectors: build ## build Sphinx packets with the Lean port, for cross-
 gen-hybrid-vectors: build ## build X25519+ML-KEM-768 combiner vectors, for cross-checking against hpqc
 	@$(BIN)/CryptWalker-KEM-gen_mlkem768_x25519_combiner_vectors
 
-gen-hedged-vectors: build ## build hedged ML-KEM-768 vectors, for cross-checking against hpqc
-	@$(BIN)/CryptWalker-KEM-gen_mlkem768_hedged_vectors
+gen-hedged-vectors: build ## build hedged ML-KEM-512/768/1024 vectors, for cross-checking against hpqc
+	@$(BIN)/CryptWalker-KEM-gen_mlkem_hedged_vectors
 
 gen-mrhybrid-vectors: build ## build multi-recipient hybrid vectors, for cross-checking against hpqc
 	@$(BIN)/CryptWalker-MultiRecipientHybrid-gen_multirecipient_hybrid_vectors
@@ -181,9 +181,9 @@ test-mlkem: build ## ML-KEM-768: round-trip self-test + NIST ACVP known-answer v
 test-mlkem-kat: build ## ML-KEM-768: NIST ACVP known-answer vectors only
 	@$(BIN)/CryptWalker-KEM-MLKEM-mlkem_test
 
-test-mlkem-hedged: build ## hedged ML-KEM-768: NIST ACVP vectors + hpqc cross-check vectors
+test-mlkem-hedged: build ## hedged ML-KEM-512/768/1024: NIST ACVP vectors + hpqc cross-check vectors
 	@$(BIN)/CryptWalker-KEM-MLKEMHedged-mlkemhedged_test
-	@$(BIN)/CryptWalker-KEM-mlkem768_hedged_test
+	@$(BIN)/CryptWalker-KEM-mlkem_hedged_test
 
 test-mrhybrid: build ## multi-recipient hybrid: hpqc cross-check vectors
 	@$(BIN)/CryptWalker-MultiRecipientHybrid-multirecipient_hybrid_test
