@@ -59,6 +59,10 @@ pre {
 }
 pre code { background: none; padding: 0; }
 
+/* a caption directly under a code block */
+.caption { margin: -0.4rem 0 1.5rem; color: var(--muted); font-size: 0.85rem; font-style: italic; }
+.caption p { margin: 0; }
+
 /* header and nav */
 
 header.site {
@@ -81,11 +85,6 @@ header.site {
   text-decoration: none;
 }
 
-.logo { width: 1.6rem; height: 1.6rem; }
-.logo rect { fill: var(--accent); }
-.logo path { stroke: var(--accent); }
-.logo .keyhole { fill: var(--bg); }
-
 header.site nav ol {
   display: flex;
   flex-wrap: wrap;
@@ -101,7 +100,6 @@ header.site nav a:hover { color: var(--accent); }
 /* front page */
 
 .hero { text-align: center; padding: 3rem 0 1.5rem; }
-.hero .logo { width: 4rem; height: 4rem; }
 .hero h1 { font-size: 2.6rem; margin: 0.5rem 0; }
 .hero .tagline { color: var(--muted); font-size: 1.15rem; max-width: 32rem; margin: 0 auto 1.5rem; }
 
