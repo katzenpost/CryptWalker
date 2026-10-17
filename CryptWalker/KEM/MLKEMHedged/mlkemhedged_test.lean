@@ -12,7 +12,7 @@ import CryptWalker.Util.newhex
 
 ACVP gives `Encaps_internal`'s message directly, so by `encapsHedged_eq_encaps_hashH` these
 vectors check everything except the pre-hash `H(m)`. The pre-hash is covered by
-`KEM/mlkem768_hedged_test.lean` and by round trips.
+`KEM/mlkem_hedged_test.lean` and by round trips.
 -/
 
 open Lean
