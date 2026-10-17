@@ -63,10 +63,16 @@ EXES := $(TESTS) CryptWalker.Protocols.BACAP.gen_vectors CryptWalker.Bench.bench
 .PHONY: test-hkdf-structured test-cipher test-sign test-blinded test-bacap test-sphinx-crypto
 .PHONY: gen-sphinx-vectors gen-hybrid-vectors gen-hedged-vectors gen-mrhybrid-vectors test-mrhybrid test-mlkem test-mlkem-kat test-mlkem-hedged test-hybrid-sphinx
 .PHONY: verify-vectors gen-acks-vectors gen-groupchat-wire-vectors check-bacap-vectors axioms tla veil
+.PHONY: api-docs website website-pages website-serve mathlib-cache
 
 all: build ## build everything, library and executables
 
-build: ## build everything, library and executables
+# Prebuilt Mathlib. `lake clean` deletes it along with every other package's
+# build directory, and rebuilding it from source takes hours.
+mathlib-cache: ## download prebuilt Mathlib (fast when already present)
+	$(LAKE) exe cache get
+
+build: mathlib-cache ## build everything, library and executables
 	$(LAKE) build --log-level=warning CryptWalker $(EXES)
 
 # A suite counts as failed if it exits non-zero or prints anything matching
@@ -212,6 +218,32 @@ bench-sphinx: ## benchmark Sphinx packet creation and unwrap for every scheme
 
 sorries: ## list every declaration still standing on sorry
 	@$(LAKE) build 2>&1 | grep 'declaration uses' | sort -u || echo "no sorries"
+
+# The website: Verso pages from docs/site plus the doc-gen4 API reference.
+# gen-api.py documents CryptWalker's modules and Lean's core libraries;
+# prune-api.py keeps only our pages and links core to its hosted docs.
+API_DOCS := docs/_api
+SITE_OUT := docs/public
+SERVE_PORT ?= 8000
+
+# doc-gen4 jobs run at once; each loads Lean plus the imported part of Mathlib.
+DOCS_JOBS ?= $(shell awk '/MemTotal/ { j = int($$2 / 3000000); print (j < 1) ? 1 : j }' /proc/meminfo 2>/dev/null || echo 2)
+
+api-docs: mathlib-cache ## generate the API reference with doc-gen4 into docs/_api (DOCS_JOBS caps parallelism)
+	python3 -I docs/scripts/gen-api.py . $(DOCS_JOBS)
+	rm -rf $(API_DOCS)
+	cp -r docs/docbuild/.lake/apidocs/doc $(API_DOCS)
+	python3 -I docs/scripts/prune-api.py $(API_DOCS)
+
+website-pages: ## render the Verso pages into docs/public, keeping any API docs already there
+	cd docs/site && $(LAKE) exe cryptlib --output ../public
+
+website: api-docs website-pages ## build the whole website, API reference included, into docs/public
+	rm -rf $(SITE_OUT)/api
+	cp -r $(API_DOCS) $(SITE_OUT)/api
+
+website-serve: website-pages ## serve docs/public on 127.0.0.1:$(SERVE_PORT) (run make website once for /api/)
+	python3 -m http.server --bind 127.0.0.1 -d $(SITE_OUT) $(SERVE_PORT)
 
 clean: ## remove all build artefacts
 	$(LAKE) clean
