@@ -224,6 +224,7 @@ sorries: ## list every declaration still standing on sorry
 # prune-api.py keeps only our pages and links core to its hosted docs.
 API_DOCS := docs/_api
 SITE_OUT := docs/public
+SERVE_PORT ?= 8000
 
 # doc-gen4 jobs run at once; each loads Lean plus the imported part of Mathlib.
 DOCS_JOBS ?= $(shell awk '/MemTotal/ { j = int($$2 / 3000000); print (j < 1) ? 1 : j }' /proc/meminfo 2>/dev/null || echo 2)
@@ -241,8 +242,8 @@ website: api-docs website-pages ## build the whole website, API reference includ
 	rm -rf $(SITE_OUT)/api
 	cp -r $(API_DOCS) $(SITE_OUT)/api
 
-website-serve: website-pages ## serve docs/public at localhost:8000 (run make website once for /api/)
-	python3 -m http.server -d $(SITE_OUT) 8000
+website-serve: website-pages ## serve docs/public on 127.0.0.1:$(SERVE_PORT) (run make website once for /api/)
+	python3 -m http.server --bind 127.0.0.1 -d $(SITE_OUT) $(SERVE_PORT)
 
 clean: ## remove all build artefacts
 	$(LAKE) clean
