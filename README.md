@@ -14,24 +14,6 @@ It's got a struct field called "commutes" we says that the group operation is co
 This is a proof burden to anyone writing an instance of the NIKE type, say for X25519, you need to prove
 the "commutes" hypothesis for your specific type instance.
 
-This library so far has two implementations of X25519. One of them, a
-montgomery ladder implementation, I ported from rust to lean mostly by
-hand. Too difficult to prove the operations commute. The other is
-entirely written by an LLM agent specifically to have an easy proof.
-It uses an existing lean elliptic curve API that exists in mathlib,
-and therefore already has existing group lemmas that says the group
-operations commute. Therefore the proof is one or two lines of code.
-
-This library is also a mix of Lean code written by humans and by LLM agents.
-We mitigate LLM slop code by means of test vector based unit tests. 
-For example when implementing BACAP and Sphinx, we first ensured all the necessary test vectors
-were present in the hpqc golang cryptography library, here: https://github.com/katzenpost/hpqc
-Then we copied those test vectors into the Cryptlib git repo and used them in our verification
-step to ensure every cryptographic primitive was implemented correctly.
-
-TODO: we should probably include all the KAT test vectors for every cryptographic primitive implemented
-in this library.
-
 
 ## cryptographic primitives
 

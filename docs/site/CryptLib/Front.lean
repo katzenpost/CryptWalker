@@ -3,46 +3,97 @@ open Verso Genre Blog
 
 #doc (Page) "Cryptlib" =>
 
+```leanInit demo
+```
+
+```lean demo -show
+inductive KEMError where
+  | badCiphertext
+  | unsafePublicKey
+```
+
 # Abstract
 
-Cryptlib is an experiment in using dependent types to represent cryptographic primitives.
-The usual approach is to write the code first and the theorems about it later. Cryptlib works
-the other way round. Each kind of primitive is a dependently typed structure that holds the
-primitive's data and operations, plus one or more proposition fields that state what we would want
-to prove about it. Writing an instance of the structure means discharging those propositions.
-Correctness obligations are part of the interface, not an afterthought.
+Cryptlib started off as a Lean model of [hpqc](https://github.com/katzenpost/hpqc/) (hybrid
+post-quantum cryptography), a Go, Python and Rust cryptography library used by the
+[Katzenpost](https://katzenpost.network/) post-quantum decryption mix network.
 
-The non-interactive key exchange (NIKE) type shows the idea. It has a field called `commutes`
-which states that the group operation is commutative: g^x^y = g^y^x. Anyone who provides a NIKE
-instance, X25519 for example, has to prove `commutes` for that instance. Cryptlib contains two
-X25519 implementations. The first is a constant-time Montgomery ladder ported from Rust by hand,
-and proving commutativity for it directly is hard. The second is built on Mathlib's elliptic-curve
-API. Mathlib already proves the group laws, so its proof takes a line or two.
+Beyond that we have two main goals:
 
-# Overview
+* Cryptlib can be used to write real, high-assurance cryptography applications in Lean.
+* Cryptlib can be used to prove security properties of cryptographic primitives and protocols.
 
-The library covers the building blocks of modern, post-quantum-ready protocols:
+For each kind of cryptographic primitive, such as a NIKE (non-interactive key exchange), Cryptlib
+defines a Lean structure type that describes the primitive generically. In a language like Rust a
+trait is an empty husk that only declares function signatures. Cryptlib uses a structure instead,
+where some fields hold functions and others hold data types. So far this is how Rust or Go would
+represent a primitive generically. Lean lets us go a step further with dependent types: a field can
+also be a proposition. For example, our NIKE structure has a field stating that the group operation
+is commutative:
 
-* *Key exchange and key encapsulation:* X25519, ML-KEM-768 (FIPS 203), a hedged ML-KEM-768
-  variant, and a security-preserving KEM combiner that builds X25519 + ML-KEM-768 hybrids.
-* *Signatures:* Ed25519, plain and blinded.
-* *Authenticated encryption:* AES-256-GCM-SIV.
-* *Hashing:* SHA-2, BLAKE2b and its XOF.
-* *Key derivation:* HKDF and Argon2.
-* *Stream ciphers and wide-block ciphers:* AES-CTR, ChaCha20 and AEZ.
+```lean demo
+structure NIKE where
+  PrivateKey   : Type
+  PublicKey    : Type
+  SharedSecret : Type
+  -- ...
+  Safe : PublicKey → Prop
+  derivePublicKey : PrivateKey → PublicKey
+  groupAction : PrivateKey → {pk : PublicKey // Safe pk} → SharedSecret
+  -- ...
+  derive_safe : ∀ sk, Safe (derivePublicKey sk)
+  -- ...
+  commutes : ∀ sk₁ sk₂,
+    groupAction sk₁ ⟨derivePublicKey sk₂, derive_safe sk₂⟩
+      = groupAction sk₂ ⟨derivePublicKey sk₁, derive_safe sk₁⟩
+```
 
-On top of these primitives sit two protocol components. The first is the Sphinx packet format, in
-both its NIKE and KEM forms, with any number of hops. The second is BACAP (Blinded Cryptographic
-Capabilities), a building block for private messaging systems.
+:::htmlDiv (class := "caption")
+Abridged from [`Cryptlib/Primitives/NIKE/NIKE.lean`](https://github.com/katzenpost/cryptlib/blob/2165380e906475ac966b72c272c527c93ef2b15b/Cryptlib/Primitives/NIKE/NIKE.lean#L12-L73)
+:::
 
-Interoperability is checked byte for byte. The test suites run known-answer vectors from NIST ACVP
-and the relevant RFCs, plus vectors from the Go implementations in
-[hpqc](https://github.com/katzenpost/hpqc) and [Katzenpost](https://github.com/katzenpost/katzenpost),
-which are copied into the repository. Cryptlib's Sphinx packets are binary compatible with the
-Katzenpost mixnet's Sphinx implementation, including when the per-hop KEM is the post-quantum
-hybrid.
+Each category of cryptographic primitive in Cryptlib has a structure type like this one, defining
+its functions and data types together with propositions about the primitive. Our generic definition
+of a KEM (key encapsulation mechanism) is another example:
 
-Cryptlib is written partly by people and partly by LLM agents. Vector-based tests are how we keep
-that code honest: no primitive counts as implemented until it reproduces the reference outputs
-exactly. The library is free software under the AGPLv3. Its API reference is generated directly
-from the Lean sources.
+```lean demo
+structure KEM where
+  State      : Type
+  PublicKey  : Type
+  PrivateKey : Type
+  Ciphertext : Type
+  Plaintext  : Type
+  -- ...
+  decap : PrivateKey → Ciphertext → EStateM KEMError State Plaintext
+  encap : PublicKey → EStateM KEMError State (Ciphertext × Plaintext)
+
+  /-- Pre-encapsulation states that cannot cause a decryption failure. `True` for a perfectly
+  correct KEM; a lattice KEM restricts it to states whose sampled noise stays within bounds. -/
+  Reliable : State → Prop := fun _ => True
+  -- ...
+  derivePublicKey : PrivateKey → PublicKey
+
+  /-- Round trip for any private key and its derived public key, from a `Reliable` state. -/
+  honestRoundTrip : ∀ sk, ∀ s, Reliable s → ∀ c k s', encap (derivePublicKey sk) s = .ok (c, k) s' →
+    ∀ t, ∃ t', decap sk c t = .ok k t'
+```
+
+:::htmlDiv (class := "caption")
+Abridged from [`Cryptlib/Primitives/KEM/KEM.lean`](https://github.com/katzenpost/cryptlib/blob/2165380e906475ac966b72c272c527c93ef2b15b/Cryptlib/Primitives/KEM/KEM.lean#L13-L65)
+:::
+
+A cryptography library that uses dependent types to add these proof obligations has some obvious
+and some less obvious benefits. The obvious one is that every instance of these types meets at
+least a basic bar of quality: it satisfies the type's proposition fields. A less obvious advantage
+is that when we compose these types, the resulting definitions carry fewer transitive proof
+obligations overall.
+
+For example, we define a NIKE-to-KEM adapter, which is a hashed ElGamal construction. In Lean we
+could write a theorem saying the adapter produces a lawful KEM whenever it is given a lawful NIKE.
+But with dependent types for the NIKE and KEM definitions there is no need to write that theorem at
+all, because it is impossible to construct an instance that violates its type's proposition fields.
+See our [NIKE-to-KEM adapter](https://github.com/katzenpost/cryptlib/blob/2165380e906475ac966b72c272c527c93ef2b15b/Cryptlib/Primitives/KEM/Adapter.lean#L119-L161).
+
+This is an example of dependent types enforcing a proof implicitly, and they keep doing so
+transitively as primitives are composed. In many ways this simplifies the proof obligations of the
+composed protocol.

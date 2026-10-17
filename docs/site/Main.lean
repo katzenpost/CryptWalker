@@ -6,14 +6,6 @@ open Verso.Output Html Template Theme
 
 def repo := "https://github.com/katzenpost/cryptlib"
 
-def logo : Html := {{
-  <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
-    <rect x="6" y="14" width="20" height="14" rx="3"/>
-    <path d="M11 14 V10 a5 5 0 0 1 10 0 V14" fill="none" stroke-width="3"/>
-    <circle cx="16" cy="21" r="2.2" class="keyhole"/>
-  </svg>
-}}
-
 def primary (version : String) : Template := do
   let posts := match (← param? "posts") with
     | none => Html.empty
@@ -26,15 +18,13 @@ def primary (version : String) : Template := do
         <meta name="color-scheme" content="light dark"/>
         <title>{{s!"{← param (α := String) "title"} · Cryptlib"}}</title>
         {{← builtinHeader}}
-        <link rel="icon" href="static/favicon.svg"/>
         <link rel="stylesheet" href="static/style.css"/>
       </head>
       <body>
         <header class="site">
-          <a class="brand" href=".">{{logo}}<span>"Cryptlib"</span></a>
+          <a class="brand" href=".">"Cryptlib"</a>
           <nav>
             <ol>
-              {{← dirLinks (← read).site}}
               <li><a href="api/">"API"</a></li>
               <li><a href={{repo}}>"GitHub"</a></li>
             </ol>
@@ -59,7 +49,6 @@ def primary (version : String) : Template := do
 def front : Template := do
   pure {{
     <section class="hero">
-      {{logo}}
       <h1>"Cryptlib"</h1>
       <p class="tagline">"Cryptography for Lean 4, where a primitive's type says what must be proved about it."</p>
       <p class="buttons">
