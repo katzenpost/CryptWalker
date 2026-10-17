@@ -31,15 +31,13 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      # Lake rebuilds whatever changed, so an older cache is still a good start.
-      # Mathlib's build files are left out: `lake exe cache get` fetches them.
-      - uses: actions/cache@v4
+      # Reuse the .lake cache saved by Lean Action CI rather than storing another copy.
+      # Lake rebuilds whatever changed, so an older commit's cache is still a good start.
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          path: |
-            .lake
-            !.lake/packages/mathlib/.lake/build
-          key: lake-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'docs/docbuild/lake-manifest.json') }}-${{ github.sha }}
-          restore-keys: lake-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'docs/docbuild/lake-manifest.json') }}-
+          path: ./.lake
+          key: lake-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lake-manifest.json') }}-${{ github.sha }}
+          restore-keys: lake-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lake-manifest.json') }}
       - uses: actions/cache@v4
         with:
           path: docs/site/.lake
