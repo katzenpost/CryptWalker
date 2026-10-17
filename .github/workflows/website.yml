@@ -2,6 +2,7 @@ name: Website
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   pull_request:
     paths:
@@ -29,6 +30,26 @@ jobs:
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      # Lake rebuilds whatever changed, so an older cache is still a good start.
+      # Mathlib's build files are left out: `lake exe cache get` fetches them.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .lake
+            !.lake/packages/mathlib/.lake/build
+          key: lake-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'docs/docbuild/lake-manifest.json') }}-${{ github.sha }}
+          restore-keys: lake-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'docs/docbuild/lake-manifest.json') }}-
+      - uses: actions/cache@v4
+        with:
+          path: docs/site/.lake
+          key: verso-${{ hashFiles('docs/site/lean-toolchain', 'docs/site/lake-manifest.json') }}-${{ github.sha }}
+          restore-keys: verso-${{ hashFiles('docs/site/lean-toolchain', 'docs/site/lake-manifest.json') }}-
+      - uses: actions/cache@v4
+        with:
+          path: docs/docbuild/.lake/apidocs/core-*
+          key: core-docs-${{ hashFiles('lean-toolchain', 'docs/docbuild/lake-manifest.json') }}
+
       - name: Build the site
         env:
           CRYPTLIB_VERSION: ${{ github.head_ref || github.ref_name }}
